@@ -1,0 +1,21 @@
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+.env*.local
+*.tsbuildinfo
+.DS_Store
+npm-debug.*
+# generated native folder (created by `expo prebuild` on CI only)
+/ios
+/android
+/build
+/Payload
+*.ipa

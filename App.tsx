@@ -1,0 +1,218 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+
+import { BedState, DrumState, WandererState, defaultState, droneNotes, noteName, toEngineJson } from './src/config';
+import { Section, Stepper, Toggle, colors } from './src/controls';
+import { describePattern, patternText } from './src/euclid';
+import { engine, hasNativeEngine, onBeat } from './src/engine';
+
+const KEEP_AWAKE_TAG = 'midibed-playing';
+
+export default function App() {
+  const [state, setState] = useState<BedState>(defaultState);
+  const [playing, setPlaying] = useState(false);
+  const [position, setPosition] = useState('1.1');
+
+  // Push every settings change to the native engine (it applies at the next
+  // tick; musical timing never depends on this).
+  const json = useMemo(() => toEngineJson(state), [state]);
+  useEffect(() => {
+    engine.applyConfig(json);
+  }, [json]);
+
+  useEffect(() => {
+    return onBeat(({ bar, beat }) => setPosition(`${bar}.${beat}`));
+  }, []);
+
+  useEffect(() => {
+    if (playing) {
+      activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+    } else {
+      try {
+        deactivateKeepAwake(KEEP_AWAKE_TAG);
+      } catch {
+        // ignore
+      }
+    }
+  }, [playing]);
+
+  const togglePlay = () => {
+    if (playing) {
+      engine.stop();
+      setPlaying(false);
+      setPosition('1.1');
+    } else {
+      engine.applyConfig(json);
+      engine.start();
+      setPlaying(true);
+    }
+  };
+
+  const patch = (p: Partial<BedState>) => setState((s) => ({ ...s, ...p }));
+  const patchDrum = (i: number, p: Partial<DrumState>) =>
+    setState((s) => ({ ...s, drums: s.drums.map((d, k) => (k === i ? { ...d, ...p } : d)) }));
+  const patchDrone = (p: Partial<BedState['drone']>) => setState((s) => ({ ...s, drone: { ...s.drone, ...p } }));
+  const patchWanderer = (i: number, p: Partial<WandererState>) =>
+    setState((s) => ({ ...s, wanderers: s.wanderers.map((w, k) => (k === i ? { ...w, ...p } : w)) }));
+
+  return (
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <StatusBar style="light" />
+        <ScrollView contentContainerStyle={styles.scroll}>
+          <Text style={styles.title} accessibilityRole="header">
+            MidiBed
+          </Text>
+          {!hasNativeEngine && (
+            <Text style={styles.warn}>Native MIDI engine not available in this build; the controls work but nothing plays.</Text>
+          )}
+
+          <Pressable
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            style={[styles.play, playing && { backgroundColor: '#7d2f2f' }]}
+            accessibilityRole="button"
+            accessibilityLabel={playing ? 'Stop' : 'Play'}
+            onPress={togglePlay}
+          >
+            <Text style={styles.playText}>{playing ? 'Stop' : 'Play'}</Text>
+          </Pressable>
+
+          {/* Fixed label: the value changes every beat and must not make
+              VoiceOver re-announce it. */}
+          <View accessible accessibilityLabel="Bar and beat position" style={styles.positionBox}>
+            <Text style={styles.position}>{position}</Text>
+          </View>
+
+          <Section title="Tempo and output">
+            <Stepper label="Tempo" value={state.bpm} onChange={(v) => patch({ bpm: v })} min={40} max={200} bigStep={10} format={(v) => `${v} BPM`} />
+            <Stepper label="Swing" value={state.swing} onChange={(v) => patch({ swing: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+            <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
+            <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />
+          </Section>
+
+          <Section title="Drone and bass">
+            <Toggle label="Drone" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
+            <Stepper
+              label="Root note"
+              value={state.drone.root}
+              onChange={(v) => patchDrone({ root: v })}
+              min={24}
+              max={60}
+              bigStep={12}
+              format={noteName}
+            />
+            <Toggle label="Add octave" value={state.drone.octave} onChange={(v) => patchDrone({ octave: v })} />
+            <Toggle label="Add fifth" value={state.drone.fifth} onChange={(v) => patchDrone({ fifth: v })} />
+            <Stepper label="Drone velocity" value={state.drone.velocity} onChange={(v) => patchDrone({ velocity: v })} min={1} max={127} step={5} />
+            <Stepper
+              label="MIDI channel"
+              value={state.drone.channel}
+              onChange={(v) => patchDrone({ channel: v })}
+              min={0}
+              max={15}
+              format={(v) => String(v + 1)}
+            />
+            <Stepper
+              label="Retrigger every"
+              value={state.drone.retriggerBars}
+              onChange={(v) => patchDrone({ retriggerBars: v })}
+              min={0}
+              max={32}
+              format={(v) => (v === 0 ? 'never' : `${v} bars`)}
+            />
+            <Text style={styles.note} accessibilityLabel={`Drone plays ${droneNotes(state.drone).map(noteName).join(', ')}`}>
+              Plays {droneNotes(state.drone).map(noteName).join(' ')}
+            </Text>
+          </Section>
+
+          <Section title="Filter wanderers">
+            {state.wanderers.map((w, i) => (
+              <View key={w.name} style={styles.group}>
+                <Toggle label={`${w.name} wander (CC ${w.cc})`} value={w.enabled} onChange={(v) => patchWanderer(i, { enabled: v })} />
+                <Stepper label={`${w.name} CC number`} value={w.cc} onChange={(v) => patchWanderer(i, { cc: v })} min={0} max={127} bigStep={10} />
+                <Stepper label={`${w.name} lowest`} value={w.min} onChange={(v) => patchWanderer(i, { min: Math.min(v, w.max) })} min={0} max={127} bigStep={10} />
+                <Stepper label={`${w.name} highest`} value={w.max} onChange={(v) => patchWanderer(i, { max: Math.max(v, w.min) })} min={0} max={127} bigStep={10} />
+                <Stepper label={`${w.name} speed`} value={w.speed} onChange={(v) => patchWanderer(i, { speed: v })} min={1} max={40} format={(v) => `${v} percent per second`} />
+                <Stepper label={`${w.name} smoothing`} value={w.smooth} onChange={(v) => patchWanderer(i, { smooth: v })} min={1} max={100} step={5} format={(v) => `${(v / 10).toFixed(1)} seconds`} />
+              </View>
+            ))}
+          </Section>
+
+          {state.drums.map((d, i) => (
+            <Section key={d.name} title={d.name}>
+              <Toggle label={`${d.name} on`} value={d.enabled} onChange={(v) => patchDrum(i, { enabled: v })} />
+              <Stepper
+                label={`${d.name} hits`}
+                value={d.hits}
+                onChange={(v) => patchDrum(i, { hits: v })}
+                min={0}
+                max={d.steps}
+              />
+              <Stepper
+                label={`${d.name} steps`}
+                value={d.steps}
+                onChange={(v) => patchDrum(i, { steps: v, hits: Math.min(d.hits, v) })}
+                min={2}
+                max={32}
+                hint="Loop length in sixteenth notes. Different lengths drift against each other."
+              />
+              <Stepper
+                label={`${d.name} rotation`}
+                value={d.rotation}
+                onChange={(v) => patchDrum(i, { rotation: v })}
+                min={0}
+                max={Math.max(0, d.steps - 1)}
+              />
+              <Stepper label={`${d.name} velocity`} value={d.velocity} onChange={(v) => patchDrum(i, { velocity: v })} min={1} max={127} step={5} />
+              <Stepper
+                label={`${d.name} chance`}
+                value={d.probability}
+                onChange={(v) => patchDrum(i, { probability: v })}
+                min={0}
+                max={100}
+                step={5}
+                format={(v) => `${v} percent`}
+              />
+              <Stepper
+                label={`${d.name} humanize`}
+                value={d.humanize}
+                onChange={(v) => patchDrum(i, { humanize: v })}
+                min={0}
+                max={100}
+                step={5}
+                format={(v) => `${v} percent`}
+              />
+              <View accessible accessibilityLabel={`${d.name} pattern`} accessibilityValue={{ text: describePattern(d.hits, d.steps, d.rotation) }}>
+                <Text style={styles.pattern}>{patternText(d.hits, d.steps, d.rotation)}</Text>
+              </View>
+            </Section>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    </SafeAreaProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.bg },
+  scroll: { padding: 16, paddingBottom: 60 },
+  title: { color: colors.text, fontSize: 30, fontWeight: '700', marginBottom: 12 },
+  warn: { color: '#ffb86b', marginBottom: 12, fontSize: 15 },
+  play: {
+    backgroundColor: colors.on,
+    borderRadius: 14,
+    minHeight: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  playText: { color: '#fff', fontSize: 26, fontWeight: '700' },
+  positionBox: { alignItems: 'center', marginBottom: 16 },
+  position: { color: colors.accent, fontSize: 22, fontVariant: ['tabular-nums'] },
+  group: { marginBottom: 10, paddingBottom: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
+  note: { color: colors.dim, fontSize: 15, marginTop: 6 },
+  pattern: { color: colors.accent, fontSize: 16, fontFamily: 'Courier', marginTop: 8, letterSpacing: 1 },
+});

@@ -1,0 +1,36 @@
+import ExpoModulesCore
+
+/// Bridge between the JS UI and the native MIDI engine. JS owns the settings
+/// and sends them whole as a JSON string; all musical timing happens natively.
+public class MidiBedEngineModule: Module {
+  private let engine = MidiBedEngine()
+
+  public func definition() -> ModuleDefinition {
+    Name("MidiBedEngine")
+
+    Events("onBeat")
+
+    OnCreate {
+      self.engine.onBeat = { [weak self] bar, beat in
+        let body: [String: Any?] = ["bar": bar, "beat": beat]
+        self?.sendEvent("onBeat", body)
+      }
+    }
+
+    Function("start") { () in
+      self.engine.start()
+    }
+
+    Function("stop") { () in
+      self.engine.stop()
+    }
+
+    Function("applyConfig") { (json: String) in
+      self.engine.applyConfig(json: json)
+    }
+
+    Function("getStatus") { () -> [String: Any] in
+      return self.engine.status()
+    }
+  }
+}
