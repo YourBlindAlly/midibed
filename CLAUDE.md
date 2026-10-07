@@ -123,3 +123,14 @@ note any gap here rather than guessing.
   `src/euclid.ts` must match `euclidHit`/rotation in Swift (UI pattern preview + speech description).
 - Not done yet: GitHub repo (needs Rusty's go-ahead before creating/pushing publicly), persistence of
   settings (AsyncStorage + a `migrate` fn), scenes, pad chords, pedal, MIDI clock, app icon.
+- 2026-10-07 (device test, Rusty): app installs and plays on iPhone speaker. Two bugs found and fixed:
+  (1) connecting/disconnecting a Bluetooth output left the built-in synth silent forever (VoiceOver kept
+  talking) because iOS stops AVAudioEngine on route change and nothing restarted it. Now
+  `MidiBedTestSynth` observes AVAudioEngineConfigurationChange / routeChange / mediaServicesWereReset /
+  didBecomeActive and restarts (with retries); `MidiBedEngine.start()` also self-heals.
+  (2) the filter wanderers were barely audible: the synth used a 6 dB/oct one-pole, ignored CC71, and the
+  iPhone speaker can't reproduce the low drone anyway. Replaced with a 12 dB/oct resonant TPT state-variable
+  lowpass (CC74 cutoff 60 Hz-3.6 kHz, CC71 resonance); offline numpy model gave ~22 dB audible-band swing
+  across the CC range vs ~8 dB before. Default wanderer ranges widened (cutoff 15-105, resonance 25-85).
+  Sideload notes: free Apple ID = max 3 installed sideloaded apps (delete one to free a slot); iLoader's
+  certificate needs a one-time Trust in Settings > General > VPN & Device Management.

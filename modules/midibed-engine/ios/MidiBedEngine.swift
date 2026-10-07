@@ -137,6 +137,8 @@ final class MidiBedEngine {
   }
 
   func start() {
+    // Self-heal the built-in synth if iOS stopped its audio engine (route change).
+    DispatchQueue.main.async { self.synth.restartIfNeeded() }
     queue.async {
       guard !self.running else { return }
       self.running = true

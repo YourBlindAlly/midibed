@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 import os
 
 /// Tiny built-in synth so the app can be heard with no routing to AUM etc.
@@ -30,7 +31,8 @@ final class MidiBedTestSynth {
     var phaseB: Float = 0
     var env: Float = 0
     var velocity: Float = 0
-    var lp: Float = 0
+    var ic1: Float = 0   // state-variable filter integrators
+    var ic2: Float = 0
     var age: Int = 0
   }
 
@@ -59,7 +61,8 @@ final class MidiBedTestSynth {
   private var drums: UnsafeMutablePointer<DrumVoice>
   private let padCount = 8
   private let drumCount = 8
-  private var cutoffCC: Float = 70
+  private var cutoffCC: Float = 70   // CC 74
+  private var resonanceCC: Float = 70 // CC 71
   private var noiseState: UInt32 = 0x1234_5678
   private var padAgeCounter = 0
 
@@ -106,19 +109,68 @@ final class MidiBedTestSynth {
     engine.attach(node)
     engine.connect(node, to: engine.mainMixerNode, format: renderFormat ?? format)
     engine.mainMixerNode.outputVolume = 0.8
+    restart()
+    observeAudioChanges()
+  }
+
+  private var observing = false
+
+  /// iOS stops the engine whenever the output route changes (Bluetooth
+  /// connecting or disconnecting, headphones, etc.). Without a restart the synth
+  /// stays silent for good while VoiceOver, which uses a separate path, keeps
+  /// talking. Also covers returning to the foreground and media-services resets.
+  private func observeAudioChanges() {
+    guard !observing else { return }
+    observing = true
+    let nc = NotificationCenter.default
+    nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+      self?.scheduleRestart()
+    }
+    nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.scheduleRestart()
+    }
+    nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.rebuild()
+    }
+    nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.restart()
+    }
+  }
+
+  private func scheduleRestart() {
+    // Let the new route settle before restarting.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+      self?.restart()
+    }
+  }
+
+  private func restart(attempt: Int = 0) {
+    try? AVAudioSession.sharedInstance().setActive(true)
+    if engine.isRunning { return }
     do {
       try engine.start()
     } catch {
-      NSLog("MidiBedTestSynth: engine start failed: \(error)")
+      NSLog("MidiBedTestSynth: engine start failed (attempt \(attempt)): \(error)")
+      if attempt < 6 {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+          self?.restart(attempt: attempt + 1)
+        }
+      }
     }
+  }
+
+  private func rebuild() {
+    engine.stop()
+    if let node = sourceNode {
+      engine.detach(node)
+    }
+    sourceNode = nil
+    startEngine()
   }
 
   /// Restarts the engine after an audio-session interruption (phone call etc.).
   func restartIfNeeded() {
-    if !engine.isRunning {
-      try? AVAudioSession.sharedInstance().setActive(true)
-      try? engine.start()
-    }
+    restart()
   }
 
   /// Called from the control side with raw MIDI bytes.
@@ -154,6 +206,7 @@ final class MidiBedTestSynth {
       noteOff(channel: channel, note: Int(e.d1))
     case 0xB0:
       if e.d1 == 74 { cutoffCC = Float(e.d2) }
+      if e.d1 == 71 { resonanceCC = Float(e.d2) }
       if e.d1 == 123 || e.d1 == 120 { allNotesOff() }
     default:
       break
@@ -184,7 +237,7 @@ final class MidiBedTestSynth {
       for i in 0..<padCount where pads[i].age < pads[oldest].age { oldest = i }
       slot = oldest
     }
-    pads[slot] = PadVoice(active: true, gate: true, note: note, phaseA: 0, phaseB: 0.37, env: 0, velocity: velocity, lp: 0, age: padAgeCounter)
+    pads[slot] = PadVoice(active: true, gate: true, note: note, phaseA: 0, phaseB: 0.37, env: 0, velocity: velocity, ic1: 0, ic2: 0, age: padAgeCounter)
   }
 
   private func noteOff(channel: UInt8, note: Int) {
@@ -214,9 +267,17 @@ final class MidiBedTestSynth {
     let dt = 1 / sr
     let on = enabled
 
-    // Cutoff 100 Hz ... ~8 kHz, exponential in the CC value.
-    let fc = 100 * powf(80, cutoffCC / 127)
-    let lpCoef = 1 - expf(-2 * Float.pi * fc / sr)
+    // 12 dB/oct resonant lowpass (TPT state-variable). Cutoff 60 Hz ... 3.6 kHz,
+    // exponential in CC 74; resonance from CC 71. Chosen so a sweep is clearly
+    // audible on a drone that sits low (checked offline: ~22 dB swing in the
+    // audible band across the CC range, versus ~8 dB for the old one-pole).
+    let fc = min(60 * powf(60, cutoffCC / 127), 0.45 * sr)
+    let res = min(0.92, max(0, resonanceCC / 127 * 0.95))
+    let g = tanf(Float.pi * fc / sr)
+    let k = 2 - 2 * res
+    let a1 = 1 / (1 + g * (g + k))
+    let a2 = g * a1
+    let a3 = g * a2
     let attack = 1 - expf(-dt / 0.9)
     let release = 1 - expf(-dt / 1.6)
 
@@ -230,14 +291,18 @@ final class MidiBedTestSynth {
         pads[i].phaseB += f * 1.003 * dt
         if pads[i].phaseB >= 1 { pads[i].phaseB -= 1 }
         let saw = (pads[i].phaseA * 2 - 1) + (pads[i].phaseB * 2 - 1)
-        pads[i].lp += lpCoef * (saw - pads[i].lp)
+        let v3 = saw - pads[i].ic2
+        let v1 = a1 * pads[i].ic1 + a2 * v3
+        let v2 = pads[i].ic2 + a2 * pads[i].ic1 + a3 * v3
+        pads[i].ic1 = 2 * v1 - pads[i].ic1
+        pads[i].ic2 = 2 * v2 - pads[i].ic2
         if pads[i].gate {
           pads[i].env += (1 - pads[i].env) * attack
         } else {
           pads[i].env -= pads[i].env * release
           if pads[i].env < 0.0005 { pads[i].active = false }
         }
-        out += pads[i].lp * pads[i].env * pads[i].velocity * 0.12
+        out += v2 * pads[i].env * pads[i].velocity * 0.09
       }
 
       for i in 0..<drumCount where drums[i].active {

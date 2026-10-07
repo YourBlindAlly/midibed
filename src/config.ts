@@ -63,8 +63,8 @@ export const defaultState: BedState = {
     retriggerBars: 0,
   },
   wanderers: [
-    { name: 'Cutoff', enabled: true, cc: 74, channel: 0, min: 30, max: 100, speed: 3, smooth: 30 },
-    { name: 'Resonance', enabled: true, cc: 71, channel: 0, min: 20, max: 70, speed: 2, smooth: 40 },
+    { name: 'Cutoff', enabled: true, cc: 74, channel: 0, min: 15, max: 105, speed: 4, smooth: 30 },
+    { name: 'Resonance', enabled: true, cc: 71, channel: 0, min: 25, max: 85, speed: 3, smooth: 40 },
   ],
 };
 
