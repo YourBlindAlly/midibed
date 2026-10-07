@@ -1,4 +1,6 @@
 import { buildPadChords } from './chords';
+import { GM_DRUMS } from './gm';
+import { ProfileChoice, defaultProfileChoice } from './profiles';
 
 export type DrumState = {
   name: string;
@@ -109,6 +111,8 @@ export type BedState = {
   pad: PadState;
   fade: FadeState;
   sounds: SoundSlot[];
+  /** Which known app each role talks to (names and shortcuts only; see profiles.ts). */
+  profiles: ProfileChoice;
   activeScene: number;
   scenes: SceneData[];
 };
@@ -182,6 +186,7 @@ export function copyScene(s: BedState, to: number): BedState {
 }
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
+  profiles: defaultProfileChoice,
   bpm: 88,
   swing: 15,
   midiOut: true,
@@ -270,63 +275,6 @@ export function noteName(note: number): string {
   const n = Math.max(0, Math.min(127, Math.round(note)));
   return `${NOTE_NAMES[n % 12]}${Math.floor(n / 12) - 1}`;
 }
-
-/** General MIDI percussion map (GM2 range 27-87 where names are agreed). */
-const GM_DRUMS: Record<number, string> = {
-  35: 'Acoustic bass drum',
-  36: 'Bass drum',
-  37: 'Side stick',
-  38: 'Acoustic snare',
-  39: 'Hand clap',
-  40: 'Electric snare',
-  41: 'Low floor tom',
-  42: 'Closed hi-hat',
-  43: 'High floor tom',
-  44: 'Pedal hi-hat',
-  45: 'Low tom',
-  46: 'Open hi-hat',
-  47: 'Low-mid tom',
-  48: 'Hi-mid tom',
-  49: 'Crash cymbal',
-  50: 'High tom',
-  51: 'Ride cymbal',
-  52: 'Chinese cymbal',
-  53: 'Ride bell',
-  54: 'Tambourine',
-  55: 'Splash cymbal',
-  56: 'Cowbell',
-  57: 'Crash cymbal 2',
-  58: 'Vibraslap',
-  59: 'Ride cymbal 2',
-  60: 'Hi bongo',
-  61: 'Low bongo',
-  62: 'Mute hi conga',
-  63: 'Open hi conga',
-  64: 'Low conga',
-  65: 'High timbale',
-  66: 'Low timbale',
-  67: 'High agogo',
-  68: 'Low agogo',
-  69: 'Cabasa',
-  70: 'Maracas',
-  71: 'Short whistle',
-  72: 'Long whistle',
-  73: 'Short guiro',
-  74: 'Long guiro',
-  75: 'Claves',
-  76: 'Hi wood block',
-  77: 'Low wood block',
-  78: 'Mute cuica',
-  79: 'Open cuica',
-  80: 'Mute triangle',
-  81: 'Open triangle',
-  82: 'Shaker',
-  83: 'Jingle bell',
-  84: 'Bell tree',
-  85: 'Castanets',
-  86: 'Mute surdo',
-  87: 'Open surdo',
-};
 
 /** "36, Bass drum" for GM drum notes, "62, D4" for everything else. */
 export function drumNoteLabel(note: number): string {

@@ -27,6 +27,7 @@ import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel } from './src/chords';
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { engine, hasNativeEngine, onBeat, testSweep } from './src/engine';
+import { PROFILES, ProfileRole, ccName, getProfile, profileForChannel, profileIndex, profileNoteName, stepDrumNote } from './src/profiles';
 import { loadState, saveState } from './src/storage';
 
 const KEEP_AWAKE_TAG = 'midibed-playing';
@@ -100,6 +101,20 @@ export default function App() {
   };
 
   const patch = (p: Partial<BedState>) => setState((s) => ({ ...s, ...p }));
+
+  // Device profiles: names and shortcuts for the apps being driven (src/profiles.ts).
+  const drumProfile = getProfile(state.profiles.drums);
+  const droneProfile = getProfile(state.profiles.drone);
+  const padProfile = getProfile(state.profiles.pad);
+  const fadeProfile = [droneProfile, padProfile].find((p) => p.fadeCC !== undefined);
+  const patchProfile = (role: ProfileRole, id: string) =>
+    setState((s) => ({ ...s, profiles: { ...s.profiles, [role]: id } }));
+  const noteLabel = (n: number) => {
+    const name = profileNoteName(drumProfile, n);
+    return name ? `${n}, ${name}` : drumNoteLabel(n);
+  };
+  const slotProfile = (slotName: string) =>
+    slotName === 'Drone synth' ? droneProfile : slotName === 'Percussion' ? drumProfile : padProfile;
   const patchDrum = (i: number, p: Partial<DrumState>) =>
     setState((s) => ({ ...s, drums: s.drums.map((d, k) => (k === i ? { ...d, ...p } : d)) }));
   const patchDrone = (p: Partial<BedState['drone']>) => setState((s) => ({ ...s, drone: { ...s.drone, ...p } }));
@@ -232,6 +247,44 @@ export default function App() {
             <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />
           </Section>
 
+          <Section title="Apps and devices">
+            <Text style={styles.note}>
+              Tell MidiBed which app each part is sent to. It then shows real names and offers shortcuts. It works the same with no profile chosen.
+            </Text>
+            {(
+              [
+                ['drums', 'Drums app', drumProfile],
+                ['drone', 'Drone app', droneProfile],
+                ['pad', 'Chord pad app', padProfile],
+              ] as const
+            ).map(([role, label, prof]) => (
+              <View key={role} style={styles.group}>
+                <Stepper
+                  label={`${label} profile`}
+                  value={profileIndex(state.profiles[role])}
+                  onChange={(v) => patchProfile(role, PROFILES[v].id)}
+                  min={0}
+                  max={PROFILES.length - 1}
+                  format={(v) => PROFILES[v].name}
+                />
+                <Text style={styles.note}>{prof.about}</Text>
+              </View>
+            ))}
+            {droneProfile.mono && (state.drone.octave || state.drone.fifth) && (
+              <ActionButton
+                label="Drone app plays one note: use a single drone note"
+                hint="Turns off the octave and the fifth"
+                onPress={() => patchDrone({ octave: false, fifth: false })}
+              />
+            )}
+            {fadeProfile?.fadeCC !== undefined && state.fade.cc !== fadeProfile.fadeCC && (
+              <ActionButton
+                label={`Use ${fadeProfile.name} volume control, CC ${fadeProfile.fadeCC}, for fades`}
+                onPress={() => patchFade({ cc: fadeProfile.fadeCC as number })}
+              />
+            )}
+          </Section>
+
           <Section title="Fades">
             <Text style={styles.note}>
               Applied when you switch a layer on or off, and when you press Play. Drone and pad fade by sending a MIDI volume control to the other synth; drums fade by getting softer. Set a time to zero for no fade.
@@ -298,6 +351,12 @@ export default function App() {
                       )}
                     </>
                   );
+                })()}
+                {(() => {
+                  const prof = slotProfile(sl.name);
+                  return prof.favorites && sl.favorites !== prof.favorites ? (
+                    <ActionButton label={`Load ${prof.name} favorites into ${sl.name}`} onPress={() => patchSoundFavorites(i, prof.favorites as string)} />
+                  ) : null;
                 })()}
                 <Toggle label={`${sl.name} send bank select`} value={sl.sendBank} onChange={(v) => patchSound(i, { sendBank: v })} />
                 {sl.sendBank && (
@@ -400,7 +459,33 @@ export default function App() {
             {state.wanderers.map((w, i) => (
               <View key={w.name} style={styles.group}>
                 <Toggle label={`${w.name} wander`} value={w.enabled} onChange={(v) => patchWanderer(i, { enabled: v })} />
-                <Stepper label={`${w.name} CC number`} value={w.cc} onChange={(v) => patchWanderer(i, { cc: v })} min={0} max={127} bigStep={10} />
+                {(() => {
+                  const prof = profileForChannel(state, w.channel);
+                  const idx = prof.ccs.findIndex((c) => c.cc === w.cc);
+                  return prof.ccs.length > 0 ? (
+                    <Stepper
+                      label={`${w.name} target control`}
+                      value={idx}
+                      onChange={(v) => patchWanderer(i, { cc: prof.ccs[Math.max(0, v)].cc })}
+                      min={-1}
+                      max={prof.ccs.length - 1}
+                      format={(v) => (v < 0 ? `custom, CC ${w.cc}` : `${prof.ccs[v].name}, CC ${prof.ccs[v].cc}`)}
+                      hint={`Controls known for ${prof.name}. Swipe to choose what this wanderer moves.`}
+                    />
+                  ) : null;
+                })()}
+                <Stepper
+                  label={`${w.name} CC number`}
+                  value={w.cc}
+                  onChange={(v) => patchWanderer(i, { cc: v })}
+                  min={0}
+                  max={127}
+                  bigStep={10}
+                  format={(v) => {
+                    const name = ccName(profileForChannel(state, w.channel), v);
+                    return name ? `${v}, ${name}` : String(v);
+                  }}
+                />
                 <Stepper label={`${w.name} MIDI channel`} value={w.channel} onChange={(v) => patchWanderer(i, { channel: v })} min={0} max={15} format={channelText} />
                 <ActionButton
                   label={`Send ${w.name} test sweep`}
@@ -421,12 +506,14 @@ export default function App() {
               <Stepper
                 label={`${d.name} note`}
                 value={d.note}
-                onChange={(v) => patchDrum(i, { note: v })}
+                onChange={(v) =>
+                  patchDrum(i, { note: drumProfile.drumNotes ? stepDrumNote(drumProfile, d.note, v > d.note ? 1 : -1) : v })
+                }
                 min={0}
                 max={127}
-                bigStep={10}
-                format={drumNoteLabel}
-                hint="MIDI note sent. General MIDI drum names shown where they apply."
+                bigStep={drumProfile.drumNotes ? undefined : 10}
+                format={noteLabel}
+                hint="MIDI note sent. With the General MIDI profile this steps between named drums only."
               />
               <Stepper label={`${d.name} MIDI channel`} value={d.channel} onChange={(v) => patchDrum(i, { channel: v })} min={0} max={15} format={channelText} hint="Channel 10 is General MIDI drums." />
               <ActionButton label={`Play ${d.name} test hit`} hint="Sends this note on this channel once, to check what the other app does with it" onPress={() => engine.sendNote(d.channel, d.note, d.velocity, 200)} />
