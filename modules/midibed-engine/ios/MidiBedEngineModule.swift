@@ -29,6 +29,14 @@ public class MidiBedEngineModule: Module {
       self.engine.applyConfig(json: json)
     }
 
+    Function("sendControlChange") { (channel: Int, cc: Int, value: Int) in
+      self.engine.sendControlChange(channel: channel, cc: cc, value: value)
+    }
+
+    Function("sendProgramChange") { (channel: Int, program: Int, bankMSB: Int, bankLSB: Int) in
+      self.engine.sendProgramChange(channel: channel, program: program, bankMSB: bankMSB, bankLSB: bankLSB)
+    }
+
     Function("getStatus") { () -> [String: Any] in
       return self.engine.status()
     }

@@ -114,6 +114,21 @@ export function Toggle({ label, value, onChange, hint }: ToggleProps) {
   );
 }
 
+export function ActionButton({ label, onPress, hint }: { label: string; onPress: () => void; hint?: string }) {
+  return (
+    <Pressable
+      hitSlop={SLOP}
+      style={styles.action}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={hint}
+      onPress={onPress}
+    >
+      <Text style={styles.actionText}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.card}>
@@ -154,6 +169,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pillText: { color: colors.text, fontSize: 16 },
+  action: {
+    minHeight: 48,
+    borderRadius: 10,
+    backgroundColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 6,
+    paddingHorizontal: 12,
+  },
+  actionText: { color: colors.accent, fontSize: 17, fontWeight: '600' },
   card: {
     backgroundColor: colors.card,
     borderRadius: 12,

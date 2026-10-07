@@ -12,6 +12,8 @@ type Native = {
   start(): void;
   stop(): void;
   applyConfig(json: string): void;
+  sendControlChange(channel: number, cc: number, value: number): void;
+  sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number): void;
   addListener(name: 'onBeat', cb: (e: BeatPayload) => void): unknown;
 };
 
@@ -44,4 +46,30 @@ export const engine = {
   start: () => native?.start(),
   stop: () => native?.stop(),
   applyConfig: (json: string) => native?.applyConfig(json),
+  sendControlChange: (channel: number, cc: number, value: number) => native?.sendControlChange(channel, cc, value),
+  /** bank values < 0 are skipped (no Bank Select sent). */
+  sendProgramChange: (channel: number, program: number, bankMSB = -1, bankLSB = -1) =>
+    native?.sendProgramChange(channel, program, bankMSB, bankLSB),
 };
+
+let sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Sends one smooth 0 -> 127 -> 0 sweep of a single CC, for MIDI-learn in the
+ * receiving app. Timing here is deliberately loose (JS timer): it is not musical.
+ */
+export function testSweep(channel: number, cc: number, durationMs = 3000): void {
+  if (sweepTimer) clearInterval(sweepTimer);
+  const stepMs = 40;
+  const total = Math.max(2, Math.round(durationMs / stepMs));
+  let i = 0;
+  sweepTimer = setInterval(() => {
+    const v = Math.round((127 * (1 - Math.cos((2 * Math.PI * i) / total))) / 2);
+    engine.sendControlChange(channel, cc, v);
+    i += 1;
+    if (i > total) {
+      if (sweepTimer) clearInterval(sweepTimer);
+      sweepTimer = null;
+    }
+  }, stepMs);
+}

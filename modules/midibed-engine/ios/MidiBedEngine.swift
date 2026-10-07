@@ -167,6 +167,25 @@ final class MidiBedEngine {
     }
   }
 
+  /// One-off control change, usable whether or not the transport is running
+  /// (MIDI-learn sweeps, manual nudges).
+  func sendControlChange(channel: Int, cc: Int, value: Int) {
+    queue.async {
+      self.emit(0xB0 | UInt8(max(0, min(15, channel))), UInt8(max(0, min(127, cc))), UInt8(max(0, min(127, value))))
+    }
+  }
+
+  /// Optional Bank Select (CC 0 / CC 32; pass a negative number to skip) then
+  /// Program Change, so the receiving app switches sound.
+  func sendProgramChange(channel: Int, program: Int, bankMSB: Int, bankLSB: Int) {
+    queue.async {
+      let ch = UInt8(max(0, min(15, channel)))
+      if bankMSB >= 0 { self.emit(0xB0 | ch, 0, UInt8(min(127, bankMSB))) }
+      if bankLSB >= 0 { self.emit(0xB0 | ch, 32, UInt8(min(127, bankLSB))) }
+      self.emit(0xC0 | ch, UInt8(max(0, min(127, program))), 0)
+    }
+  }
+
   func status() -> [String: Any] {
     // Cheap snapshot for the UI; reading these without the queue is benign.
     return ["running": running, "tick": tickIndex]

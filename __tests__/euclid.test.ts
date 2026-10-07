@@ -45,3 +45,30 @@ describe('config', () => {
     expect(j.wanderers[0].smooth).toBeCloseTo(3);
   });
 });
+
+import { drumNoteLabel, migrateState } from '../src/config';
+
+describe('saved-settings migration', () => {
+  it('fills a brand new field into old saved data', () => {
+    const old = { bpm: 100, drums: [{ name: 'Kick', note: 35 }] } as unknown;
+    const s = migrateState(old);
+    expect(s.bpm).toBe(100);
+    expect(s.drums).toHaveLength(4);
+    expect(s.drums[0].note).toBe(35);
+    expect(s.drums[0].steps).toBe(16);
+    expect(s.sounds).toHaveLength(2);
+  });
+
+  it('ignores garbage and wrong types', () => {
+    expect(migrateState(null).bpm).toBe(88);
+    expect(migrateState({ bpm: 'fast', swing: NaN }).bpm).toBe(88);
+    expect(migrateState({ bpm: 'fast', swing: NaN }).swing).toBe(15);
+  });
+
+  it('labels GM drum notes and falls back to note names', () => {
+    expect(drumNoteLabel(36)).toBe('36, Bass drum');
+    expect(drumNoteLabel(82)).toBe('82, Shaker');
+    expect(drumNoteLabel(62)).toBe('62, Mute hi conga');
+    expect(drumNoteLabel(10)).toBe('10, A#-1');
+  });
+});

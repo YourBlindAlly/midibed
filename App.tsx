@@ -1,20 +1,49 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
-import { BedState, DrumState, WandererState, defaultState, droneNotes, noteName, toEngineJson } from './src/config';
-import { Section, Stepper, Toggle, colors } from './src/controls';
+import {
+  BedState,
+  DrumState,
+  SoundSlot,
+  WandererState,
+  defaultState,
+  drumNoteLabel,
+  droneNotes,
+  noteName,
+  toEngineJson,
+} from './src/config';
+import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
-import { engine, hasNativeEngine, onBeat } from './src/engine';
+import { engine, hasNativeEngine, onBeat, testSweep } from './src/engine';
+import { loadState, saveState } from './src/storage';
 
 const KEEP_AWAKE_TAG = 'midibed-playing';
+const channelText = (v: number) => String(v + 1);
 
 export default function App() {
   const [state, setState] = useState<BedState>(defaultState);
+  const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState('1.1');
+  const programTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+
+  // Load saved settings once. Saving is held back until this finishes so the
+  // defaults can never overwrite what is stored.
+  useEffect(() => {
+    loadState().then((s) => {
+      setState(s);
+      setReady(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => saveState(state), 400);
+    return () => clearTimeout(t);
+  }, [state, ready]);
 
   // Push every settings change to the native engine (it applies at the next
   // tick; musical timing never depends on this).
@@ -58,6 +87,18 @@ export default function App() {
   const patchWanderer = (i: number, p: Partial<WandererState>) =>
     setState((s) => ({ ...s, wanderers: s.wanderers.map((w, k) => (k === i ? { ...w, ...p } : w)) }));
 
+  const sendSound = (slot: SoundSlot) =>
+    engine.sendProgramChange(slot.channel, slot.program, slot.sendBank ? slot.bankMSB : -1, slot.sendBank ? slot.bankLSB : -1);
+
+  // Changing a sound sends Program Change right away (after a short pause so
+  // swiping quickly through programs doesn't flood the receiving app).
+  const patchSound = (i: number, p: Partial<SoundSlot>) => {
+    const next = { ...state.sounds[i], ...p };
+    setState((s) => ({ ...s, sounds: s.sounds.map((x, k) => (k === i ? next : x)) }));
+    if (programTimers.current[i]) clearTimeout(programTimers.current[i]);
+    programTimers.current[i] = setTimeout(() => sendSound(next), 200);
+  };
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.safe} edges={['top']}>
@@ -93,6 +134,35 @@ export default function App() {
             <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />
           </Section>
 
+          <Section title="Sounds in the other app">
+            <Text style={styles.note}>
+              Sends Bank Select and Program Change so you can step through sounds from here. The receiving app must be set to respond to program changes.
+            </Text>
+            {state.sounds.map((sl, i) => (
+              <View key={sl.name} style={styles.group}>
+                <Stepper label={`${sl.name} channel`} value={sl.channel} onChange={(v) => patchSound(i, { channel: v })} min={0} max={15} format={channelText} />
+                <Stepper
+                  label={`${sl.name} program`}
+                  value={sl.program}
+                  onChange={(v) => patchSound(i, { program: v })}
+                  min={0}
+                  max={127}
+                  bigStep={10}
+                  format={(v) => `${v + 1}`}
+                  hint="Swipe up or down to change sound. Sends immediately."
+                />
+                <Toggle label={`${sl.name} send bank select`} value={sl.sendBank} onChange={(v) => patchSound(i, { sendBank: v })} />
+                {sl.sendBank && (
+                  <>
+                    <Stepper label={`${sl.name} bank MSB`} value={sl.bankMSB} onChange={(v) => patchSound(i, { bankMSB: v })} min={0} max={127} />
+                    <Stepper label={`${sl.name} bank LSB`} value={sl.bankLSB} onChange={(v) => patchSound(i, { bankLSB: v })} min={0} max={127} />
+                  </>
+                )}
+                <ActionButton label={`Send ${sl.name} sound now`} onPress={() => sendSound(sl)} />
+              </View>
+            ))}
+          </Section>
+
           <Section title="Drone and bass">
             <Toggle label="Drone" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
             <Stepper
@@ -107,14 +177,7 @@ export default function App() {
             <Toggle label="Add octave" value={state.drone.octave} onChange={(v) => patchDrone({ octave: v })} />
             <Toggle label="Add fifth" value={state.drone.fifth} onChange={(v) => patchDrone({ fifth: v })} />
             <Stepper label="Drone velocity" value={state.drone.velocity} onChange={(v) => patchDrone({ velocity: v })} min={1} max={127} step={5} />
-            <Stepper
-              label="MIDI channel"
-              value={state.drone.channel}
-              onChange={(v) => patchDrone({ channel: v })}
-              min={0}
-              max={15}
-              format={(v) => String(v + 1)}
-            />
+            <Stepper label="MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} />
             <Stepper
               label="Retrigger every"
               value={state.drone.retriggerBars}
@@ -129,10 +192,19 @@ export default function App() {
           </Section>
 
           <Section title="Filter wanderers">
+            <Text style={styles.note}>
+              To teach a synth which control to move: put it in MIDI learn, touch the control, then press the test sweep button here. Press Stop first so only the sweep is sent.
+            </Text>
             {state.wanderers.map((w, i) => (
               <View key={w.name} style={styles.group}>
-                <Toggle label={`${w.name} wander (CC ${w.cc})`} value={w.enabled} onChange={(v) => patchWanderer(i, { enabled: v })} />
+                <Toggle label={`${w.name} wander`} value={w.enabled} onChange={(v) => patchWanderer(i, { enabled: v })} />
                 <Stepper label={`${w.name} CC number`} value={w.cc} onChange={(v) => patchWanderer(i, { cc: v })} min={0} max={127} bigStep={10} />
+                <Stepper label={`${w.name} MIDI channel`} value={w.channel} onChange={(v) => patchWanderer(i, { channel: v })} min={0} max={15} format={channelText} />
+                <ActionButton
+                  label={`Send ${w.name} test sweep`}
+                  hint="Sweeps this control change from zero to full and back over three seconds, for MIDI learn"
+                  onPress={() => testSweep(w.channel, w.cc)}
+                />
                 <Stepper label={`${w.name} lowest`} value={w.min} onChange={(v) => patchWanderer(i, { min: Math.min(v, w.max) })} min={0} max={127} bigStep={10} />
                 <Stepper label={`${w.name} highest`} value={w.max} onChange={(v) => patchWanderer(i, { max: Math.max(v, w.min) })} min={0} max={127} bigStep={10} />
                 <Stepper label={`${w.name} speed`} value={w.speed} onChange={(v) => patchWanderer(i, { speed: v })} min={1} max={40} format={(v) => `${v} percent per second`} />
@@ -145,12 +217,17 @@ export default function App() {
             <Section key={d.name} title={d.name}>
               <Toggle label={`${d.name} on`} value={d.enabled} onChange={(v) => patchDrum(i, { enabled: v })} />
               <Stepper
-                label={`${d.name} hits`}
-                value={d.hits}
-                onChange={(v) => patchDrum(i, { hits: v })}
+                label={`${d.name} note`}
+                value={d.note}
+                onChange={(v) => patchDrum(i, { note: v })}
                 min={0}
-                max={d.steps}
+                max={127}
+                bigStep={10}
+                format={drumNoteLabel}
+                hint="MIDI note sent. General MIDI drum names shown where they apply."
               />
+              <Stepper label={`${d.name} MIDI channel`} value={d.channel} onChange={(v) => patchDrum(i, { channel: v })} min={0} max={15} format={channelText} hint="Channel 10 is General MIDI drums." />
+              <Stepper label={`${d.name} hits`} value={d.hits} onChange={(v) => patchDrum(i, { hits: v })} min={0} max={d.steps} />
               <Stepper
                 label={`${d.name} steps`}
                 value={d.steps}
@@ -159,32 +236,10 @@ export default function App() {
                 max={32}
                 hint="Loop length in sixteenth notes. Different lengths drift against each other."
               />
-              <Stepper
-                label={`${d.name} rotation`}
-                value={d.rotation}
-                onChange={(v) => patchDrum(i, { rotation: v })}
-                min={0}
-                max={Math.max(0, d.steps - 1)}
-              />
+              <Stepper label={`${d.name} rotation`} value={d.rotation} onChange={(v) => patchDrum(i, { rotation: v })} min={0} max={Math.max(0, d.steps - 1)} />
               <Stepper label={`${d.name} velocity`} value={d.velocity} onChange={(v) => patchDrum(i, { velocity: v })} min={1} max={127} step={5} />
-              <Stepper
-                label={`${d.name} chance`}
-                value={d.probability}
-                onChange={(v) => patchDrum(i, { probability: v })}
-                min={0}
-                max={100}
-                step={5}
-                format={(v) => `${v} percent`}
-              />
-              <Stepper
-                label={`${d.name} humanize`}
-                value={d.humanize}
-                onChange={(v) => patchDrum(i, { humanize: v })}
-                min={0}
-                max={100}
-                step={5}
-                format={(v) => `${v} percent`}
-              />
+              <Stepper label={`${d.name} chance`} value={d.probability} onChange={(v) => patchDrum(i, { probability: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+              <Stepper label={`${d.name} humanize`} value={d.humanize} onChange={(v) => patchDrum(i, { humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
               <View accessible accessibilityLabel={`${d.name} pattern`} accessibilityValue={{ text: describePattern(d.hits, d.steps, d.rotation) }}>
                 <Text style={styles.pattern}>{patternText(d.hits, d.steps, d.rotation)}</Text>
               </View>
@@ -213,6 +268,6 @@ const styles = StyleSheet.create({
   positionBox: { alignItems: 'center', marginBottom: 16 },
   position: { color: colors.accent, fontSize: 22, fontVariant: ['tabular-nums'] },
   group: { marginBottom: 10, paddingBottom: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
-  note: { color: colors.dim, fontSize: 15, marginTop: 6 },
+  note: { color: colors.dim, fontSize: 15, marginTop: 6, marginBottom: 6 },
   pattern: { color: colors.accent, fontSize: 16, fontFamily: 'Courier', marginTop: 8, letterSpacing: 1 },
 });

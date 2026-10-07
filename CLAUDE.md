@@ -134,3 +134,13 @@ note any gap here rather than guessing.
   across the CC range vs ~8 dB before. Default wanderer ranges widened (cutoff 15-105, resonance 25-85).
   Sideload notes: free Apple ID = max 3 installed sideloaded apps (delete one to free a slot); iLoader's
   certificate needs a one-time Trust in Settings > General > VPN & Device Management.
+- 2026-10-07 (round 2, Rusty: "I'll try Synth One first"): added per-drum GM note + MIDI channel steppers
+  (Shaker default fixed 39 clap -> 82 shaker); wanderer MIDI channel + "test sweep" button (JS-timed 0-127-0
+  sweep on one CC for the receiving app's MIDI learn); "Sounds in the other app" section sending Bank Select
+  (CC0/CC32, optional) + Program Change per channel slot (native `sendProgramChange`, `sendControlChange`);
+  settings now persist (AsyncStorage key `midibed.state.v1`, `migrateState`/`mergeDefaults` in
+  `src/config.ts` fill new fields with defaults - use them for every future state field).
+  UNCONFIRMED: which CC numbers Synth One / Moog apps use for filter (no public chart found; 74/71 are only
+  the MIDI-standard guesses) and whether Synth One responds to Program Change. Moog Model D has user-assignable
+  CC mapping per control. ThumbJam: 8-part multitimbral, receives on multiple channels, drum kits mappable;
+  AUv3 status unconfirmed.
