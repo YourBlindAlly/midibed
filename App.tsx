@@ -313,6 +313,8 @@ export default function App() {
 
           <Section title="Drone and bass">
             <Toggle label="Drone" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
+            <Stepper label="Drone MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the bass drone plays on" />
+            <ActionButton label="Play drone test note" hint="Plays the drone root for a moment on the drone channel, to check routing" onPress={() => engine.sendNote(state.drone.channel, state.drone.root, state.drone.velocity, 1500)} />
             <Stepper
               label="Root note"
               value={state.drone.root}
@@ -325,7 +327,6 @@ export default function App() {
             <Toggle label="Add octave" value={state.drone.octave} onChange={(v) => patchDrone({ octave: v })} />
             <Toggle label="Add fifth" value={state.drone.fifth} onChange={(v) => patchDrone({ fifth: v })} />
             <Stepper label="Drone velocity" value={state.drone.velocity} onChange={(v) => patchDrone({ velocity: v })} min={1} max={127} step={5} />
-            <Stepper label="MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} />
             <Stepper
               label="Retrigger every"
               value={state.drone.retriggerBars}
@@ -341,6 +342,7 @@ export default function App() {
 
           <Section title="Chord pad">
             <Toggle label="Chord pad" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
+            <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the chords play on. Use the drone channel to play both with one sound" />
             <Stepper
               label="Progression preset"
               value={state.pad.preset}
@@ -389,7 +391,6 @@ export default function App() {
             <Stepper label="Strum" value={state.pad.strumMs} onChange={(v) => patchPad({ strumMs: v })} min={0} max={300} step={10} format={(v) => (v === 0 ? 'none' : `${v} milliseconds`)} />
             <Stepper label="Pad velocity" value={state.pad.velocity} onChange={(v) => patchPad({ velocity: v })} min={1} max={127} step={5} />
             <Stepper label="Pad humanize" value={state.pad.humanize} onChange={(v) => patchPad({ humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
-            <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Use the same channel as the drone to play both with one sound" />
           </Section>
 
           <Section title="Filter wanderers">
@@ -428,6 +429,7 @@ export default function App() {
                 hint="MIDI note sent. General MIDI drum names shown where they apply."
               />
               <Stepper label={`${d.name} MIDI channel`} value={d.channel} onChange={(v) => patchDrum(i, { channel: v })} min={0} max={15} format={channelText} hint="Channel 10 is General MIDI drums." />
+              <ActionButton label={`Play ${d.name} test hit`} hint="Sends this note on this channel once, to check what the other app does with it" onPress={() => engine.sendNote(d.channel, d.note, d.velocity, 200)} />
               <Stepper label={`${d.name} hits`} value={d.hits} onChange={(v) => patchDrum(i, { hits: v })} min={0} max={d.steps} />
               <Stepper
                 label={`${d.name} steps`}

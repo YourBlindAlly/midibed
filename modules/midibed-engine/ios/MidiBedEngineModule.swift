@@ -33,6 +33,10 @@ public class MidiBedEngineModule: Module {
       self.engine.sendControlChange(channel: channel, cc: cc, value: value)
     }
 
+    Function("sendNote") { (channel: Int, note: Int, velocity: Int, durationMs: Int) in
+      self.engine.sendNote(channel: channel, note: note, velocity: velocity, durationMs: durationMs)
+    }
+
     Function("sendProgramChange") { (channel: Int, program: Int, bankMSB: Int, bankLSB: Int) in
       self.engine.sendProgramChange(channel: channel, program: program, bankMSB: bankMSB, bankLSB: bankLSB)
     }

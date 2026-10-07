@@ -13,6 +13,7 @@ type Native = {
   stop(): void;
   applyConfig(json: string, queued: boolean): void;
   sendControlChange(channel: number, cc: number, value: number): void;
+  sendNote(channel: number, note: number, velocity: number, durationMs: number): void;
   sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number): void;
   addListener(name: 'onBeat', cb: (e: BeatPayload) => void): unknown;
 };
@@ -48,6 +49,9 @@ export const engine = {
   /** queued = wait for the next bar line while playing (scene switches). */
   applyConfig: (json: string, queued = false) => native?.applyConfig(json, queued),
   sendControlChange: (channel: number, cc: number, value: number) => native?.sendControlChange(channel, cc, value),
+  /** One note, for auditioning which channel and note a receiving app answers to. */
+  sendNote: (channel: number, note: number, velocity = 100, durationMs = 250) =>
+    native?.sendNote(channel, note, velocity, durationMs),
   /** bank values < 0 are skipped (no Bank Select sent). */
   sendProgramChange: (channel: number, program: number, bankMSB = -1, bankLSB = -1) =>
     native?.sendProgramChange(channel, program, bankMSB, bankLSB),

@@ -256,6 +256,21 @@ final class MidiBedEngine {
     }
   }
 
+  /// A single note for auditioning routing (which channel/note a receiving app
+  /// answers to). Works whether or not the transport is running.
+  func sendNote(channel: Int, note: Int, velocity: Int, durationMs: Int) {
+    queue.async {
+      let ch = UInt8(max(0, min(15, channel)))
+      let n = UInt8(max(0, min(127, note)))
+      let v = UInt8(max(1, min(127, velocity)))
+      self.emit(0x90 | ch, n, v)
+      let ms = max(20, min(5000, durationMs))
+      self.queue.asyncAfter(deadline: .now() + .milliseconds(ms)) { [weak self] in
+        self?.emit(0x80 | ch, n, 0)
+      }
+    }
+  }
+
   func status() -> [String: Any] {
     // Cheap snapshot for the UI; reading these without the queue is benign.
     return ["running": running, "tick": tickIndex]
