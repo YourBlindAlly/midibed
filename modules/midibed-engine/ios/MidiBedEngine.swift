@@ -34,6 +34,17 @@ struct MidiBedWandererConfig: Decodable {
   var smooth: Double        // seconds of easing
 }
 
+struct MidiBedPadConfig: Decodable {
+  var enabled: Bool
+  var channel: Int
+  var velocity: Int
+  var humanize: Double      // 0...1 random velocity wobble
+  var barsPerChord: Int
+  var strumMs: Double       // spread between chord-tone onsets, ascending
+  var restrikeBeats: Int    // 0 = hold; else re-strike every N beats
+  var chords: [[Int]]       // MIDI notes per chord, computed on the JS side
+}
+
 struct MidiBedConfig: Decodable {
   var bpm: Double
   var swing: Double         // 0...1, delays every other 16th
@@ -41,6 +52,7 @@ struct MidiBedConfig: Decodable {
   var synthOut: Bool
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
+  var pad: MidiBedPadConfig
   var wanderers: [MidiBedWandererConfig]
 }
 
@@ -88,6 +100,8 @@ final class MidiBedEngine {
     var note: Int
   }
   private var heldDrone: [HeldNote] = []
+  private var heldPad: [HeldNote] = []
+  private var padChordIndex = 0
 
   private struct WandererState {
     var pos: Double
@@ -132,7 +146,10 @@ final class MidiBedEngine {
       self.config = decoded
       self.synth.enabled = decoded.synthOut
       self.syncWanderers()
-      if self.running { self.reconcileDrone() }
+      if self.running {
+        self.reconcileDrone()
+        self.reconcilePadEnabled()
+      }
     }
   }
 
@@ -163,6 +180,7 @@ final class MidiBedEngine {
       self.timer = nil
       self.pending.removeAll()
       self.releaseDrone()
+      self.releasePad()
       self.allNotesOff()
     }
   }
@@ -234,6 +252,18 @@ final class MidiBedEngine {
       reconcileDrone()
     }
 
+    // Chord pad: change chord every `barsPerChord` bars; re-strike on request.
+    // Common tones between chords are left sounding (no retrigger) so changes glide.
+    if cfg.pad.enabled, !cfg.pad.chords.isEmpty {
+      let chordTicks = barTicks * max(1, cfg.pad.barsPerChord)
+      if tick % chordTicks == 0 {
+        padChordIndex = (tick / chordTicks) % cfg.pad.chords.count
+        playPad(cfg.pad.chords[padChordIndex], pad: cfg.pad, at: time, retrigger: cfg.pad.restrikeBeats > 0)
+      } else if cfg.pad.restrikeBeats > 0, tick % (ticksPerBeat * cfg.pad.restrikeBeats) == 0 {
+        playPad(cfg.pad.chords[padChordIndex % cfg.pad.chords.count], pad: cfg.pad, at: time, retrigger: true)
+      }
+    }
+
     guard tick % ticksPerStep == 0 else { return }
     let step = tick / ticksPerStep
     let stepDur = tickDur * Double(ticksPerStep)
@@ -291,6 +321,52 @@ final class MidiBedEngine {
       emit(0x80 | UInt8(held.channel), UInt8(held.note), 0)
     }
     heldDrone = []
+  }
+
+  // MARK: Chord pad
+
+  private func playPad(_ notes: [Int], pad: MidiBedPadConfig, at time: Double, retrigger: Bool) {
+    let ch = max(0, min(15, pad.channel))
+    let wanted = notes.map { HeldNote(channel: ch, note: max(0, min(127, $0))) }
+    let toRelease = heldPad.filter { retrigger || !wanted.contains($0) }
+    var toStart = wanted.filter { retrigger || !heldPad.contains($0) }
+    toStart.sort { $0.note < $1.note }
+
+    for h in toRelease {
+      pending.append(Pending(time: time, status: 0x80 | UInt8(h.channel), d1: UInt8(h.note), d2: 0))
+    }
+    let strum = max(0, pad.strumMs) / 1000
+    for (i, n) in toStart.enumerated() {
+      var vel = Double(pad.velocity)
+      if pad.humanize > 0 {
+        vel *= 1 - pad.humanize * 0.3 * Double.random(in: 0..<1, using: &rng)
+      }
+      let v = UInt8(max(1, min(127, Int(vel))))
+      // +3 ms keeps a retriggered note's off ahead of its on.
+      pending.append(Pending(time: time + 0.003 + Double(i) * strum, status: 0x90 | UInt8(n.channel), d1: UInt8(n.note), d2: v))
+    }
+    heldPad = wanted
+  }
+
+  private func releasePad() {
+    // Cancel strummed note-ons that haven't fired yet, so nothing hangs.
+    pending.removeAll { p in
+      (p.status & 0xF0) == 0x90 && heldPad.contains { UInt8($0.channel) == (p.status & 0x0F) && UInt8($0.note) == p.d1 }
+    }
+    for held in heldPad {
+      emit(0x80 | UInt8(held.channel), UInt8(held.note), 0)
+    }
+    heldPad = []
+  }
+
+  /// Handles the Pad switch being toggled while playing.
+  private func reconcilePadEnabled() {
+    guard let cfg = config else { return }
+    if !cfg.pad.enabled {
+      releasePad()
+    } else if heldPad.isEmpty, !cfg.pad.chords.isEmpty {
+      playPad(cfg.pad.chords[padChordIndex % cfg.pad.chords.count], pad: cfg.pad, at: ProcessInfo.processInfo.systemUptime, retrigger: false)
+    }
   }
 
   // MARK: CC wanderers

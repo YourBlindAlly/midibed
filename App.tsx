@@ -7,6 +7,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import {
   BedState,
   DrumState,
+  PadState,
   SoundSlot,
   WandererState,
   defaultState,
@@ -15,6 +16,7 @@ import {
   noteName,
   toEngineJson,
 } from './src/config';
+import { MODE_NAMES, PRESETS, RESTRIKE_NAMES, RESTRIKE_OPTIONS, STYLE_NAMES, chordLabel } from './src/chords';
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { engine, hasNativeEngine, onBeat, testSweep } from './src/engine';
@@ -84,6 +86,21 @@ export default function App() {
   const patchDrum = (i: number, p: Partial<DrumState>) =>
     setState((s) => ({ ...s, drums: s.drums.map((d, k) => (k === i ? { ...d, ...p } : d)) }));
   const patchDrone = (p: Partial<BedState['drone']>) => setState((s) => ({ ...s, drone: { ...s.drone, ...p } }));
+  const patchPad = (p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
+  // Editing the chords by hand turns the preset label into "Custom".
+  const setDegree = (i: number, v: number) =>
+    setState((s) => ({ ...s, pad: { ...s.pad, preset: 0, degrees: s.pad.degrees.map((d, k) => (k === i ? v : d)) } }));
+  const choosePreset = (idx: number) =>
+    setState((s) => {
+      const pr = PRESETS[idx];
+      if (idx === 0 || !pr) return { ...s, pad: { ...s.pad, preset: 0 } };
+      const degrees = [0, 1, 2, 3].map((k) => pr.degrees[k] ?? s.pad.degrees[k]);
+      return { ...s, pad: { ...s.pad, preset: idx, degrees, count: pr.degrees.length } };
+    });
+  const padSummary = state.pad.degrees
+    .slice(0, state.pad.count)
+    .map((d) => chordLabel(state.drone.root, state.pad.mode, d, state.pad.style))
+    .join(', then ');
   const patchWanderer = (i: number, p: Partial<WandererState>) =>
     setState((s) => ({ ...s, wanderers: s.wanderers.map((w, k) => (k === i ? { ...w, ...p } : w)) }));
 
@@ -189,6 +206,68 @@ export default function App() {
             <Text style={styles.note} accessibilityLabel={`Drone plays ${droneNotes(state.drone).map(noteName).join(', ')}`}>
               Plays {droneNotes(state.drone).map(noteName).join(' ')}
             </Text>
+          </Section>
+
+          <Section title="Chord pad">
+            <Toggle label="Chord pad" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
+            <Stepper
+              label="Progression preset"
+              value={state.pad.preset}
+              onChange={choosePreset}
+              min={0}
+              max={PRESETS.length - 1}
+              format={(v) => PRESETS[v]?.name ?? 'Custom'}
+              hint="Swipe to choose a chord pattern. It follows the mode and the drone root."
+            />
+            <Stepper
+              label="Mode"
+              value={state.pad.mode}
+              onChange={(v) => patchPad({ mode: v })}
+              min={0}
+              max={MODE_NAMES.length - 1}
+              format={(v) => MODE_NAMES[v]}
+              hint="The scale the chords come from, built on the drone root note."
+            />
+            <Stepper label="Chords in loop" value={state.pad.count} onChange={(v) => patchPad({ count: v, preset: 0 })} min={1} max={4} />
+            {state.pad.degrees.slice(0, state.pad.count).map((d, i) => (
+              <Stepper
+                key={i}
+                label={`Chord ${i + 1} scale degree`}
+                value={d}
+                onChange={(v) => setDegree(i, v)}
+                min={1}
+                max={7}
+                format={(v) => `${v}, ${chordLabel(state.drone.root, state.pad.mode, v, state.pad.style)}`}
+              />
+            ))}
+            <View accessible accessibilityLabel="Chord loop" accessibilityValue={{ text: `${padSummary}, ${state.pad.barsPerChord} bars each` }}>
+              <Text style={styles.note}>{padSummary}</Text>
+            </View>
+            <Stepper
+              label="Bars per chord"
+              value={state.pad.barsPerChord}
+              onChange={(v) => patchPad({ barsPerChord: v })}
+              min={1}
+              max={8}
+              format={(v) => (v === 1 ? '1 bar' : `${v} bars`)}
+            />
+            <Stepper label="Chord type" value={state.pad.style} onChange={(v) => patchPad({ style: v })} min={0} max={STYLE_NAMES.length - 1} format={(v) => STYLE_NAMES[v]} />
+            <Stepper label="Lowest pad note" value={state.pad.register} onChange={(v) => patchPad({ register: v })} min={36} max={72} bigStep={12} format={noteName} hint="Where the pad sits. The drone stays low." />
+            <Toggle label="Smooth voice leading" value={state.pad.voiceLead} onChange={(v) => patchPad({ voiceLead: v })} hint="Each chord moves as little as possible from the last one" />
+            <Toggle label="Open spread voicing" value={state.pad.spread} onChange={(v) => patchPad({ spread: v })} hint="Lifts the second note an octave. With smooth voice leading it applies to the first chord only" />
+            <Stepper label="Strum" value={state.pad.strumMs} onChange={(v) => patchPad({ strumMs: v })} min={0} max={300} step={10} format={(v) => (v === 0 ? 'none' : `${v} milliseconds`)} />
+            <Stepper
+              label="Re-strike"
+              value={Math.max(0, RESTRIKE_OPTIONS.indexOf(state.pad.restrikeBeats))}
+              onChange={(v) => patchPad({ restrikeBeats: RESTRIKE_OPTIONS[v] })}
+              min={0}
+              max={RESTRIKE_OPTIONS.length - 1}
+              format={(v) => RESTRIKE_NAMES[v]}
+              hint="Hold lets the chord ring; the others play it again on a beat grid"
+            />
+            <Stepper label="Pad velocity" value={state.pad.velocity} onChange={(v) => patchPad({ velocity: v })} min={1} max={127} step={5} />
+            <Stepper label="Pad humanize" value={state.pad.humanize} onChange={(v) => patchPad({ humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+            <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Use the same channel as the drone to play both with one sound" />
           </Section>
 
           <Section title="Filter wanderers">

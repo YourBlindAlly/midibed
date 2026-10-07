@@ -1,3 +1,5 @@
+import { buildPadChords } from './chords';
+
 export type DrumState = {
   name: string;
   enabled: boolean;
@@ -42,6 +44,25 @@ export type SoundSlot = {
   bankLSB: number; // CC 32
 };
 
+/** Looping chord pad built from the drone root + a mode (see src/chords.ts). */
+export type PadState = {
+  enabled: boolean;
+  channel: number;
+  velocity: number;
+  humanize: number; // percent
+  mode: number; // index into MODE_NAMES
+  preset: number; // index into PRESETS (0 = custom)
+  count: number; // chords in the loop, 1-4
+  degrees: number[]; // 4 slots, scale degree 1-7 each; first `count` are used
+  barsPerChord: number;
+  style: number; // index into STYLE_NAMES
+  register: number; // lowest MIDI note of the pad's range
+  spread: boolean;
+  voiceLead: boolean;
+  strumMs: number;
+  restrikeBeats: number; // 0 = hold
+};
+
 export type BedState = {
   bpm: number;
   swing: number; // percent 0-100
@@ -50,6 +71,7 @@ export type BedState = {
   drums: DrumState[];
   drone: DroneState;
   wanderers: WandererState[];
+  pad: PadState;
   sounds: SoundSlot[];
 };
 
@@ -77,6 +99,23 @@ export const defaultState: BedState = {
     { name: 'Cutoff', enabled: true, cc: 74, channel: 0, min: 15, max: 105, speed: 4, smooth: 30 },
     { name: 'Resonance', enabled: true, cc: 71, channel: 0, min: 25, max: 85, speed: 3, smooth: 40 },
   ],
+  pad: {
+    enabled: true,
+    channel: 1,
+    velocity: 60,
+    humanize: 30,
+    mode: 1, // Dorian
+    preset: 5, // Folk turn
+    count: 4,
+    degrees: [1, 7, 4, 7],
+    barsPerChord: 2,
+    style: 0,
+    register: 55,
+    spread: false,
+    voiceLead: true,
+    strumMs: 40,
+    restrikeBeats: 0,
+  },
   sounds: [
     { name: 'Drone synth', channel: 0, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0 },
     { name: 'Percussion', channel: 9, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0 },
@@ -154,6 +193,19 @@ export function drumNoteLabel(note: number): string {
   return gm ? `${note}, ${gm}` : `${note}, ${noteName(note)}`;
 }
 
+export function padChords(s: BedState): number[][] {
+  return buildPadChords({
+    root: s.drone.root,
+    mode: s.pad.mode,
+    degrees: s.pad.degrees,
+    count: s.pad.count,
+    style: s.pad.style,
+    register: s.pad.register,
+    spread: s.pad.spread,
+    voiceLead: s.pad.voiceLead,
+  });
+}
+
 export function droneNotes(d: DroneState): number[] {
   const notes = [d.root];
   if (d.octave) notes.push(d.root + 12);
@@ -211,6 +263,16 @@ export function toEngineJson(s: BedState): string {
       notes: droneNotes(s.drone),
       velocity: s.drone.velocity,
       retriggerBars: s.drone.retriggerBars,
+    },
+    pad: {
+      enabled: s.pad.enabled,
+      channel: s.pad.channel,
+      velocity: s.pad.velocity,
+      humanize: s.pad.humanize / 100,
+      barsPerChord: s.pad.barsPerChord,
+      strumMs: s.pad.strumMs,
+      restrikeBeats: s.pad.restrikeBeats,
+      chords: padChords(s),
     },
     wanderers: s.wanderers.map((w) => ({
       enabled: w.enabled,

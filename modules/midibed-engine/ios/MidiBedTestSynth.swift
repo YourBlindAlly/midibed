@@ -59,7 +59,7 @@ final class MidiBedTestSynth {
   // Audio-thread-only state.
   private var pads: UnsafeMutablePointer<PadVoice>
   private var drums: UnsafeMutablePointer<DrumVoice>
-  private let padCount = 8
+  private let padCount = 16
   private let drumCount = 8
   private var cutoffCC: Float = 70   // CC 74
   private var resonanceCC: Float = 70 // CC 71
