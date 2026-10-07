@@ -45,6 +45,19 @@ struct MidiBedPadConfig: Decodable {
   var chords: [[Int]]       // MIDI notes per chord, computed on the JS side
 }
 
+/// Fades when a layer is switched on or off (and when Play is pressed).
+/// Drone and pad fade by sending a volume-type CC on their channel; drums fade
+/// by scaling note velocity, which works with any velocity-sensitive sound.
+struct MidiBedFadeConfig: Decodable {
+  var cc: Int               // 0 = no CC fade (notes just start/stop); usually 11 or 7
+  var droneIn: Double       // seconds
+  var droneOut: Double
+  var padIn: Double
+  var padOut: Double
+  var drumIn: Double
+  var drumOut: Double
+}
+
 struct MidiBedConfig: Decodable {
   var bpm: Double
   var swing: Double         // 0...1, delays every other 16th
@@ -53,6 +66,7 @@ struct MidiBedConfig: Decodable {
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
   var pad: MidiBedPadConfig
+  var fade: MidiBedFadeConfig
   var wanderers: [MidiBedWandererConfig]
 }
 
@@ -86,6 +100,7 @@ final class MidiBedEngine {
   private var tickIndex = 0
   private var nextTickTime: Double = 0
   private var lastWandererTime: Double = 0
+  private var lastFadeTime: Double = 0
 
   private struct Pending {
     var time: Double
@@ -102,6 +117,13 @@ final class MidiBedEngine {
   private var heldDrone: [HeldNote] = []
   private var heldPad: [HeldNote] = []
   private var padChordIndex = 0
+
+  // Fade state: 0...1 per layer. Drone/pad levels go out as CC on their channel
+  // (squared, for a more natural volume taper); drum levels scale velocity.
+  private var droneLevel = 1.0
+  private var padLevel = 1.0
+  private var drumLevels: [Double] = []
+  private var channelLastCC: [Int: Int] = [:]
 
   private struct WandererState {
     var pos: Double
@@ -162,6 +184,9 @@ final class MidiBedEngine {
       self.tickIndex = 0
       self.nextTickTime = ProcessInfo.processInfo.systemUptime + 0.05
       self.lastWandererTime = self.nextTickTime
+      self.lastFadeTime = self.nextTickTime
+      self.channelLastCC.removeAll()
+      self.initDrumLevels()
       self.syncWanderers()
       self.reconcileDrone()
       let t = DispatchSource.makeTimerSource(flags: .strict, queue: self.queue)
@@ -179,9 +204,13 @@ final class MidiBedEngine {
       self.timer?.cancel()
       self.timer = nil
       self.pending.removeAll()
+      let droneCh = self.config?.drone.channel
+      let padCh = self.config?.pad.channel
       self.releaseDrone()
       self.releasePad()
       self.allNotesOff()
+      if let c = droneCh { self.scheduleCCRestore(c) }
+      if let c = padCh { self.scheduleCCRestore(c) }
     }
   }
 
@@ -220,6 +249,7 @@ final class MidiBedEngine {
     if now - nextTickTime > 0.5 {
       nextTickTime = now
       lastWandererTime = now
+      lastFadeTime = now
     }
 
     let tickDur = 60.0 / (max(20.0, min(300.0, cfg.bpm)) * Double(ticksPerBeat))
@@ -230,6 +260,7 @@ final class MidiBedEngine {
     }
 
     updateWanderers(now: now, cfg: cfg)
+    updateFades(now: now, cfg: cfg)
     drainPending(now: now)
   }
 
@@ -244,12 +275,14 @@ final class MidiBedEngine {
       DispatchQueue.main.async { cb?(bar, beat) }
     }
 
-    // Drone retrigger.
+    updateDrumLevels(tickDur: tickDur, cfg: cfg)
+
+    // Drone retrigger (keeps the current fade level, so it does not fade in again).
     if cfg.drone.enabled, cfg.drone.retriggerBars > 0, tick > 0,
       tick % (barTicks * cfg.drone.retriggerBars) == 0
     {
       releaseDrone()
-      reconcileDrone()
+      reconcileDrone(keepLevel: true)
     }
 
     // Chord pad: change chord every `barsPerChord` bars; re-strike on request.
@@ -271,7 +304,7 @@ final class MidiBedEngine {
     // Swing: push every second 16th later, up to half a step.
     let swingDelay = (step % 2 == 1) ? max(0, min(1, cfg.swing)) * stepDur * 0.5 : 0
 
-    for drum in cfg.drums where drum.enabled {
+    for (i, drum) in cfg.drums.enumerated() where drum.enabled || (i < drumLevels.count && drumLevels[i] > 0.001) {
       let steps = max(1, min(64, drum.steps))
       let hits = max(0, min(steps, drum.hits))
       let pos = ((step % steps) - drum.rotation % steps + steps) % steps
@@ -282,6 +315,8 @@ final class MidiBedEngine {
       if drum.humanize > 0 {
         vel *= 1 - drum.humanize * 0.4 * Double.random(in: 0..<1, using: &rng)
       }
+      if i < drumLevels.count { vel *= drumLevels[i] }
+      guard vel >= 1 else { continue }
       let v = UInt8(max(1, min(127, Int(vel))))
       let ch = UInt8(max(0, min(15, drum.channel)))
       let start = time + swingDelay
@@ -296,24 +331,137 @@ final class MidiBedEngine {
     return (position * hits) % steps < hits
   }
 
-  // MARK: Drone
+  // MARK: Fades
 
-  private func desiredDrone() -> [HeldNote] {
-    guard let d = config?.drone, d.enabled, running else { return [] }
-    let ch = max(0, min(15, d.channel))
-    return d.notes.map { HeldNote(channel: ch, note: max(0, min(127, $0))) }
+  private func stepLevel(_ level: Double, up: Bool, dt: Double, fadeIn: Double, fadeOut: Double) -> Double {
+    if up {
+      return fadeIn <= 0 ? 1 : min(1, level + dt / fadeIn)
+    }
+    return fadeOut <= 0 ? 0 : max(0, level - dt / fadeOut)
   }
 
-  private func reconcileDrone() {
-    let wanted = desiredDrone()
-    let vel = UInt8(max(1, min(127, config?.drone.velocity ?? 80)))
-    for held in heldDrone where !wanted.contains(held) {
+  private func initDrumLevels() {
+    guard let cfg = config else { return }
+    drumLevels = cfg.drums.map { $0.enabled ? (cfg.fade.drumIn > 0 ? 0 : 1) : 0 }
+  }
+
+  private func updateDrumLevels(tickDur: Double, cfg: MidiBedConfig) {
+    while drumLevels.count < cfg.drums.count {
+      drumLevels.append(cfg.drums[drumLevels.count].enabled ? 1 : 0)
+    }
+    if drumLevels.count > cfg.drums.count {
+      drumLevels.removeLast(drumLevels.count - cfg.drums.count)
+    }
+    for (i, d) in cfg.drums.enumerated() {
+      drumLevels[i] = stepLevel(drumLevels[i], up: d.enabled, dt: tickDur, fadeIn: cfg.fade.drumIn, fadeOut: cfg.fade.drumOut)
+    }
+  }
+
+  /// Highest fade level among the layers currently sounding on a channel, or
+  /// nil if nothing is. Drone and pad can share a channel (one synth); then the
+  /// louder of the two wins, so one layer's fade never mutes the other.
+  private func channelLevel(_ ch: Int, _ cfg: MidiBedConfig) -> Double? {
+    var level: Double?
+    if !heldDrone.isEmpty, max(0, min(15, cfg.drone.channel)) == ch { level = max(level ?? 0, droneLevel) }
+    if !heldPad.isEmpty, max(0, min(15, cfg.pad.channel)) == ch { level = max(level ?? 0, padLevel) }
+    return level
+  }
+
+  private func sendChannelLevel(_ rawChannel: Int, force: Bool = false) {
+    guard let cfg = config, cfg.fade.cc > 0 else { return }
+    let ch = max(0, min(15, rawChannel))
+    guard let lvl = channelLevel(ch, cfg) else { return }
+    let v = Int((lvl * lvl * 127).rounded())
+    if force || channelLastCC[ch] != v {
+      channelLastCC[ch] = v
+      emit(0xB0 | UInt8(ch), UInt8(max(1, min(127, cfg.fade.cc))), UInt8(max(0, min(127, v))))
+    }
+  }
+
+  /// After a layer has faded out and released, put the fade CC back to full a
+  /// few seconds later (once its release tail is gone) so the synth is not left
+  /// silent for anything else you play on it. Skipped if something is sounding.
+  private func scheduleCCRestore(_ rawChannel: Int) {
+    let ch = max(0, min(15, rawChannel))
+    queue.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+      guard let self, let cfg = self.config, cfg.fade.cc > 0 else { return }
+      if self.channelLevel(ch, cfg) == nil {
+        self.channelLastCC[ch] = 127
+        self.emit(0xB0 | UInt8(ch), UInt8(max(1, min(127, cfg.fade.cc))), 127)
+      }
+    }
+  }
+
+  private func updateFades(now: Double, cfg: MidiBedConfig) {
+    let dt = now - lastFadeTime
+    guard dt >= 0.02 else { return }
+    lastFadeTime = now
+
+    guard cfg.fade.cc > 0 else {
+      // CC fades were switched off while something was mid-fade: finish cleanly.
+      if !cfg.drone.enabled, !heldDrone.isEmpty { releaseDrone() }
+      if !cfg.pad.enabled, !heldPad.isEmpty { releasePad() }
+      return
+    }
+
+    if !heldDrone.isEmpty {
+      let up = cfg.drone.enabled
+      droneLevel = stepLevel(droneLevel, up: up, dt: dt, fadeIn: cfg.fade.droneIn, fadeOut: cfg.fade.droneOut)
+      sendChannelLevel(cfg.drone.channel)
+      if !up, droneLevel <= 0.001 {
+        releaseDrone()
+        droneLevel = 0
+        scheduleCCRestore(cfg.drone.channel)
+      }
+    }
+    if !heldPad.isEmpty {
+      let up = cfg.pad.enabled
+      padLevel = stepLevel(padLevel, up: up, dt: dt, fadeIn: cfg.fade.padIn, fadeOut: cfg.fade.padOut)
+      sendChannelLevel(cfg.pad.channel)
+      if !up, padLevel <= 0.001 {
+        releasePad()
+        padLevel = 0
+        scheduleCCRestore(cfg.pad.channel)
+      }
+    }
+  }
+
+  // MARK: Drone
+
+  private func reconcileDrone(keepLevel: Bool = false) {
+    guard let cfg = config else { return }
+    let d = cfg.drone
+    let ch = max(0, min(15, d.channel))
+
+    guard d.enabled, running else {
+      // Switched off. With a fade-out and CC fading on, the notes stay held and
+      // updateFades ramps them down, then releases. Otherwise stop right away.
+      if !running || cfg.fade.cc <= 0 || cfg.fade.droneOut <= 0 {
+        releaseDrone()
+        droneLevel = 0
+      }
+      return
+    }
+
+    let wanted = d.notes.map { HeldNote(channel: ch, note: max(0, min(127, $0))) }
+    let vel = UInt8(max(1, min(127, d.velocity)))
+    let startingFromSilence = heldDrone.isEmpty
+    let toRelease = heldDrone.filter { !wanted.contains($0) }
+    let toStart = wanted.filter { !heldDrone.contains($0) }
+
+    heldDrone = wanted
+    if startingFromSilence && !keepLevel {
+      droneLevel = (cfg.fade.cc > 0 && cfg.fade.droneIn > 0) ? 0 : 1
+    }
+    // Set the starting volume BEFORE the notes so they never blip at the old level.
+    if startingFromSilence { sendChannelLevel(ch, force: true) }
+
+    for held in toRelease {
       emit(0x80 | UInt8(held.channel), UInt8(held.note), 0)
     }
-    for note in wanted where !heldDrone.contains(note) {
+    for note in toStart {
       emit(0x90 | UInt8(note.channel), UInt8(note.note), vel)
     }
-    heldDrone = wanted
   }
 
   private func releaseDrone() {
@@ -328,9 +476,16 @@ final class MidiBedEngine {
   private func playPad(_ notes: [Int], pad: MidiBedPadConfig, at time: Double, retrigger: Bool) {
     let ch = max(0, min(15, pad.channel))
     let wanted = notes.map { HeldNote(channel: ch, note: max(0, min(127, $0))) }
+    let startingFromSilence = heldPad.isEmpty
     let toRelease = heldPad.filter { retrigger || !wanted.contains($0) }
     var toStart = wanted.filter { retrigger || !heldPad.contains($0) }
     toStart.sort { $0.note < $1.note }
+
+    heldPad = wanted
+    if startingFromSilence, let cfg = config {
+      padLevel = (cfg.fade.cc > 0 && cfg.fade.padIn > 0) ? 0 : 1
+      sendChannelLevel(ch, force: true)
+    }
 
     for h in toRelease {
       pending.append(Pending(time: time, status: 0x80 | UInt8(h.channel), d1: UInt8(h.note), d2: 0))
@@ -345,7 +500,6 @@ final class MidiBedEngine {
       // +3 ms keeps a retriggered note's off ahead of its on.
       pending.append(Pending(time: time + 0.003 + Double(i) * strum, status: 0x90 | UInt8(n.channel), d1: UInt8(n.note), d2: v))
     }
-    heldPad = wanted
   }
 
   private func releasePad() {
@@ -363,7 +517,11 @@ final class MidiBedEngine {
   private func reconcilePadEnabled() {
     guard let cfg = config else { return }
     if !cfg.pad.enabled {
-      releasePad()
+      // With a fade-out and CC fading on, updateFades ramps down then releases.
+      if cfg.fade.cc <= 0 || cfg.fade.padOut <= 0 {
+        releasePad()
+        padLevel = 0
+      }
     } else if heldPad.isEmpty, !cfg.pad.chords.isEmpty {
       playPad(cfg.pad.chords[padChordIndex % cfg.pad.chords.count], pad: cfg.pad, at: ProcessInfo.processInfo.systemUptime, retrigger: false)
     }

@@ -7,6 +7,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import {
   BedState,
   DrumState,
+  FadeState,
   PadState,
   SoundSlot,
   WandererState,
@@ -24,6 +25,7 @@ import { loadState, saveState } from './src/storage';
 
 const KEEP_AWAKE_TAG = 'midibed-playing';
 const channelText = (v: number) => String(v + 1);
+const fadeText = (v: number) => (v === 0 ? 'none' : `${(v / 10).toFixed(1)} seconds`);
 
 export default function App() {
   const [state, setState] = useState<BedState>(defaultState);
@@ -86,7 +88,8 @@ export default function App() {
   const patchDrum = (i: number, p: Partial<DrumState>) =>
     setState((s) => ({ ...s, drums: s.drums.map((d, k) => (k === i ? { ...d, ...p } : d)) }));
   const patchDrone = (p: Partial<BedState['drone']>) => setState((s) => ({ ...s, drone: { ...s.drone, ...p } }));
-  const patchPad = (p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
+  const patchFade = (p: Partial<FadeState>) => setState((s) => ({ ...s, fade: { ...s.fade, ...p } }));
+  const patchPad =(p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
   // Editing the chords by hand turns the preset label into "Custom".
   const setDegree = (i: number, v: number) =>
     setState((s) => ({ ...s, pad: { ...s.pad, preset: 0, degrees: s.pad.degrees.map((d, k) => (k === i ? v : d)) } }));
@@ -149,6 +152,33 @@ export default function App() {
             <Stepper label="Swing" value={state.swing} onChange={(v) => patch({ swing: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
             <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />
+          </Section>
+
+          <Section title="Fades">
+            <Text style={styles.note}>
+              Applied when you switch a layer on or off, and when you press Play. Drone and pad fade by sending a MIDI volume control to the other synth; drums fade by getting softer. Set a time to zero for no fade.
+            </Text>
+            <Stepper
+              label="Fade volume control number"
+              value={state.fade.cc}
+              onChange={(v) => patchFade({ cc: v })}
+              min={0}
+              max={127}
+              bigStep={10}
+              format={(v) => (v === 0 ? 'off' : `CC ${v}`)}
+              hint="11 is expression, 7 is volume. Off means drone and pad just start and stop."
+            />
+            <ActionButton
+              label="Send fade control test sweep"
+              hint="Sweeps the fade control on the drone channel, for MIDI learn. Press Stop first."
+              onPress={() => state.fade.cc > 0 && testSweep(state.drone.channel, state.fade.cc)}
+            />
+            <Stepper label="Drone fade in" value={state.fade.droneIn} onChange={(v) => patchFade({ droneIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+            <Stepper label="Drone fade out" value={state.fade.droneOut} onChange={(v) => patchFade({ droneOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+            <Stepper label="Pad fade in" value={state.fade.padIn} onChange={(v) => patchFade({ padIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+            <Stepper label="Pad fade out" value={state.fade.padOut} onChange={(v) => patchFade({ padOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+            <Stepper label="Drums fade in" value={state.fade.drumIn} onChange={(v) => patchFade({ drumIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+            <Stepper label="Drums fade out" value={state.fade.drumOut} onChange={(v) => patchFade({ drumOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
           </Section>
 
           <Section title="Sounds in the other app">

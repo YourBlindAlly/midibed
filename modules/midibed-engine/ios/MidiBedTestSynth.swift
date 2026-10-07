@@ -34,6 +34,7 @@ final class MidiBedTestSynth {
     var ic1: Float = 0   // state-variable filter integrators
     var ic2: Float = 0
     var age: Int = 0
+    var channel: UInt8 = 0
   }
 
   private struct DrumVoice {
@@ -61,8 +62,15 @@ final class MidiBedTestSynth {
   private var drums: UnsafeMutablePointer<DrumVoice>
   private let padCount = 16
   private let drumCount = 8
-  private var cutoffCC: Float = 70   // CC 74
-  private var resonanceCC: Float = 70 // CC 71
+  private var cutoffCC: Float = 70   // CC 74, pad channels
+  private var resonanceCC: Float = 70 // CC 71, pad channels
+  private var drumCutoffCC: Float = 127 // CC 74 on channel 10: wide open by default
+  private var drumResonanceCC: Float = 0 // CC 71 on channel 10
+  private var drumIc1: Float = 0 // drum-bus filter state
+  private var drumIc2: Float = 0
+  // Per-channel volume (CC 7 / CC 11), smoothed so fades have no zipper noise.
+  private var expTarget: UnsafeMutablePointer<Float>
+  private var expCurrent: UnsafeMutablePointer<Float>
   private var noiseState: UInt32 = 0x1234_5678
   private var padAgeCounter = 0
 
@@ -79,6 +87,10 @@ final class MidiBedTestSynth {
     pads.initialize(repeating: PadVoice(), count: padCount)
     drums = UnsafeMutablePointer<DrumVoice>.allocate(capacity: drumCount)
     drums.initialize(repeating: DrumVoice(), count: drumCount)
+    expTarget = UnsafeMutablePointer<Float>.allocate(capacity: 16)
+    expTarget.initialize(repeating: 1, count: 16)
+    expCurrent = UnsafeMutablePointer<Float>.allocate(capacity: 16)
+    expCurrent.initialize(repeating: 1, count: 16)
   }
 
   deinit {
@@ -87,6 +99,8 @@ final class MidiBedTestSynth {
     lock.deallocate()
     pads.deallocate()
     drums.deallocate()
+    expTarget.deallocate()
+    expCurrent.deallocate()
   }
 
   func startEngine() {
@@ -205,8 +219,13 @@ final class MidiBedTestSynth {
     case 0x80, 0x90:
       noteOff(channel: channel, note: Int(e.d1))
     case 0xB0:
-      if e.d1 == 74 { cutoffCC = Float(e.d2) }
-      if e.d1 == 71 { resonanceCC = Float(e.d2) }
+      if e.d1 == 74 {
+        if channel == 9 { drumCutoffCC = Float(e.d2) } else { cutoffCC = Float(e.d2) }
+      }
+      if e.d1 == 71 {
+        if channel == 9 { drumResonanceCC = Float(e.d2) } else { resonanceCC = Float(e.d2) }
+      }
+      if e.d1 == 7 || e.d1 == 11 { expTarget[Int(channel)] = Float(e.d2) / 127 }
       if e.d1 == 123 || e.d1 == 120 { allNotesOff() }
     default:
       break
@@ -237,7 +256,7 @@ final class MidiBedTestSynth {
       for i in 0..<padCount where pads[i].age < pads[oldest].age { oldest = i }
       slot = oldest
     }
-    pads[slot] = PadVoice(active: true, gate: true, note: note, phaseA: 0, phaseB: 0.37, env: 0, velocity: velocity, ic1: 0, ic2: 0, age: padAgeCounter)
+    pads[slot] = PadVoice(active: true, gate: true, note: note, phaseA: 0, phaseB: 0.37, env: 0, velocity: velocity, ic1: 0, ic2: 0, age: padAgeCounter, channel: channel)
   }
 
   private func noteOff(channel: UInt8, note: Int) {
@@ -280,9 +299,25 @@ final class MidiBedTestSynth {
     let a3 = g * a2
     let attack = 1 - expf(-dt / 0.9)
     let release = 1 - expf(-dt / 1.6)
+    let expSmooth = 1 - expf(-dt / 0.03)
+
+    // Drum bus: same filter type, but a much wider range (150 Hz ... ~18 kHz) so
+    // the hats and snare are not dulled at the default fully-open setting.
+    let dfc = min(150 * powf(120, drumCutoffCC / 127), 0.45 * sr)
+    let dres = min(0.92, max(0, drumResonanceCC / 127 * 0.95))
+    let dg = tanf(Float.pi * dfc / sr)
+    let dk = 2 - 2 * dres
+    let da1 = 1 / (1 + dg * (dg + dk))
+    let da2 = dg * da1
+    let da3 = dg * da2
 
     for frame in 0..<frameCount {
       var out: Float = 0
+      var drumSum: Float = 0
+
+      for c in 0..<16 {
+        expCurrent[c] += (expTarget[c] - expCurrent[c]) * expSmooth
+      }
 
       for i in 0..<padCount where pads[i].active {
         let f = 440 * powf(2, Float(pads[i].note - 69) / 12)
@@ -302,7 +337,7 @@ final class MidiBedTestSynth {
           pads[i].env -= pads[i].env * release
           if pads[i].env < 0.0005 { pads[i].active = false }
         }
-        out += v2 * pads[i].env * pads[i].velocity * 0.09
+        out += v2 * pads[i].env * pads[i].velocity * 0.09 * expCurrent[Int(pads[i].channel)]
       }
 
       for i in 0..<drumCount where drums[i].active {
@@ -333,8 +368,15 @@ final class MidiBedTestSynth {
           if t > 0.25 { drums[i].active = false }
         }
         drums[i].t += dt
-        out += s * drums[i].velocity * 0.45
+        drumSum += s * drums[i].velocity * 0.45
       }
+
+      let dv3 = drumSum - drumIc2
+      let dv1 = da1 * drumIc1 + da2 * dv3
+      let dv2 = drumIc2 + da2 * drumIc1 + da3 * dv3
+      drumIc1 = 2 * dv1 - drumIc1
+      drumIc2 = 2 * dv2 - drumIc2
+      out += dv2
 
       if !on { out = 0 }
       // gentle soft clip so stacked voices can't blast

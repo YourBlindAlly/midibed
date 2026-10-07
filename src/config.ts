@@ -63,6 +63,21 @@ export type PadState = {
   restrikeBeats: number; // 0 = hold
 };
 
+/**
+ * Fade times in tenths of a second (0 = no fade). Drone and pad fade by sending
+ * a volume-type CC on their channel (`cc` 0 turns that off); drums fade by
+ * scaling note velocity.
+ */
+export type FadeState = {
+  cc: number;
+  droneIn: number;
+  droneOut: number;
+  padIn: number;
+  padOut: number;
+  drumIn: number;
+  drumOut: number;
+};
+
 export type BedState = {
   bpm: number;
   swing: number; // percent 0-100
@@ -72,6 +87,7 @@ export type BedState = {
   drone: DroneState;
   wanderers: WandererState[];
   pad: PadState;
+  fade: FadeState;
   sounds: SoundSlot[];
 };
 
@@ -98,7 +114,10 @@ export const defaultState: BedState = {
   wanderers: [
     { name: 'Cutoff', enabled: true, cc: 74, channel: 0, min: 15, max: 105, speed: 4, smooth: 30 },
     { name: 'Resonance', enabled: true, cc: 71, channel: 0, min: 25, max: 85, speed: 3, smooth: 40 },
+    // Off by default. Moves the drum filter on channel 10 (index 9).
+    { name: 'Drum cutoff', enabled: false, cc: 74, channel: 9, min: 40, max: 127, speed: 4, smooth: 30 },
   ],
+  fade: { cc: 11, droneIn: 40, droneOut: 20, padIn: 40, padOut: 20, drumIn: 20, drumOut: 20 },
   pad: {
     enabled: true,
     channel: 1,
@@ -273,6 +292,15 @@ export function toEngineJson(s: BedState): string {
       strumMs: s.pad.strumMs,
       restrikeBeats: s.pad.restrikeBeats,
       chords: padChords(s),
+    },
+    fade: {
+      cc: s.fade.cc,
+      droneIn: s.fade.droneIn / 10,
+      droneOut: s.fade.droneOut / 10,
+      padIn: s.fade.padIn / 10,
+      padOut: s.fade.padOut / 10,
+      drumIn: s.fade.drumIn / 10,
+      drumOut: s.fade.drumOut / 10,
     },
     wanderers: s.wanderers.map((w) => ({
       enabled: w.enabled,
