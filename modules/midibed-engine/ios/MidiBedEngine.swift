@@ -41,7 +41,6 @@ struct MidiBedPadConfig: Decodable {
   var humanize: Double      // 0...1 random velocity wobble
   var barsPerChord: Int
   var strumMs: Double       // spread between chord-tone onsets, ascending
-  var restrikeBeats: Int    // 0 = hold; else re-strike every N beats
   var chords: [[Int]]       // MIDI notes per chord, computed on the JS side
 }
 
@@ -96,6 +95,11 @@ final class MidiBedEngine {
 
   // Control state (queue-only).
   private var config: MidiBedConfig?
+  /// A scene switch waiting for the next bar line. While set, further settings
+  /// edits update this instead, so the whole new scene lands together.
+  private var pendingConfig: MidiBedConfig?
+  /// Tick where the pad's chord loop starts counting (0, or the bar a scene switched in).
+  private var padStartTick = 0
   private var running = false
   private var tickIndex = 0
   private var nextTickTime: Double = 0
@@ -157,7 +161,8 @@ final class MidiBedEngine {
 
   // MARK: Public (thread-safe: everything hops onto `queue`)
 
-  func applyConfig(json: String) {
+  /// `queued` (scene switches) waits for the next bar line while playing.
+  func applyConfig(json: String, queued: Bool) {
     guard let data = json.data(using: .utf8),
       let decoded = try? JSONDecoder().decode(MidiBedConfig.self, from: data)
     else {
@@ -165,13 +170,24 @@ final class MidiBedEngine {
       return
     }
     queue.async {
-      self.config = decoded
-      self.synth.enabled = decoded.synthOut
-      self.syncWanderers()
-      if self.running {
-        self.reconcileDrone()
-        self.reconcilePadEnabled()
+      if self.running && (queued || self.pendingConfig != nil) {
+        self.pendingConfig = decoded
+        return
       }
+      self.pendingConfig = nil
+      self.install(decoded, atBar: false)
+    }
+  }
+
+  private func install(_ decoded: MidiBedConfig, atBar: Bool) {
+    config = decoded
+    synth.enabled = decoded.synthOut
+    syncWanderers()
+    if running {
+      reconcileDrone()
+      // At a bar line, processTick starts the new pad chord itself right after
+      // this; starting it here too would double-trigger it.
+      if !atBar || !decoded.pad.enabled { reconcilePadEnabled() }
     }
   }
 
@@ -182,6 +198,8 @@ final class MidiBedEngine {
       guard !self.running else { return }
       self.running = true
       self.tickIndex = 0
+      self.padStartTick = 0
+      self.pendingConfig = nil
       self.nextTickTime = ProcessInfo.processInfo.systemUptime + 0.05
       self.lastWandererTime = self.nextTickTime
       self.lastFadeTime = self.nextTickTime
@@ -204,6 +222,11 @@ final class MidiBedEngine {
       self.timer?.cancel()
       self.timer = nil
       self.pending.removeAll()
+      // A scene switch that was still waiting for its bar line takes effect now.
+      if let p = self.pendingConfig {
+        self.pendingConfig = nil
+        self.install(p, atBar: false)
+      }
       let droneCh = self.config?.drone.channel
       let padCh = self.config?.pad.channel
       self.releaseDrone()
@@ -253,14 +276,24 @@ final class MidiBedEngine {
     }
 
     let tickDur = 60.0 / (max(20.0, min(300.0, cfg.bpm)) * Double(ticksPerBeat))
+    let barTicks = ticksPerBeat * beatsPerBar
     while nextTickTime <= now {
-      processTick(tickIndex, at: nextTickTime, tickDur: tickDur, cfg: cfg)
+      // A queued scene switch lands exactly on a bar line, and the pad's chord
+      // loop restarts from its first chord there.
+      if tickIndex % barTicks == 0, let p = pendingConfig {
+        pendingConfig = nil
+        install(p, atBar: true)
+        padStartTick = tickIndex
+      }
+      guard let current = config else { break }
+      processTick(tickIndex, at: nextTickTime, tickDur: tickDur, cfg: current)
       tickIndex += 1
       nextTickTime += tickDur
     }
 
-    updateWanderers(now: now, cfg: cfg)
-    updateFades(now: now, cfg: cfg)
+    let live = config ?? cfg
+    updateWanderers(now: now, cfg: live)
+    updateFades(now: now, cfg: live)
     drainPending(now: now)
   }
 
@@ -285,15 +318,15 @@ final class MidiBedEngine {
       reconcileDrone(keepLevel: true)
     }
 
-    // Chord pad: change chord every `barsPerChord` bars; re-strike on request.
-    // Common tones between chords are left sounding (no retrigger) so changes glide.
+    // Chord pad: change chord every `barsPerChord` bars (counted from the last
+    // scene switch). Common tones between chords are left sounding, never
+    // retriggered, so changes glide. The pad is sustained, with no rhythm.
     if cfg.pad.enabled, !cfg.pad.chords.isEmpty {
       let chordTicks = barTicks * max(1, cfg.pad.barsPerChord)
-      if tick % chordTicks == 0 {
-        padChordIndex = (tick / chordTicks) % cfg.pad.chords.count
-        playPad(cfg.pad.chords[padChordIndex], pad: cfg.pad, at: time, retrigger: cfg.pad.restrikeBeats > 0)
-      } else if cfg.pad.restrikeBeats > 0, tick % (ticksPerBeat * cfg.pad.restrikeBeats) == 0 {
-        playPad(cfg.pad.chords[padChordIndex % cfg.pad.chords.count], pad: cfg.pad, at: time, retrigger: true)
+      let rel = tick - padStartTick
+      if rel >= 0, rel % chordTicks == 0 {
+        padChordIndex = (rel / chordTicks) % cfg.pad.chords.count
+        playPad(cfg.pad.chords[padChordIndex], pad: cfg.pad, at: time, retrigger: false)
       }
     }
 

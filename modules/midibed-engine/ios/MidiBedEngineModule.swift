@@ -25,8 +25,8 @@ public class MidiBedEngineModule: Module {
       self.engine.stop()
     }
 
-    Function("applyConfig") { (json: String) in
-      self.engine.applyConfig(json: json)
+    Function("applyConfig") { (json: String, queued: Bool) in
+      self.engine.applyConfig(json: json, queued: queued)
     }
 
     Function("sendControlChange") { (channel: Int, cc: Int, value: Int) in

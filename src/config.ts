@@ -60,7 +60,6 @@ export type PadState = {
   spread: boolean;
   voiceLead: boolean;
   strumMs: number;
-  restrikeBeats: number; // 0 = hold
 };
 
 /**
@@ -89,9 +88,79 @@ export type BedState = {
   pad: PadState;
   fade: FadeState;
   sounds: SoundSlot[];
+  activeScene: number;
+  scenes: SceneData[];
 };
 
-export const defaultState: BedState = {
+/**
+ * What a scene remembers. Deliberately NOT in a scene: tempo, the drone root,
+ * outputs, fades, program sounds, and all routing (MIDI channels, CC numbers,
+ * drum note numbers), so switching scenes never changes the key, speed or wiring.
+ */
+export type SceneData = {
+  swing: number;
+  drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars'>;
+  pad: Omit<PadState, 'channel'>;
+  drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
+  wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'speed' | 'smooth'>[];
+};
+
+export const SCENE_COUNT = 4;
+
+type SceneSource = Pick<BedState, 'swing' | 'drone' | 'pad' | 'drums' | 'wanderers'>;
+
+export function captureScene(s: SceneSource): SceneData {
+  const { channel: _padChannel, ...pad } = s.pad;
+  return {
+    swing: s.swing,
+    drone: {
+      enabled: s.drone.enabled,
+      octave: s.drone.octave,
+      fifth: s.drone.fifth,
+      velocity: s.drone.velocity,
+      retriggerBars: s.drone.retriggerBars,
+    },
+    pad: { ...pad, degrees: [...pad.degrees] },
+    drums: s.drums.map((d) => ({
+      enabled: d.enabled,
+      steps: d.steps,
+      hits: d.hits,
+      rotation: d.rotation,
+      velocity: d.velocity,
+      probability: d.probability,
+      humanize: d.humanize,
+    })),
+    wanderers: s.wanderers.map((w) => ({ enabled: w.enabled, min: w.min, max: w.max, speed: w.speed, smooth: w.smooth })),
+  };
+}
+
+/** Overlay a scene onto the live settings, leaving everything global untouched. */
+export function applyScene(s: BedState, sc: SceneData): BedState {
+  return {
+    ...s,
+    swing: sc.swing,
+    drone: { ...s.drone, ...sc.drone },
+    pad: { ...s.pad, ...sc.pad, degrees: [...sc.pad.degrees] },
+    drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
+    wanderers: s.wanderers.map((w, i) => ({ ...w, ...sc.wanderers[i] })),
+  };
+}
+
+/** Save the live settings into the current scene, then load scene `to`. */
+export function switchScene(s: BedState, to: number): BedState {
+  if (to < 0 || to >= s.scenes.length || to === s.activeScene) return s;
+  const saved = s.scenes.map((sc, i) => (i === s.activeScene ? captureScene(s) : sc));
+  return { ...applyScene(s, saved[to]), scenes: saved, activeScene: to };
+}
+
+/** Copy the current scene (including unsaved edits) over scene `to`. */
+export function copyScene(s: BedState, to: number): BedState {
+  if (to < 0 || to >= s.scenes.length || to === s.activeScene) return s;
+  const current = captureScene(s);
+  return { ...s, scenes: s.scenes.map((sc, i) => (i === s.activeScene || i === to ? current : sc)) };
+}
+
+const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
   bpm: 88,
   swing: 15,
   midiOut: true,
@@ -133,13 +202,42 @@ export const defaultState: BedState = {
     spread: false,
     voiceLead: true,
     strumMs: 40,
-    restrikeBeats: 0,
   },
   sounds: [
     { name: 'Drone synth', channel: 0, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0 },
     { name: 'Percussion', channel: 9, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0 },
   ],
 };
+
+/**
+ * Starting scenes, so all four are different and usable out of the box:
+ * 1 the full bed, 2 a breakdown (shaker, one long chord), 3 a lift
+ * (Mixolydian, busier kick and hats), 4 drone only.
+ */
+function startingScenes(): SceneData[] {
+  const b = baseState;
+  const drumsWhere = (on: (name: string) => boolean) => b.drums.map((d) => ({ ...d, enabled: on(d.name) }));
+  return [
+    captureScene(b),
+    captureScene({
+      ...b,
+      drums: drumsWhere((n) => n === 'Shaker'),
+      pad: { ...b.pad, preset: 1, count: 1, barsPerChord: 4 },
+    }),
+    captureScene({
+      ...b,
+      drums: b.drums.map((d) => (d.name === 'Kick' ? { ...d, hits: 5 } : d.name === 'Hat' ? { ...d, hits: 9 } : d)),
+      pad: { ...b.pad, mode: 4, preset: 3, count: 2, degrees: [1, 4, 4, 7] },
+    }),
+    captureScene({
+      ...b,
+      drums: drumsWhere(() => false),
+      pad: { ...b.pad, enabled: false },
+    }),
+  ];
+}
+
+export const defaultState: BedState = { ...baseState, activeScene: 0, scenes: startingScenes() };
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -255,7 +353,14 @@ export function mergeDefaults<T>(def: T, raw: unknown): T {
 }
 
 export function migrateState(raw: unknown): BedState {
-  return mergeDefaults(defaultState, raw);
+  const merged = mergeDefaults(defaultState, raw);
+  const active = Math.max(0, Math.min(merged.scenes.length - 1, Math.round(merged.activeScene)));
+  // The live settings ARE the active scene; keep the stored copy in step with them.
+  return {
+    ...merged,
+    activeScene: active,
+    scenes: merged.scenes.map((sc, i) => (i === active ? captureScene(merged) : sc)),
+  };
 }
 
 /** Shape the native engine expects (MidiBedConfig in MidiBedEngine.swift). */
@@ -290,7 +395,6 @@ export function toEngineJson(s: BedState): string {
       humanize: s.pad.humanize / 100,
       barsPerChord: s.pad.barsPerChord,
       strumMs: s.pad.strumMs,
-      restrikeBeats: s.pad.restrikeBeats,
       chords: padChords(s),
     },
     fade: {

@@ -28,10 +28,6 @@ const STYLE_STEPS: number[][] = [
   [0, 4, 7],
 ];
 
-/** Retrigger options as beats between re-strikes (0 = hold). */
-export const RESTRIKE_OPTIONS = [0, 4, 2, 1];
-export const RESTRIKE_NAMES = ['hold', 'every bar', 'every 2 beats', 'every beat'];
-
 export type ChordPreset = { name: string; degrees: number[] };
 
 /** Index 0 is "Custom": selecting it changes nothing. Degrees are 1-7. */

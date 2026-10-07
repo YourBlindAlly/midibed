@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -9,15 +9,18 @@ import {
   DrumState,
   FadeState,
   PadState,
+  SCENE_COUNT,
   SoundSlot,
   WandererState,
+  copyScene,
   defaultState,
   drumNoteLabel,
   droneNotes,
   noteName,
+  switchScene,
   toEngineJson,
 } from './src/config';
-import { MODE_NAMES, PRESETS, RESTRIKE_NAMES, RESTRIKE_OPTIONS, STYLE_NAMES, chordLabel } from './src/chords';
+import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel } from './src/chords';
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { engine, hasNativeEngine, onBeat, testSweep } from './src/engine';
@@ -33,6 +36,10 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState('1.1');
   const programTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  // A scene switch is pushed to the engine "queued" so it lands on a bar line.
+  const queueNextApply = useRef(false);
+  const [queuedScene, setQueuedScene] = useState<number | null>(null);
+  const [copyTarget, setCopyTarget] = useState(2);
 
   // Load saved settings once. Saving is held back until this finishes so the
   // defaults can never overwrite what is stored.
@@ -53,11 +60,16 @@ export default function App() {
   // tick; musical timing never depends on this).
   const json = useMemo(() => toEngineJson(state), [state]);
   useEffect(() => {
-    engine.applyConfig(json);
+    engine.applyConfig(json, queueNextApply.current);
+    queueNextApply.current = false;
   }, [json]);
 
   useEffect(() => {
-    return onBeat(({ bar, beat }) => setPosition(`${bar}.${beat}`));
+    return onBeat(({ bar, beat }) => {
+      setPosition(`${bar}.${beat}`);
+      // A queued scene switch lands on beat 1 of a bar.
+      if (beat === 1) setQueuedScene(null);
+    });
   }, []);
 
   useEffect(() => {
@@ -88,7 +100,25 @@ export default function App() {
   const patchDrum = (i: number, p: Partial<DrumState>) =>
     setState((s) => ({ ...s, drums: s.drums.map((d, k) => (k === i ? { ...d, ...p } : d)) }));
   const patchDrone = (p: Partial<BedState['drone']>) => setState((s) => ({ ...s, drone: { ...s.drone, ...p } }));
-  const patchFade = (p: Partial<FadeState>) => setState((s) => ({ ...s, fade: { ...s.fade, ...p } }));
+  const goToScene = (to: number) => {
+    if (to === state.activeScene) return;
+    const next = switchScene(state, to);
+    // Only queue if the engine will actually receive a changed config.
+    const queued = playing && toEngineJson(next) !== json;
+    queueNextApply.current = queued;
+    setState(next);
+    setQueuedScene(queued ? to : null);
+    const msg = queued ? `Scene ${to + 1}, starts at the next bar` : `Scene ${to + 1}`;
+    setTimeout(() => AccessibilityInfo.announceForAccessibility(msg), 500);
+  };
+
+  const copySceneTo = (to: number) => {
+    if (to === state.activeScene) return;
+    setState((s) => copyScene(s, to));
+    setTimeout(() => AccessibilityInfo.announceForAccessibility(`Copied scene ${state.activeScene + 1} to scene ${to + 1}`), 500);
+  };
+
+  const patchFade =(p: Partial<FadeState>) => setState((s) => ({ ...s, fade: { ...s.fade, ...p } }));
   const patchPad =(p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
   // Editing the chords by hand turns the preset label into "Custom".
   const setDegree = (i: number, v: number) =>
@@ -146,6 +176,48 @@ export default function App() {
           <View accessible accessibilityLabel="Bar and beat position" style={styles.positionBox}>
             <Text style={styles.position}>{position}</Text>
           </View>
+
+          <Section title="Scenes">
+            <View style={styles.sceneRow}>
+              {Array.from({ length: SCENE_COUNT }, (_, i) => {
+                const active = i === state.activeScene;
+                return (
+                  <Pressable
+                    key={i}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                    style={[styles.sceneBtn, active && styles.sceneBtnOn]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Scene ${i + 1}`}
+                    accessibilityState={{ selected: active }}
+                    accessibilityHint={active ? 'Current scene' : 'Switches at the next bar while playing'}
+                    onPress={() => goToScene(i)}
+                  >
+                    <Text style={[styles.sceneText, active && styles.sceneTextOn]}>{i + 1}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.note}>
+              {queuedScene !== null
+                ? `Scene ${state.activeScene + 1} starts at the next bar`
+                : `Scene ${state.activeScene + 1} is playing`}
+            </Text>
+            <Text style={styles.note}>
+              Each scene remembers its drums, drone on/off and voicing, chord pad, swing, and filter movement. Tempo, drone root, outputs, fades and MIDI routing stay the same in every scene. Changes you make are saved into the current scene.
+            </Text>
+            <Stepper
+              label="Copy this scene to scene"
+              value={copyTarget}
+              onChange={setCopyTarget}
+              min={1}
+              max={SCENE_COUNT}
+              hint="Pick where to copy, then press the copy button. It replaces that scene."
+            />
+            <ActionButton
+              label={`Copy scene ${state.activeScene + 1} to scene ${copyTarget}`}
+              onPress={() => copySceneTo(copyTarget - 1)}
+            />
+          </Section>
 
           <Section title="Tempo and output">
             <Stepper label="Tempo" value={state.bpm} onChange={(v) => patch({ bpm: v })} min={40} max={200} bigStep={10} format={(v) => `${v} BPM`} />
@@ -286,15 +358,6 @@ export default function App() {
             <Toggle label="Smooth voice leading" value={state.pad.voiceLead} onChange={(v) => patchPad({ voiceLead: v })} hint="Each chord moves as little as possible from the last one" />
             <Toggle label="Open spread voicing" value={state.pad.spread} onChange={(v) => patchPad({ spread: v })} hint="Lifts the second note an octave. With smooth voice leading it applies to the first chord only" />
             <Stepper label="Strum" value={state.pad.strumMs} onChange={(v) => patchPad({ strumMs: v })} min={0} max={300} step={10} format={(v) => (v === 0 ? 'none' : `${v} milliseconds`)} />
-            <Stepper
-              label="Re-strike"
-              value={Math.max(0, RESTRIKE_OPTIONS.indexOf(state.pad.restrikeBeats))}
-              onChange={(v) => patchPad({ restrikeBeats: RESTRIKE_OPTIONS[v] })}
-              min={0}
-              max={RESTRIKE_OPTIONS.length - 1}
-              format={(v) => RESTRIKE_NAMES[v]}
-              hint="Hold lets the chord ring; the others play it again on a beat grid"
-            />
             <Stepper label="Pad velocity" value={state.pad.velocity} onChange={(v) => patchPad({ velocity: v })} min={1} max={127} step={5} />
             <Stepper label="Pad humanize" value={state.pad.humanize} onChange={(v) => patchPad({ humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
             <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Use the same channel as the drone to play both with one sound" />
@@ -374,6 +437,19 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   playText: { color: '#fff', fontSize: 26, fontWeight: '700' },
+  sceneRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  sceneBtn: {
+    flex: 1,
+    minHeight: 56,
+    marginHorizontal: 4,
+    borderRadius: 12,
+    backgroundColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sceneBtnOn: { backgroundColor: colors.accent },
+  sceneText: { color: colors.text, fontSize: 24, fontWeight: '700' },
+  sceneTextOn: { color: '#000' },
   positionBox: { alignItems: 'center', marginBottom: 16 },
   position: { color: colors.accent, fontSize: 22, fontVariant: ['tabular-nums'] },
   group: { marginBottom: 10, paddingBottom: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },

@@ -11,7 +11,7 @@ import type { BeatPayload } from '../modules/midibed-engine/src/MidiBedEngine.ty
 type Native = {
   start(): void;
   stop(): void;
-  applyConfig(json: string): void;
+  applyConfig(json: string, queued: boolean): void;
   sendControlChange(channel: number, cc: number, value: number): void;
   sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number): void;
   addListener(name: 'onBeat', cb: (e: BeatPayload) => void): unknown;
@@ -45,7 +45,8 @@ export function onBeat(cb: (e: BeatPayload) => void): () => void {
 export const engine = {
   start: () => native?.start(),
   stop: () => native?.stop(),
-  applyConfig: (json: string) => native?.applyConfig(json),
+  /** queued = wait for the next bar line while playing (scene switches). */
+  applyConfig: (json: string, queued = false) => native?.applyConfig(json, queued),
   sendControlChange: (channel: number, cc: number, value: number) => native?.sendControlChange(channel, cc, value),
   /** bank values < 0 are skipped (no Bank Select sent). */
   sendProgramChange: (channel: number, program: number, bankMSB = -1, bankLSB = -1) =>
