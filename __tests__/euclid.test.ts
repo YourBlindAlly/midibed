@@ -56,7 +56,7 @@ describe('saved-settings migration', () => {
     expect(s.drums).toHaveLength(4);
     expect(s.drums[0].note).toBe(35);
     expect(s.drums[0].steps).toBe(16);
-    expect(s.sounds).toHaveLength(2);
+    expect(s.sounds).toHaveLength(3);
   });
 
   it('ignores garbage and wrong types', () => {

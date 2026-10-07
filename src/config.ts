@@ -38,11 +38,32 @@ export type WandererState = {
 export type SoundSlot = {
   name: string;
   channel: number; // 0-based
-  program: number; // 0-127 (shown as 1-128)
+  program: number; // 0-127, shown exactly as sent (Synth One's own screen uses the same numbers)
   sendBank: boolean;
   bankMSB: number; // CC 0
   bankLSB: number; // CC 32
+  favorites: string; // comma-separated program numbers, e.g. "12,16,20"
 };
+
+/** Valid, de-duplicated, sorted program numbers from a favorites string. */
+export function parseFavorites(text: string): number[] {
+  const out = new Set<number>();
+  for (const part of text.split(',')) {
+    const n = Number(part.trim());
+    if (part.trim() !== '' && Number.isInteger(n) && n >= 0 && n <= 127) out.add(n);
+  }
+  return [...out].sort((a, b) => a - b).slice(0, 32);
+}
+
+export function addFavorite(text: string, program: number): string {
+  return parseFavorites(`${text},${program}`).join(',');
+}
+
+export function removeFavorite(text: string, program: number): string {
+  return parseFavorites(text)
+    .filter((p) => p !== program)
+    .join(',');
+}
 
 /** Looping chord pad built from the drone root + a mode (see src/chords.ts). */
 export type PadState = {
@@ -204,8 +225,11 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
     strumMs: 40,
   },
   sounds: [
-    { name: 'Drone synth', channel: 0, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0 },
-    { name: 'Percussion', channel: 9, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0 },
+    { name: 'Drone synth', channel: 0, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '' },
+    { name: 'Percussion', channel: 9, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '' },
+    // New slots go at the END so settings saved by earlier versions keep their positions.
+    // Favorites are Rusty's good Synth One pad presets (Synth One's own numbers).
+    { name: 'Chord pad', channel: 1, program: 12, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '12,16,20,26,39,55,63,75,80,82,99,113' },
   ],
 };
 

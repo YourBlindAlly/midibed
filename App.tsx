@@ -12,11 +12,14 @@ import {
   SCENE_COUNT,
   SoundSlot,
   WandererState,
+  addFavorite,
   copyScene,
   defaultState,
   drumNoteLabel,
   droneNotes,
   noteName,
+  parseFavorites,
+  removeFavorite,
   switchScene,
   toEngineJson,
 } from './src/config';
@@ -142,6 +145,9 @@ export default function App() {
 
   // Changing a sound sends Program Change right away (after a short pause so
   // swiping quickly through programs doesn't flood the receiving app).
+  const patchSoundFavorites = (i: number, favorites: string) =>
+    setState((s) => ({ ...s, sounds: s.sounds.map((x, k) => (k === i ? { ...x, favorites } : x)) }));
+
   const patchSound = (i: number, p: Partial<SoundSlot>) => {
     const next = { ...state.sounds[i], ...p };
     setState((s) => ({ ...s, sounds: s.sounds.map((x, k) => (k === i ? next : x)) }));
@@ -267,9 +273,32 @@ export default function App() {
                   min={0}
                   max={127}
                   bigStep={10}
-                  format={(v) => `${v + 1}`}
-                  hint="Swipe up or down to change sound. Sends immediately."
+                  hint="Swipe up or down to change sound. Sends immediately. Numbers match what the other app shows when it counts from zero."
                 />
+                {(() => {
+                  const favs = parseFavorites(sl.favorites);
+                  const idx = favs.indexOf(sl.program);
+                  return (
+                    <>
+                      {favs.length > 0 && (
+                        <Stepper
+                          label={`${sl.name} favorite`}
+                          value={idx}
+                          onChange={(v) => patchSound(i, { program: favs[Math.max(0, v)] })}
+                          min={-1}
+                          max={favs.length - 1}
+                          format={(v) => (v < 0 ? 'current program is not a favorite' : `program ${favs[v]}, ${v + 1} of ${favs.length}`)}
+                          hint="Swipe up or down to step through only your favorite sounds. Sends immediately."
+                        />
+                      )}
+                      {idx < 0 ? (
+                        <ActionButton label={`Add program ${sl.program} to ${sl.name} favorites`} onPress={() => patchSoundFavorites(i, addFavorite(sl.favorites, sl.program))} />
+                      ) : (
+                        <ActionButton label={`Remove program ${sl.program} from ${sl.name} favorites`} onPress={() => patchSoundFavorites(i, removeFavorite(sl.favorites, sl.program))} />
+                      )}
+                    </>
+                  );
+                })()}
                 <Toggle label={`${sl.name} send bank select`} value={sl.sendBank} onChange={(v) => patchSound(i, { sendBank: v })} />
                 {sl.sendBank && (
                   <>
