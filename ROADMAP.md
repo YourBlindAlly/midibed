@@ -70,19 +70,30 @@ or two as the change happens.
 - Per scene (or per song): "transition in" clip, lead in beats, level; a "transition out" clip for fades.
 - The ambience layer's own fade could also be used as the "fade out within a beat or two" transition.
 
-### 5a. Automatic variations inside a scene (Rusty, 2026-10-08)
-After hearing "bass follows chords" and the fifths pad, Rusty likes how they create subtle or not so subtle
-shifts and wants a scene to make such variations by itself.
-- Idea: each scene gets a VARIATION, a small set of overrides on top of the scene (bass follows chords on/off,
-  pad follows on/off, pad chord type such as triad vs fifth only, octave/fifth on the bass, maybe mode or
-  drum density), plus a RULE for when it plays: alternate every chord loop; play it every Nth loop; random
-  chance each loop; or hold for N loops then return.
-- Changes land at the END of a chord loop (a bar line) and use the existing machinery: common tones keep
-  ringing, fades are not needed, nothing restarts.
-- Needs the engine to hold both versions and the rule (same architecture as auto-advance, item 5), and to tell
-  the screen which version is playing ("Variation playing"). So build it together with auto-advance.
-- Questions for Rusty: which settings should be allowed to vary; rules he wants; one variation per scene or a
-  short list; whether to announce when it switches.
+### 5a. Scene "breathing": automatic variations (Rusty's design, 2026-10-08; REPLACES the earlier overlay idea)
+After hearing "bass follows chords" and the fifths pad, Rusty likes the subtle or not so subtle shifts and wants
+a scene to make them by itself. His design: independent per-layer rules, counted in bars from the start of the
+scene.
+- BASS: flip "Bass follows chords" every X bars (4, 8, whatever). Maybe with a probability.
+- PAD: the same kind of flip for the chord pad (its "follows chords", and/or full chords vs fifths only).
+- DRUMS: a "breakdown" option: every so often the drums drop out for a while, then return.
+- STAYS FIXED: the scene's initial settings (where it starts), the chords (harmony) and the key.
+Claude's refinements (to confirm with Rusty):
+- Each flip happens ON a bar line, counted from when the scene started (scene switch or Play). The scene's saved
+  setting is the starting state; the first change comes after X bars. Shared notes keep ringing, so a flip sounds
+  like movement, not a restart. If X is a multiple of "bars per chord" it also lands on a chord change.
+- Optional CHANCE per interval (100% = always flip, lower = sometimes skip), so it never feels mechanical.
+- Optionally two lengths ("follow for 8 bars, steady for 4") instead of one, for uneven breathing.
+- Breakdown: every X bars, for Y bars, either ALL drums out or a LIGHT version (kick and snare out, hats and
+  shaker stay). Uses the drum fade times so it eases out and back in. Later it can trigger a transition sound
+  (see 4b) on the way back in.
+- Engine: pure bar-counting at the bar line, in native code (like scene switches). JS sends BOTH note lists for
+  bass and pad (following and steady) plus the rules; the engine picks the active one. It should tell the
+  screen the current state (for a "Currently: following / steady" readout) and can announce changes if wanted.
+- Scene-owned settings (each scene has its own rules). A manual change to the base setting restarts the count.
+- Small enough to build BEFORE the full auto-advance plan (item 5); they will share the bar counter.
+- Open questions: what exactly the pad flips (follows on/off, full chords vs fifths, or both); uneven lengths
+  wanted or not; breakdown styles wanted; announce changes or only show them.
 
 ### 5. Repeat a scene, or auto-advance after N repeats
 - Per scene: "repeat N times, then go to": next scene / a chosen scene / random of a few / stay (hold).
