@@ -1,6 +1,6 @@
 import { buildBassChords, buildPadChords } from './chords';
 import { MotionState, defaultMotion, drumRole } from './motion';
-import { TransitionsState, defaultTransitions } from './transitions';
+import { NOISE_VERSION, TransitionUse, TransitionsState, defaultTransitionUse, defaultTransitions } from './transitions';
 import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice } from './profiles';
 
@@ -148,8 +148,12 @@ export type BedState = {
   motion: MotionState;
   /** Speak a short message when a rule changes something. Off by default. */
   announce: boolean;
-  /** Transition sounds per scene (how it starts, how the drums return). */
+  /** The transition sounds (how a scene starts, how the drums break down and return). Global. */
   transitions: TransitionsState;
+  /** Per scene: which of those sounds this scene plays. */
+  transitionUse: TransitionUse;
+  /** Level-scale version of the saved transition levels (see NOISE_VERSION). */
+  noiseVersion: number;
   /** A lead-in needs at least this many eighth notes before the change, or only its downer plays on the beat. */
   transitionMinEighths: number;
   pad: PadState;
@@ -172,7 +176,7 @@ export type SceneData = {
   drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow'>;
   harmony: HarmonyState;
   motion: MotionState;
-  transitions: TransitionsState;
+  transitionUse: TransitionUse;
   pad: Omit<PadState, 'channel'>;
   drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
   wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'speed' | 'smooth'>[];
@@ -181,7 +185,7 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'transitions' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -198,7 +202,7 @@ export function captureScene(s: SceneSource): SceneData {
     },
     harmony: { ...s.harmony, degrees: [...s.harmony.degrees] },
     motion: { preset: s.motion.preset, bass: { ...s.motion.bass }, pad: { ...s.motion.pad }, drums: { ...s.motion.drums } },
-    transitions: { entrance: { ...s.transitions.entrance }, drumReturn: { ...s.transitions.drumReturn } },
+    transitionUse: { ...s.transitionUse },
     pad: { ...pad },
     drums: s.drums.map((d) => ({
       enabled: d.enabled,
@@ -229,7 +233,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     drone: { ...s.drone, ...sc.drone },
     harmony: { ...sc.harmony, degrees: [...sc.harmony.degrees] },
     motion: { preset: sc.motion.preset, bass: { ...sc.motion.bass }, pad: { ...sc.motion.pad }, drums: { ...sc.motion.drums } },
-    transitions: { entrance: { ...sc.transitions.entrance }, drumReturn: { ...sc.transitions.drumReturn } },
+    transitionUse: { ...sc.transitionUse },
     pad: { ...s.pad, ...sc.pad },
     drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
     wanderers: s.wanderers.map((w, i) => ({ ...w, ...sc.wanderers[i] })),
@@ -308,6 +312,8 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
   motion: defaultMotion,
   announce: false,
   transitions: defaultTransitions,
+  transitionUse: defaultTransitionUse,
+  noiseVersion: NOISE_VERSION,
   transitionMinEighths: 1,
   harmony: {
     mode: 1, // Dorian
@@ -480,8 +486,28 @@ function markCustomMotion(raw: unknown): unknown {
   return r;
 }
 
+// Transition levels saved before noise version 2 were on a louder scale for every shape but
+// the Boom. Convert them once, so the mix sounds the same after the upgrade.
+function upgradeNoiseLevels(raw: unknown): unknown {
+  if (raw === null || typeof raw !== 'object') return raw;
+  const r = { ...(raw as Record<string, unknown>) };
+  const t = r.transitions;
+  if (r.noiseVersion === undefined && t !== null && typeof t === 'object') {
+    const next: Record<string, unknown> = {};
+    for (const [key, slot] of Object.entries(t as Record<string, unknown>)) {
+      const sl = slot as Record<string, unknown> | null;
+      next[key] =
+        sl && typeof sl === 'object' && typeof sl.level === 'number' && sl.shape !== 3
+          ? { ...sl, level: Math.min(100, Math.round(sl.level * 5)) }
+          : slot;
+    }
+    r.transitions = next;
+  }
+  return r;
+}
+
 export function migrateState(rawInput: unknown): BedState {
-  const lifted = markCustomMotion(liftHarmony(rawInput));
+  const lifted = markCustomMotion(liftHarmony(upgradeNoiseLevels(rawInput)));
   const raw =
     lifted !== null && typeof lifted === 'object' && Array.isArray((lifted as Record<string, unknown>).scenes)
       ? {
@@ -552,8 +578,9 @@ export function toEngineJson(s: BedState): string {
     motion: s.motion,
     transitions: {
       minLeadBeats: s.transitionMinEighths / 2,
-      entrance: { ...s.transitions.entrance, level: s.transitions.entrance.level / 100 },
-      drumReturn: { ...s.transitions.drumReturn, level: s.transitions.drumReturn.level / 100 },
+      entrance: { ...s.transitions.entrance, on: s.transitions.entrance.on && s.transitionUse.entrance, level: s.transitions.entrance.level / 100 },
+      drumBreak: { ...s.transitions.drumBreak, on: s.transitions.drumBreak.on && s.transitionUse.drumBreak, level: s.transitions.drumBreak.level / 100 },
+      drumReturn: { ...s.transitions.drumReturn, on: s.transitions.drumReturn.on && s.transitionUse.drumReturn, level: s.transitions.drumReturn.level / 100 },
     },
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
     fade: {

@@ -48,40 +48,88 @@ describe('what to play when the bar is close (the late-trigger rule)', () => {
   });
 });
 
-describe('transition settings', () => {
-  it('start switched off', () => {
+describe('transition settings are global, with a per-scene switch', () => {
+  it('start with only the drums-break boom on', () => {
     expect(defaultTransitions.entrance.on).toBe(false);
     expect(defaultTransitions.drumReturn.on).toBe(false);
+    expect(defaultTransitions.drumBreak).toMatchObject({ on: true, shape: 3 }); // Boom
+  });
+
+  it('every scene uses the sounds unless it switches them off', () => {
+    expect(defaultState.transitionUse).toEqual({ entrance: true, drumBreak: true, drumReturn: true });
+    expect(defaultState.scenes.every((sc) => sc.transitionUse.entrance && sc.transitionUse.drumBreak && sc.transitionUse.drumReturn)).toBe(true);
   });
 
   it('are sent to the engine with level as 0 to 1 and the minimum in beats', () => {
     const live = {
       ...defaultState,
       transitionMinEighths: 1,
-      transitions: { ...defaultState.transitions, entrance: { on: true, shape: 0, color: 2, beats: 3, level: 80 } },
+      transitions: { ...defaultState.transitions, entrance: { on: true, shape: 0, color: 2, beats: 8, level: 20 } },
     };
     const j = JSON.parse(toEngineJson(live));
     expect(j.transitions.minLeadBeats).toBe(0.5);
-    expect(j.transitions.entrance).toEqual({ on: true, shape: 0, color: 2, beats: 3, level: 0.8 });
+    expect(j.transitions.entrance).toEqual({ on: true, shape: 0, color: 2, beats: 8, level: 0.2 });
+    expect(j.transitions.drumBreak.on).toBe(true);
     expect(j.transitions.drumReturn.on).toBe(false);
   });
 
-  it('belong to each scene, while the shortest lead-in is shared by all', () => {
-    const live = {
-      ...defaultState,
-      transitionMinEighths: 2,
-      transitions: { ...defaultState.transitions, entrance: { on: true, shape: 4, color: 0, beats: 2, level: 50 } },
-    };
+  it('a scene that switches a sound off silences it there, but not in other scenes', () => {
+    const on = { ...defaultState, transitions: { ...defaultState.transitions, drumReturn: { ...defaultState.transitions.drumReturn, on: true } } };
+    expect(JSON.parse(toEngineJson(on)).transitions.drumReturn.on).toBe(true);
+    const muted = { ...on, transitionUse: { ...on.transitionUse, drumReturn: false } };
+    expect(JSON.parse(toEngineJson(muted)).transitions.drumReturn.on).toBe(false);
+    const away = switchScene(muted, 1);
+    expect(away.transitionUse.drumReturn).toBe(true); // scene 2 still uses it
+    expect(JSON.parse(toEngineJson(away)).transitions.drumReturn.on).toBe(true);
+    expect(switchScene(away, 0).transitionUse.drumReturn).toBe(false);
+  });
+
+  it('a sound that is off globally stays off even if the scene would use it', () => {
+    const j = JSON.parse(toEngineJson(defaultState));
+    expect(j.transitions.entrance.on).toBe(false);
+    expect(defaultState.transitionUse.entrance).toBe(true);
+  });
+
+  it('the sounds are the same in every scene (they are not saved per scene)', () => {
+    const live = { ...defaultState, transitions: { ...defaultState.transitions, entrance: { on: true, shape: 4, color: 0, beats: 8, level: 30 } } };
     const away = switchScene(live, 1);
-    expect(away.transitions.entrance.on).toBe(false);
-    expect(away.transitionMinEighths).toBe(2);
-    expect(switchScene(away, 0).transitions.entrance).toEqual({ on: true, shape: 4, color: 0, beats: 2, level: 50 });
+    expect(away.transitions.entrance).toEqual({ on: true, shape: 4, color: 0, beats: 8, level: 30 });
+    expect(Object.keys(defaultState.scenes[0])).not.toContain('transitions');
+    expect(Object.keys(defaultState.scenes[0])).toContain('transitionUse');
   });
 
   it('fill in for old saved settings', () => {
     const s = migrateState({ bpm: 100 });
     expect(s.transitions.entrance.on).toBe(false);
     expect(s.transitionMinEighths).toBe(1);
-    expect(s.scenes.every((sc) => sc.transitions.drumReturn.on === false)).toBe(true);
+    expect(s.noiseVersion).toBe(2);
+    expect(s.transitionUse.drumBreak).toBe(true);
+  });
+});
+
+describe('upgrading levels saved before the level scale changed', () => {
+  const old = {
+    transitions: {
+      entrance: { on: true, shape: 1, color: 1, beats: 4, level: 5 },
+      drumReturn: { on: true, shape: 3, color: 0, beats: 2, level: 50 },
+    },
+  };
+
+  it('multiplies noise-shape levels by 5 and leaves the Boom alone', () => {
+    const s = migrateState(old);
+    expect(s.transitions.entrance.level).toBe(25); // 5 -> 25
+    expect(s.transitions.drumReturn.level).toBe(50); // Boom unchanged
+    expect(s.transitions.entrance.beats).toBe(4); // other settings kept
+  });
+
+  it('never goes above 100', () => {
+    const s = migrateState({ transitions: { entrance: { on: true, shape: 0, color: 0, beats: 4, level: 60 } } });
+    expect(s.transitions.entrance.level).toBe(100);
+  });
+
+  it('does it only once: already-upgraded settings are left as they are', () => {
+    const once = migrateState(old);
+    const twice = migrateState(JSON.parse(JSON.stringify(once)));
+    expect(twice.transitions.entrance.level).toBe(25);
   });
 });

@@ -116,6 +116,7 @@ struct MidiBedTransitionSlot: Decodable {
 struct MidiBedTransitionConfig: Decodable {
   var minLeadBeats: Double  // a lead-in needs at least this long before the bar line, else its "downer" plays on the bar
   var entrance: MidiBedTransitionSlot   // when a scene starts
+  var drumBreak: MidiBedTransitionSlot  // as the drums drop out in a breakdown
   var drumReturn: MidiBedTransitionSlot // as the drums come back from a breakdown
 }
 
@@ -186,7 +187,7 @@ final class MidiBedEngine {
 
   private struct PendingNoise {
     var time: Double
-    var tag: Int // 0 scene entrance, 1 drum return
+    var tag: Int // 0 scene entrance, 1 drum return, 2 drum break
     var shape: Int
     var color: Int
     var pre: Double
@@ -699,15 +700,20 @@ final class MidiBedEngine {
         }
       }
     }
-    // Lookahead: on the FINAL bar of a drum breakdown, settle the chance roll for the
-    // coming return now (once), so a lead-in can rise into the kick on the downbeat.
-    if m.drums.baseBars > 0, drumRT.alt, drumRT.barsLeft == 1, drumRT.roll == nil {
+    // Lookahead: on the FINAL bar of a drum phase, settle the chance roll for the coming
+    // change now (once), so a lead-in can rise into it. At the end of the normal phase
+    // the change is a BREAK; at the end of a breakdown it is the RETURN (kick on the downbeat).
+    if m.drums.baseBars > 0, drumRT.barsLeft == 1, drumRT.roll == nil {
       let r = Double.random(in: 0..<1, using: &rng)
       drumRT.roll = r
       if r * 100 < m.drums.chance {
         let tickDur = 60.0 / (max(20.0, min(300.0, cfg.bpm)) * Double(ticksPerBeat))
         let barDur = tickDur * Double(ticksPerBeat * beatsPerBar)
-        scheduleTransition(cfg.transitions.drumReturn, tag: 1, barTime: time + barDur, cfg: cfg)
+        if drumRT.alt {
+          scheduleTransition(cfg.transitions.drumReturn, tag: 1, barTime: time + barDur, cfg: cfg)
+        } else {
+          scheduleTransition(cfg.transitions.drumBreak, tag: 2, barTime: time + barDur, cfg: cfg)
+        }
       }
     }
     if changed { emitMotion("flip") }

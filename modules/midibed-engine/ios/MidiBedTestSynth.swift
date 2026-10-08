@@ -345,12 +345,17 @@ final class MidiBedTestSynth {
   /// (columns: white, pink, brown). Measured offline so every combination comes out at a
   /// similar loudness: a low-passed white Thunder or a high-passed brown Crash would
   /// otherwise be nearly silent next to the pink versions.
+  ///
+  /// Version 2 scale: every noise shape is about five times quieter than it was, and the
+  /// Boom (mostly deep bass a phone barely reproduces) is unchanged, so at the same level
+  /// setting they now sit closer together in how loud they SEEM. Rusty was setting the
+  /// noise shapes to 5% and the Boom much higher.
   private let noiseGains: [Float] = [
-    2.3, 0.85, 2.3,
-    2.4, 1.2, 3.2,
-    8.0, 1.2, 2.5,
+    0.46, 0.17, 0.46,
+    0.48, 0.24, 0.64,
+    1.6, 0.24, 0.5,
     1.1, 1.1, 1.1,
-    3.5, 3.5, 10.0,
+    0.7, 0.7, 2.0,
   ]
 
   private func startNoise(_ c: NoiseCommand) {

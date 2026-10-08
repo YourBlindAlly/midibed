@@ -29,15 +29,38 @@ export type TransitionSlot = {
   level: number; // percent
 };
 
-/** Per scene: how it starts, and how the drums come back from a breakdown. */
+/**
+ * The sounds themselves are GLOBAL (set once, on the Sound tab): how a scene starts, how
+ * the drums break down, and how they come back. Each scene then only says whether it uses
+ * each one (see TransitionUse).
+ */
 export type TransitionsState = {
   entrance: TransitionSlot;
+  drumBreak: TransitionSlot;
   drumReturn: TransitionSlot;
 };
 
+/** Per scene: does this scene play each transition sound? (A sound also needs to be on globally.) */
+export type TransitionUse = {
+  entrance: boolean;
+  drumBreak: boolean;
+  drumReturn: boolean;
+};
+
+export const defaultTransitionUse: TransitionUse = { entrance: true, drumBreak: true, drumReturn: true };
+
+/**
+ * Version of the level scale. Version 2 made every noise shape about five times quieter
+ * than the Boom at the same level (the Boom is mostly deep bass a phone barely reproduces,
+ * so it needs a higher setting). Levels saved before version 2 are multiplied by 5, except
+ * the Boom, so nothing sounds different after the upgrade.
+ */
+export const NOISE_VERSION = 2;
+
 export const defaultTransitions: TransitionsState = {
-  entrance: { on: false, shape: 1, color: 1, beats: 4, level: 60 },
-  drumReturn: { on: false, shape: 1, color: 0, beats: 2, level: 60 },
+  entrance: { on: false, shape: 1, color: 1, beats: 8, level: 25 },
+  drumBreak: { on: true, shape: 3, color: 0, beats: 4, level: 50 },
+  drumReturn: { on: false, shape: 1, color: 0, beats: 8, level: 25 },
 };
 
 export function isLeadIn(shape: number): boolean {
