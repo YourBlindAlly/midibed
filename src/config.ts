@@ -1,4 +1,4 @@
-import { buildPadChords } from './chords';
+import { buildBassChords, buildPadChords } from './chords';
 import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice } from './profiles';
 
@@ -23,6 +23,8 @@ export type DroneState = {
   octave: boolean;
   velocity: number;
   retriggerBars: number;
+  /** Play the root of each chord of the harmony loop instead of staying on the key root. */
+  follow: boolean;
 };
 
 export type WandererState = {
@@ -67,17 +69,26 @@ export function removeFavorite(text: string, program: number): string {
     .join(',');
 }
 
-/** Looping chord pad built from the drone root + a mode (see src/chords.ts). */
-export type PadState = {
-  enabled: boolean;
-  channel: number;
-  velocity: number;
-  humanize: number; // percent
+/**
+ * The chord loop the pad and the bass can follow (see src/chords.ts). It runs
+ * whether or not anything is following it. Chords are built on the drone root.
+ */
+export type HarmonyState = {
   mode: number; // index into MODE_NAMES
   preset: number; // index into PRESETS (0 = custom)
   count: number; // chords in the loop, 1-4
   degrees: number[]; // 4 slots, scale degree 1-7 each; first `count` are used
   barsPerChord: number;
+};
+
+/** The sustained chord (or fifths) pad: how it sounds. What it plays comes from the harmony. */
+export type PadState = {
+  enabled: boolean;
+  channel: number;
+  velocity: number;
+  humanize: number; // percent
+  /** true = follows the chord loop; false = one steady chord on the key (a fifths drone with the 'Fifth only' type). */
+  follow: boolean;
   style: number; // index into STYLE_NAMES
   register: number; // lowest MIDI note of the pad's range
   spread: boolean;
@@ -130,6 +141,7 @@ export type BedState = {
   drone: DroneState;
   wanderers: WandererState[];
   loops: LoopsState;
+  harmony: HarmonyState;
   pad: PadState;
   fade: FadeState;
   sounds: SoundSlot[];
@@ -147,7 +159,8 @@ export type BedState = {
 export type SceneData = {
   swing: number;
   percussion: boolean;
-  drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars'>;
+  drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow'>;
+  harmony: HarmonyState;
   pad: Omit<PadState, 'channel'>;
   drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
   wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'speed' | 'smooth'>[];
@@ -156,7 +169,7 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -169,8 +182,10 @@ export function captureScene(s: SceneSource): SceneData {
       fifth: s.drone.fifth,
       velocity: s.drone.velocity,
       retriggerBars: s.drone.retriggerBars,
+      follow: s.drone.follow,
     },
-    pad: { ...pad, degrees: [...pad.degrees] },
+    harmony: { ...s.harmony, degrees: [...s.harmony.degrees] },
+    pad: { ...pad },
     drums: s.drums.map((d) => ({
       enabled: d.enabled,
       steps: d.steps,
@@ -198,7 +213,8 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     swing: sc.swing,
     percussion: sc.percussion,
     drone: { ...s.drone, ...sc.drone },
-    pad: { ...s.pad, ...sc.pad, degrees: [...sc.pad.degrees] },
+    harmony: { ...sc.harmony, degrees: [...sc.harmony.degrees] },
+    pad: { ...s.pad, ...sc.pad },
     drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
     wanderers: s.wanderers.map((w, i) => ({ ...w, ...sc.wanderers[i] })),
     loops: { ...s.loops, ...sc.loops },
@@ -252,6 +268,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
     octave: true,
     velocity: 75,
     retriggerBars: 0,
+    follow: false,
   },
   wanderers: [
     { name: 'Cutoff', enabled: true, cc: 74, channel: 0, min: 15, max: 105, speed: 4, smooth: 30 },
@@ -265,16 +282,19 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
     channel: 1,
     velocity: 60,
     humanize: 30,
-    mode: 1, // Dorian
-    preset: 5, // Folk turn
-    count: 4,
-    degrees: [1, 7, 4, 7],
-    barsPerChord: 2,
+    follow: true,
     style: 0,
     register: 55,
     spread: false,
     voiceLead: true,
     strumMs: 40,
+  },
+  harmony: {
+    mode: 1, // Dorian
+    preset: 5, // Folk turn
+    count: 4,
+    degrees: [1, 7, 4, 7],
+    barsPerChord: 2,
   },
   sounds: [
     { name: 'Drone synth', channel: 0, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '' },
@@ -298,12 +318,13 @@ function startingScenes(): SceneData[] {
     captureScene({
       ...b,
       drums: drumsWhere((n) => n === 'Shaker'),
-      pad: { ...b.pad, preset: 1, count: 1, barsPerChord: 4 },
+      harmony: { ...b.harmony, preset: 1, count: 1, barsPerChord: 4 },
     }),
     captureScene({
       ...b,
       drums: b.drums.map((d) => (d.name === 'Kick' ? { ...d, hits: 5 } : d.name === 'Hat' ? { ...d, hits: 9 } : d)),
-      pad: { ...b.pad, mode: 4, preset: 3, count: 2, degrees: [1, 4, 4, 7] },
+      drone: { ...b.drone, follow: true },
+      harmony: { ...b.harmony, mode: 4, preset: 3, count: 2, degrees: [1, 4, 4, 7] },
     }),
     captureScene({
       ...b,
@@ -330,16 +351,33 @@ export function drumNoteLabel(note: number): string {
   return gm ? `${note}, ${gm}` : `${note}, ${noteName(note)}`;
 }
 
+/**
+ * Pad note lists, one per chord of the harmony loop when following, or a single
+ * steady chord on the key (the tonic of the mode) when not.
+ */
 export function padChords(s: BedState): number[][] {
   return buildPadChords({
     root: s.drone.root,
-    mode: s.pad.mode,
-    degrees: s.pad.degrees,
-    count: s.pad.count,
+    mode: s.harmony.mode,
+    degrees: s.pad.follow ? s.harmony.degrees : [1],
+    count: s.pad.follow ? s.harmony.count : 1,
     style: s.pad.style,
     register: s.pad.register,
     spread: s.pad.spread,
     voiceLead: s.pad.voiceLead,
+  });
+}
+
+/** Bass note lists, one per chord of the harmony loop when following, or one steady list. */
+export function droneChords(s: BedState): number[][] {
+  return buildBassChords({
+    root: s.drone.root,
+    mode: s.harmony.mode,
+    degrees: s.harmony.degrees,
+    count: s.harmony.count,
+    follow: s.drone.follow,
+    octave: s.drone.octave,
+    fifth: s.drone.fifth,
   });
 }
 
@@ -372,7 +410,31 @@ export function mergeDefaults<T>(def: T, raw: unknown): T {
   return (typeof raw === typeof def && raw !== undefined && !(typeof raw === 'number' && !Number.isFinite(raw)) ? raw : def) as T;
 }
 
-export function migrateState(raw: unknown): BedState {
+// Chord-loop settings used to live inside the pad. Carry saved ones over to
+// `harmony` (live settings and every scene) before merging, or they would be lost.
+const HARMONY_KEYS = ['mode', 'preset', 'count', 'degrees', 'barsPerChord'];
+
+function liftHarmony(raw: unknown): unknown {
+  if (raw === null || typeof raw !== 'object') return raw;
+  const r = { ...(raw as Record<string, unknown>) };
+  const pad = r.pad;
+  if (r.harmony === undefined && pad !== null && typeof pad === 'object') {
+    const h: Record<string, unknown> = {};
+    for (const k of HARMONY_KEYS) {
+      const v = (pad as Record<string, unknown>)[k];
+      if (v !== undefined) h[k] = v;
+    }
+    if (Object.keys(h).length > 0) r.harmony = h;
+  }
+  return r;
+}
+
+export function migrateState(rawInput: unknown): BedState {
+  const lifted = liftHarmony(rawInput);
+  const raw =
+    lifted !== null && typeof lifted === 'object' && Array.isArray((lifted as Record<string, unknown>).scenes)
+      ? { ...(lifted as Record<string, unknown>), scenes: ((lifted as Record<string, unknown>).scenes as unknown[]).map(liftHarmony) }
+      : lifted;
   const merged = mergeDefaults(defaultState, raw);
   const active = Math.max(0, Math.min(merged.scenes.length - 1, Math.round(merged.activeScene)));
   // The live settings ARE the active scene; keep the stored copy in step with them.
@@ -414,7 +476,7 @@ export function toEngineJson(s: BedState): string {
     drone: {
       enabled: s.drone.enabled,
       channel: s.drone.channel,
-      notes: droneNotes(s.drone),
+      chords: droneChords(s),
       velocity: s.drone.velocity,
       retriggerBars: s.drone.retriggerBars,
     },
@@ -423,10 +485,10 @@ export function toEngineJson(s: BedState): string {
       channel: s.pad.channel,
       velocity: s.pad.velocity,
       humanize: s.pad.humanize / 100,
-      barsPerChord: s.pad.barsPerChord,
       strumMs: s.pad.strumMs,
       chords: padChords(s),
     },
+    harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
     fade: {
       cc: s.fade.cc,
       droneIn: s.fade.droneIn / 10,

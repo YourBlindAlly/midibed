@@ -40,7 +40,7 @@ describe('config', () => {
     expect(j.bpm).toBe(88);
     expect(j.swing).toBeCloseTo(0.15);
     expect(j.drums).toHaveLength(4);
-    expect(j.drone.notes).toEqual([38, 50, 45]);
+    expect(j.drone.chords).toEqual([[38, 50, 45]]);
     expect(j.wanderers[0].cc).toBe(74);
     expect(j.wanderers[0].smooth).toBeCloseTo(3);
   });

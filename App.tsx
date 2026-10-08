@@ -8,6 +8,7 @@ import {
   BedState,
   DrumState,
   FadeState,
+  HarmonyState,
   LoopsState,
   PadState,
   SCENE_COUNT,
@@ -17,6 +18,7 @@ import {
   copyScene,
   defaultState,
   drumNoteLabel,
+  droneChords,
   droneNotes,
   noteName,
   parseFavorites,
@@ -154,20 +156,24 @@ export default function App() {
       }, 200);
     }
   };
-  const patchPad =(p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
+  const patchPad = (p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
+  const patchHarmony = (p: Partial<HarmonyState>) => setState((s) => ({ ...s, harmony: { ...s.harmony, ...p } }));
   // Editing the chords by hand turns the preset label into "Custom".
   const setDegree = (i: number, v: number) =>
-    setState((s) => ({ ...s, pad: { ...s.pad, preset: 0, degrees: s.pad.degrees.map((d, k) => (k === i ? v : d)) } }));
+    setState((s) => ({
+      ...s,
+      harmony: { ...s.harmony, preset: 0, degrees: s.harmony.degrees.map((d, k) => (k === i ? v : d)) },
+    }));
   const choosePreset = (idx: number) =>
     setState((s) => {
       const pr = PRESETS[idx];
-      if (idx === 0 || !pr) return { ...s, pad: { ...s.pad, preset: 0 } };
-      const degrees = [0, 1, 2, 3].map((k) => pr.degrees[k] ?? s.pad.degrees[k]);
-      return { ...s, pad: { ...s.pad, preset: idx, degrees, count: pr.degrees.length } };
+      if (idx === 0 || !pr) return { ...s, harmony: { ...s.harmony, preset: 0 } };
+      const degrees = [0, 1, 2, 3].map((k) => pr.degrees[k] ?? s.harmony.degrees[k]);
+      return { ...s, harmony: { ...s.harmony, preset: idx, degrees, count: pr.degrees.length } };
     });
-  const padSummary = state.pad.degrees
-    .slice(0, state.pad.count)
-    .map((d) => chordLabel(state.drone.root, state.pad.mode, d, state.pad.style))
+  const harmonySummary = state.harmony.degrees
+    .slice(0, state.harmony.count)
+    .map((d) => chordLabel(state.drone.root, state.harmony.mode, d, 0))
     .join(', then ');
   const patchWanderer = (i: number, p: Partial<WandererState>) =>
     setState((s) => ({ ...s, wanderers: s.wanderers.map((w, k) => (k === i ? { ...w, ...p } : w)) }));
@@ -424,8 +430,19 @@ export default function App() {
               bigStep={12}
               format={noteName}
             />
+            <Toggle
+              label="Drone follows chords"
+              value={state.drone.follow}
+              onChange={(v) => patchDrone({ follow: v })}
+              hint="Off: the drone stays on the root note. On: it plays the root of each chord of the harmony, changing with the chords"
+            />
             <Toggle label="Add octave" value={state.drone.octave} onChange={(v) => patchDrone({ octave: v })} />
-            <Toggle label="Add fifth" value={state.drone.fifth} onChange={(v) => patchDrone({ fifth: v })} />
+            <Toggle
+              label="Add fifth"
+              value={state.drone.fifth}
+              onChange={(v) => patchDrone({ fifth: v })}
+              hint="For a root and fifth drone, turn this on and turn the octave off"
+            />
             <Stepper label="Drone velocity" value={state.drone.velocity} onChange={(v) => patchDrone({ velocity: v })} min={1} max={127} step={5} />
             <Stepper
               label="Retrigger every"
@@ -435,17 +452,25 @@ export default function App() {
               max={32}
               format={(v) => (v === 0 ? 'never' : `${v} bars`)}
             />
-            <Text style={styles.note} accessibilityLabel={`Drone plays ${droneNotes(state.drone).map(noteName).join(', ')}`}>
-              Plays {droneNotes(state.drone).map(noteName).join(' ')}
-            </Text>
+            {(() => {
+              const text = state.drone.follow
+                ? `Follows the chords: ${droneChords(state).map((c) => c.map(noteName).join(' ')).join(', then ')}`
+                : `Plays ${droneNotes(state.drone).map(noteName).join(' ')}`;
+              return (
+                <Text style={styles.note} accessibilityLabel={text}>
+                  {text}
+                </Text>
+              );
+            })()}
           </Section>
 
-          <Section title="Chord pad">
-            <Toggle label="Chord pad" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
-            <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the chords play on. Use the drone channel to play both with one sound" />
+          <Section title="Harmony">
+            <Text style={styles.note}>
+              The chord loop. The chord pad and the bass drone can follow it. Chords are built on the drone root note, in the mode you choose. The loop keeps time even if nothing is following it.
+            </Text>
             <Stepper
               label="Progression preset"
-              value={state.pad.preset}
+              value={state.harmony.preset}
               onChange={choosePreset}
               min={0}
               max={PRESETS.length - 1}
@@ -454,15 +479,15 @@ export default function App() {
             />
             <Stepper
               label="Mode"
-              value={state.pad.mode}
-              onChange={(v) => patchPad({ mode: v })}
+              value={state.harmony.mode}
+              onChange={(v) => patchHarmony({ mode: v })}
               min={0}
               max={MODE_NAMES.length - 1}
               format={(v) => MODE_NAMES[v]}
               hint="The scale the chords come from, built on the drone root note."
             />
-            <Stepper label="Chords in loop" value={state.pad.count} onChange={(v) => patchPad({ count: v, preset: 0 })} min={1} max={4} />
-            {state.pad.degrees.slice(0, state.pad.count).map((d, i) => (
+            <Stepper label="Chords in loop" value={state.harmony.count} onChange={(v) => patchHarmony({ count: v, preset: 0 })} min={1} max={4} />
+            {state.harmony.degrees.slice(0, state.harmony.count).map((d, i) => (
               <Stepper
                 key={i}
                 label={`Chord ${i + 1} scale degree`}
@@ -470,21 +495,32 @@ export default function App() {
                 onChange={(v) => setDegree(i, v)}
                 min={1}
                 max={7}
-                format={(v) => `${v}, ${chordLabel(state.drone.root, state.pad.mode, v, state.pad.style)}`}
+                format={(v) => `${v}, ${chordLabel(state.drone.root, state.harmony.mode, v, 0)}`}
               />
             ))}
-            <View accessible accessibilityLabel="Chord loop" accessibilityValue={{ text: `${padSummary}, ${state.pad.barsPerChord} bars each` }}>
-              <Text style={styles.note}>{padSummary}</Text>
+            <View accessible accessibilityLabel="Chord loop" accessibilityValue={{ text: `${harmonySummary}, ${state.harmony.barsPerChord} bars each` }}>
+              <Text style={styles.note}>{harmonySummary}</Text>
             </View>
             <Stepper
               label="Bars per chord"
-              value={state.pad.barsPerChord}
-              onChange={(v) => patchPad({ barsPerChord: v })}
+              value={state.harmony.barsPerChord}
+              onChange={(v) => patchHarmony({ barsPerChord: v })}
               min={1}
               max={8}
               format={(v) => (v === 1 ? '1 bar' : `${v} bars`)}
             />
-            <Stepper label="Chord type" value={state.pad.style} onChange={(v) => patchPad({ style: v })} min={0} max={STYLE_NAMES.length - 1} format={(v) => STYLE_NAMES[v]} />
+          </Section>
+
+          <Section title="Chord pad">
+            <Toggle label="Chord pad" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
+            <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the chords play on. Use the drone channel to play both with one sound" />
+            <Toggle
+              label="Pad follows chords"
+              value={state.pad.follow}
+              onChange={(v) => patchPad({ follow: v })}
+              hint="On: plays each chord of the harmony in turn. Off: one steady chord on the key. With the Fifth only chord type, that is a fifths drone"
+            />
+            <Stepper label="Chord type" value={state.pad.style} onChange={(v) => patchPad({ style: v })} min={0} max={STYLE_NAMES.length - 1} format={(v) => STYLE_NAMES[v]} hint="Fifth only plays just the root and the fifth" />
             <Stepper label="Lowest pad note" value={state.pad.register} onChange={(v) => patchPad({ register: v })} min={36} max={72} bigStep={12} format={noteName} hint="Where the pad sits. The drone stays low." />
             <Toggle label="Smooth voice leading" value={state.pad.voiceLead} onChange={(v) => patchPad({ voiceLead: v })} hint="Each chord moves as little as possible from the last one" />
             <Toggle label="Open spread voicing" value={state.pad.spread} onChange={(v) => patchPad({ spread: v })} hint="Lifts the second note an octave. With smooth voice leading it applies to the first chord only" />

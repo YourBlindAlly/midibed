@@ -6,6 +6,9 @@ move an item to CLAUDE.md's status log when it is built.
 
 ## Rusty's ideas
 
+### STATUS 2026-10-08: items 1 and 2 are BUILT (Harmony layer, "Drone follows chords", "Pad follows chords",
+### "Fifth only" chord type). Untested on a device until Rusty tries the build. See CLAUDE.md round 12.
+
 ### 1. Bass drone follows the chords (on/off)
 Root sets the key. With "Drone follows chords" on, the bass plays the root of each chord instead of
 staying on the key root.
@@ -18,7 +21,10 @@ staying on the key root.
 - Scenes: "follows chords" should be scene-owned. The key root stays global.
 
 ### 2. Fifths drone (root + fifth only)
-- ALREADY POSSIBLE today: turn "Add octave" off and leave "Add fifth" on. That plays root plus fifth.
+- CLARIFIED by Rusty: he meant a fifths PAD in a HIGHER register than the bass, taking the place of the chord
+  pad, on the same sound engine as the pad. Two modes: a steady droning fifth, or following the harmony.
+  Built as: pad chord type "Fifth only" + "Pad follows chords" on/off (off = steady tonic fifth).
+- The BASS can also do root + fifth already: turn "Add octave" off and leave "Add fifth" on.
 - Improvements worth doing: one "Drone voicing" choice (root only, root+octave, root+fifth,
   root+fifth+octave, root+fourth for a suspended feel) instead of two separate switches.
 - Not a separate sound engine. It is just which notes are sent. But it could OPTIONALLY go to its own
@@ -47,6 +53,17 @@ A control you flick up/down to move to the next one. Each has a name. Possibly o
   Avoids licensing and keeps the app small. Optionally bundle a few public-domain/CC0 loops later.
 - Alternative: a dedicated ambience app driven by MidiBed's loops layer (start/stop/choose). Works today
   with the right app, but one player inside MidiBed gives better scene control.
+
+### 4b. Transitional sounds (Rusty's idea, 2026-10-08)
+Short clips, played by the same sample engine, tied to scene changes: e.g. an ocean-drum swell that starts a
+beat or two BEFORE the change and lands on it, or a short sound that fades the old scene out within a beat
+or two as the change happens.
+- Needs lead time. The engine already knows exactly when a queued change will land (the next bar line), and
+  for auto-advance (item 5) it knows far ahead, so that case is easy.
+- Manual switch: if fewer beats remain before the next bar line than the clip's lead (say a 2-beat swell
+  pressed on beat 4), defer the switch to the bar after, so the swell still has room. Make that a visible rule.
+- Per scene (or per song): "transition in" clip, lead in beats, level; a "transition out" clip for fades.
+- The ambience layer's own fade could also be used as the "fade out within a beat or two" transition.
 
 ### 5. Repeat a scene, or auto-advance after N repeats
 - Per scene: "repeat N times, then go to": next scene / a chosen scene / random of a few / stay (hold).

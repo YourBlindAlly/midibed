@@ -16,7 +16,8 @@ export const MODE_INTERVALS: number[][] = [
   [0, 1, 3, 5, 6, 8, 10],
 ];
 
-export const STYLE_NAMES = ['Triad', 'Sus 2', 'Sus 4', 'Add 9', 'Seventh', 'Open fifth'];
+// New chord types go at the END so a saved style number keeps its meaning.
+export const STYLE_NAMES = ['Triad', 'Sus 2', 'Sus 4', 'Add 9', 'Seventh', 'Open fifth', 'Fifth only'];
 
 /** Scale-step offsets from the chord's degree for each chord type. */
 const STYLE_STEPS: number[][] = [
@@ -26,6 +27,7 @@ const STYLE_STEPS: number[][] = [
   [0, 2, 4, 8],
   [0, 2, 4, 6],
   [0, 4, 7],
+  [0, 4],
 ];
 
 export type ChordPreset = { name: string; degrees: number[] };
@@ -68,6 +70,7 @@ export function chordLabel(root: number, mode: number, degree: number, style: nu
   const stack = chordStack(root, mode, degree, style);
   const name = pitchClassName(stack[0]);
   if (style === 5) return `${name} open fifth`;
+  if (style === 6) return `${name} and ${pitchClassName(stack[1])}`;
   if (style === 1) return `${name} sus 2`;
   if (style === 2) return `${name} sus 4`;
   const t = stack[1] - stack[0];
@@ -177,4 +180,35 @@ export function buildPadChords(p: PadChordParams): number[][] {
     }
   });
   return out;
+}
+
+export type BassChordParams = {
+  root: number; // the key's drone root (MIDI)
+  mode: number;
+  degrees: number[];
+  count: number;
+  follow: boolean; // false = stay on the key root; true = the root of each chord
+  octave: boolean;
+  fifth: boolean;
+};
+
+/**
+ * Bass note lists, one per chord of the loop (or a single list when not
+ * following). Following: each chord's root is folded into [root - 5, root + 6]
+ * so the bass stays in the drone's register instead of leaping up a seventh.
+ * The fifth follows the chord (a diminished chord gets a diminished fifth);
+ * a steady drone always uses a perfect fifth, as it always has.
+ */
+export function buildBassChords(p: BassChordParams): number[][] {
+  const count = Math.max(1, Math.min(4, p.count));
+  const degrees = p.follow ? p.degrees.slice(0, count) : [1];
+  return degrees.map((d) => {
+    const stack = chordStack(p.root, p.mode, d, 0);
+    const folded = p.root + ((((stack[0] - p.root + 5) % 12) + 12) % 12) - 5;
+    const base = p.follow ? folded : p.root;
+    const notes = [base];
+    if (p.octave) notes.push(base + 12);
+    if (p.fifth) notes.push(base + (p.follow ? stack[2] - stack[0] : 7));
+    return notes;
+  });
 }

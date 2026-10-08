@@ -19,7 +19,7 @@ struct MidiBedDrumConfig: Decodable {
 struct MidiBedDroneConfig: Decodable {
   var enabled: Bool
   var channel: Int
-  var notes: [Int]
+  var chords: [[Int]]       // MIDI notes per chord; one entry = a steady drone
   var velocity: Int
   var retriggerBars: Int    // 0 = hold until stopped
 }
@@ -39,9 +39,15 @@ struct MidiBedPadConfig: Decodable {
   var channel: Int
   var velocity: Int
   var humanize: Double      // 0...1 random velocity wobble
-  var barsPerChord: Int
   var strumMs: Double       // spread between chord-tone onsets, ascending
-  var chords: [[Int]]       // MIDI notes per chord, computed on the JS side
+  var chords: [[Int]]       // MIDI notes per chord (one entry = a steady chord), computed on the JS side
+}
+
+/// The chord loop's timing. What each layer plays comes from its own `chords`
+/// list, indexed by the chord the loop is on (modulo that list's length).
+struct MidiBedHarmonyConfig: Decodable {
+  var barsPerChord: Int
+  var count: Int
 }
 
 /// Fades when a layer is switched on or off (and when Play is pressed).
@@ -78,6 +84,7 @@ struct MidiBedConfig: Decodable {
   var clock: Bool           // send MIDI clock plus Start/Stop while playing
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
+  var harmony: MidiBedHarmonyConfig
   var pad: MidiBedPadConfig
   var loops: MidiBedLoopsConfig
   var fade: MidiBedFadeConfig
@@ -135,7 +142,8 @@ final class MidiBedEngine {
   }
   private var heldDrone: [HeldNote] = []
   private var heldPad: [HeldNote] = []
-  private var padChordIndex = 0
+  /// Which chord of the harmony loop we are on.
+  private var chordIndex = 0
 
   // Fade state: 0...1 per layer. Drone/pad levels go out as CC on their channel
   // (squared, for a more natural volume taper); drum levels scale velocity.
@@ -215,6 +223,7 @@ final class MidiBedEngine {
       self.running = true
       self.tickIndex = 0
       self.padStartTick = 0
+      self.chordIndex = 0
       self.pendingConfig = nil
       self.loopsPlaying = false
       self.lastLoopSelect = []
@@ -319,8 +328,11 @@ final class MidiBedEngine {
       // loop restarts from its first chord there.
       if tickIndex % barTicks == 0, let p = pendingConfig {
         pendingConfig = nil
-        install(p, atBar: true)
+        // Restart the chord loop first, so installing the new settings starts the
+        // drone on chord 1 straight away instead of on the old position.
+        chordIndex = 0
         padStartTick = tickIndex
+        install(p, atBar: true)
       }
       guard let current = config else { break }
       processTick(tickIndex, at: nextTickTime, tickDur: tickDur, cfg: current)
@@ -355,24 +367,28 @@ final class MidiBedEngine {
     }
     if tick == 0 { startLoops(cfg, at: time) }
 
+    // Harmony: the chord loop changes chord every `barsPerChord` bars (counted from
+    // the last scene switch). The pad and a following bass both change then.
+    // Common tones are left sounding, never retriggered, so changes glide. Nothing
+    // here is rhythmic: these are sustained notes.
+    let chordTicks = barTicks * max(1, cfg.harmony.barsPerChord)
+    let rel = tick - padStartTick
+    if rel >= 0, rel % chordTicks == 0 {
+      chordIndex = (rel / chordTicks) % max(1, cfg.harmony.count)
+      if cfg.pad.enabled, !cfg.pad.chords.isEmpty {
+        playPad(cfg.pad.chords[chordIndex % cfg.pad.chords.count], pad: cfg.pad, at: time, retrigger: false)
+      }
+      if cfg.drone.enabled, cfg.drone.chords.count > 1, !heldDrone.isEmpty {
+        reconcileDrone(keepLevel: true)
+      }
+    }
+
     // Drone retrigger (keeps the current fade level, so it does not fade in again).
     if cfg.drone.enabled, cfg.drone.retriggerBars > 0, tick > 0,
       tick % (barTicks * cfg.drone.retriggerBars) == 0
     {
       releaseDrone()
       reconcileDrone(keepLevel: true)
-    }
-
-    // Chord pad: change chord every `barsPerChord` bars (counted from the last
-    // scene switch). Common tones between chords are left sounding, never
-    // retriggered, so changes glide. The pad is sustained, with no rhythm.
-    if cfg.pad.enabled, !cfg.pad.chords.isEmpty {
-      let chordTicks = barTicks * max(1, cfg.pad.barsPerChord)
-      let rel = tick - padStartTick
-      if rel >= 0, rel % chordTicks == 0 {
-        padChordIndex = (rel / chordTicks) % cfg.pad.chords.count
-        playPad(cfg.pad.chords[padChordIndex], pad: cfg.pad, at: time, retrigger: false)
-      }
     }
 
     guard tick % ticksPerStep == 0 else { return }
@@ -521,7 +537,8 @@ final class MidiBedEngine {
       return
     }
 
-    let wanted = d.notes.map { HeldNote(channel: ch, note: max(0, min(127, $0))) }
+    let notes = d.chords.isEmpty ? [] : d.chords[chordIndex % d.chords.count]
+    let wanted = notes.map { HeldNote(channel: ch, note: max(0, min(127, $0))) }
     let vel = UInt8(max(1, min(127, d.velocity)))
     let startingFromSilence = heldDrone.isEmpty
     let toRelease = heldDrone.filter { !wanted.contains($0) }
@@ -658,7 +675,7 @@ final class MidiBedEngine {
         padLevel = 0
       }
     } else if heldPad.isEmpty, !cfg.pad.chords.isEmpty {
-      playPad(cfg.pad.chords[padChordIndex % cfg.pad.chords.count], pad: cfg.pad, at: ProcessInfo.processInfo.systemUptime, retrigger: false)
+      playPad(cfg.pad.chords[chordIndex % cfg.pad.chords.count], pad: cfg.pad, at: ProcessInfo.processInfo.systemUptime, retrigger: false)
     }
   }
 

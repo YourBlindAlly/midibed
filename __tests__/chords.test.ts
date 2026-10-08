@@ -68,7 +68,7 @@ describe('modal chords (drone root D = 38)', () => {
   it('follows the drone root and sends chords to the engine', () => {
     const j = JSON.parse(toEngineJson(defaultState));
     expect(j.pad.chords).toHaveLength(4);
-    expect(j.pad.barsPerChord).toBe(2);
+    expect(j.harmony.barsPerChord).toBe(2);
     const moved = JSON.parse(toEngineJson({ ...defaultState, drone: { ...defaultState.drone, root: 40 } }));
     expect(pcs(moved.pad.chords[0])).toEqual([4, 7, 11]); // E minor over an E drone
   });
@@ -76,7 +76,7 @@ describe('modal chords (drone root D = 38)', () => {
   it('adds the pad to old saved settings without losing them', () => {
     const s = migrateState({ bpm: 120 });
     expect(s.bpm).toBe(120);
-    expect(s.pad.degrees).toEqual([1, 7, 4, 7]);
-    expect(s.pad.mode).toBe(1);
+    expect(s.harmony.degrees).toEqual([1, 7, 4, 7]);
+    expect(s.harmony.mode).toBe(1);
   });
 });
