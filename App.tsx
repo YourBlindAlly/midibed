@@ -21,6 +21,7 @@ import {
   droneChords,
   droneNotes,
   noteName,
+  padIsSteadyFifths,
   parseFavorites,
   removeFavorite,
   switchScene,
@@ -29,7 +30,8 @@ import {
 import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel } from './src/chords';
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
-import { engine, hasNativeEngine, onBeat, testSweep } from './src/engine';
+import { engine, hasNativeEngine, onBeat, onMotion, testSweep } from './src/engine';
+import { BREAKDOWN_NAMES, MotionNow, MotionRule, DrumBreakdown, describeMotion } from './src/motion';
 import { PROFILES, ProfileRole, ccName, getProfile, profileForChannel, profileIndex, profileNoteName, stepDrumNote } from './src/profiles';
 import { loadState, saveState } from './src/storage';
 import { Pager } from './src/Pager';
@@ -48,6 +50,7 @@ function announceLater(message: string, delay = 400) {
   }, delay);
 }
 const channelText = (v: number) => String(v + 1);
+const barsText = (v: number) => (v === 0 ? 'off' : v === 1 ? '1 bar' : `${v} bars`);
 const fadeText = (v: number) => (v === 0 ? 'none' : `${(v / 10).toFixed(1)} seconds`);
 
 export default function App() {
@@ -60,6 +63,9 @@ export default function App() {
   const queueNextApply = useRef(false);
   const [queuedScene, setQueuedScene] = useState<number | null>(null);
   const [copyTarget, setCopyTarget] = useState(2);
+  // Which layers are currently in their alternate state (reported by the engine).
+  const [motionNow, setMotionNow] = useState<MotionNow>({ bass: false, pad: false, drums: false });
+  const motionRef = useRef<MotionNow>({ bass: false, pad: false, drums: false });
 
   // Load saved settings once. Saving is held back until this finishes so the
   // defaults can never overwrite what is stored.
@@ -83,6 +89,27 @@ export default function App() {
     engine.applyConfig(json, queueNextApply.current);
     queueNextApply.current = false;
   }, [json]);
+
+  // Always-current copy of the settings for event handlers that outlive a render.
+  const latest = useRef(state);
+  latest.current = state;
+
+  useEffect(() => {
+    return onMotion((e) => {
+      const now = { bass: e.bass, pad: e.pad, drums: e.drums };
+      const prev = motionRef.current;
+      motionRef.current = now;
+      setMotionNow(now);
+      const st = latest.current;
+      if (e.reason !== 'flip' || !st.announce) return;
+      const words = describeMotion(now, { bassFollows: st.drone.follow, padSteadyFifths: padIsSteadyFifths(st.pad) }, st.motion.drums.style);
+      const parts: string[] = [];
+      if (now.bass !== prev.bass) parts.push(words.bass);
+      if (now.pad !== prev.pad) parts.push(words.pad);
+      if (now.drums !== prev.drums) parts.push(words.drums);
+      if (parts.length > 0) announceLater(parts.join('. '), 100);
+    });
+  }, []);
 
   useEffect(() => {
     return onBeat(({ bar, beat }) => {
@@ -109,6 +136,8 @@ export default function App() {
       engine.stop();
       setPlaying(false);
       setPosition('1.1');
+      motionRef.current = { bass: false, pad: false, drums: false };
+      setMotionNow(motionRef.current);
     } else {
       engine.applyConfig(json);
       engine.start();
@@ -187,6 +216,10 @@ export default function App() {
     }
   };
   const patchPad = (p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
+  const patchMotionRule = (layer: 'bass' | 'pad', p: Partial<MotionRule>) =>
+    setState((s) => ({ ...s, motion: { ...s.motion, [layer]: { ...s.motion[layer], ...p } } }));
+  const patchBreakdown = (p: Partial<DrumBreakdown>) =>
+    setState((s) => ({ ...s, motion: { ...s.motion, drums: { ...s.motion.drums, ...p } } }));
   const patchHarmony = (p: Partial<HarmonyState>) => setState((s) => ({ ...s, harmony: { ...s.harmony, ...p } }));
   // Editing the chords by hand turns the preset label into "Custom".
   const setDegree = (i: number, v: number) =>
@@ -201,6 +234,19 @@ export default function App() {
       const degrees = [0, 1, 2, 3].map((k) => pr.degrees[k] ?? s.harmony.degrees[k]);
       return { ...s, harmony: { ...s.harmony, preset: idx, degrees, count: pr.degrees.length } };
     });
+  const motionWords = describeMotion(
+    motionNow,
+    { bassFollows: state.drone.follow, padSteadyFifths: padIsSteadyFifths(state.pad) },
+    state.motion.drums.style,
+  );
+  const motionSummary =
+    [
+      state.motion.bass.baseBars > 0 ? motionWords.bass : '',
+      state.motion.pad.baseBars > 0 ? motionWords.pad : '',
+      state.motion.drums.baseBars > 0 ? motionWords.drums : '',
+    ]
+      .filter(Boolean)
+      .join('. ') || 'Nothing in this scene is set to change by itself';
   const harmonySummary = state.harmony.degrees
     .slice(0, state.harmony.count)
     .map((d) => chordLabel(state.drone.root, state.harmony.mode, d, 0))
@@ -294,6 +340,67 @@ export default function App() {
               hint="Turns all the drums on or off together. Each drum keeps its own setting"
             />
             <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
+          </Section>
+
+          <Section title="Breathing">
+            <Text style={styles.note}>
+              Lets a scene change by itself, counted in bars from the start of the scene. A layer keeps its normal setting for a while, then flips to the other for a while, then back. The chords and the key never change. A scene always starts in its normal state.
+            </Text>
+            <View accessible accessibilityLabel="Right now" accessibilityValue={{ text: motionSummary }}>
+              <Text style={styles.note}>{motionSummary}</Text>
+            </View>
+
+            <Stepper
+              label="Bass: stay normal for"
+              value={state.motion.bass.baseBars}
+              onChange={(v) => patchMotionRule('bass', { baseBars: v })}
+              min={0}
+              max={64}
+              bigStep={4}
+              format={barsText}
+              hint="How long the bass keeps its normal setting, following the chords or not. Then it switches to the other. Off means it never changes."
+            />
+            {state.motion.bass.baseBars > 0 && (
+              <>
+                <Stepper label="Bass: then switch for" value={state.motion.bass.altBars} onChange={(v) => patchMotionRule('bass', { altBars: v })} min={1} max={64} bigStep={4} format={barsText} />
+                <Stepper label="Bass: chance of switching" value={state.motion.bass.chance} onChange={(v) => patchMotionRule('bass', { chance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} hint="At 100 it always switches on time. Lower, and sometimes it stays as it is for another round." />
+              </>
+            )}
+
+            <Stepper
+              label="Pad: stay normal for"
+              value={state.motion.pad.baseBars}
+              onChange={(v) => patchMotionRule('pad', { baseBars: v })}
+              min={0}
+              max={64}
+              bigStep={4}
+              format={barsText}
+              hint="How long the pad keeps its normal setting. Then it switches to a steady fifths drone, and back. Off means it never changes."
+            />
+            {state.motion.pad.baseBars > 0 && (
+              <>
+                <Stepper label="Pad: then fifths for" value={state.motion.pad.altBars} onChange={(v) => patchMotionRule('pad', { altBars: v })} min={1} max={64} bigStep={4} format={barsText} />
+                <Stepper label="Pad: chance of switching" value={state.motion.pad.chance} onChange={(v) => patchMotionRule('pad', { chance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} />
+              </>
+            )}
+
+            <Stepper
+              label="Drums: play for"
+              value={state.motion.drums.baseBars}
+              onChange={(v) => patchBreakdown({ baseBars: v })}
+              min={0}
+              max={64}
+              bigStep={4}
+              format={barsText}
+              hint="How long the drums play normally before a breakdown. Off means no breakdowns."
+            />
+            {state.motion.drums.baseBars > 0 && (
+              <>
+                <Stepper label="Drums: then break down for" value={state.motion.drums.breakBars} onChange={(v) => patchBreakdown({ breakBars: v })} min={1} max={32} format={barsText} />
+                <Stepper label="Drums: chance of breaking down" value={state.motion.drums.chance} onChange={(v) => patchBreakdown({ chance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} />
+                <Stepper label="Breakdown style" value={state.motion.drums.style} onChange={(v) => patchBreakdown({ style: v })} min={0} max={BREAKDOWN_NAMES.length - 1} format={(v) => BREAKDOWN_NAMES[v]} hint="Full takes every drum out. Light takes out the kick and snare. Kick only leaves just the kick. The drums ease out and back in using the drum fade times." />
+              </>
+            )}
           </Section>
 
           <Section title="Tempo and swing">
@@ -695,6 +802,7 @@ export default function App() {
           {tab === 'setup' && (
             <>
           <Section title="Output">
+            <Toggle label="Announce breathing changes" value={state.announce} onChange={(v) => patch({ announce: v })} hint="Speaks a short message when a bass, pad or drum change happens by itself" />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
             <Toggle label="Send MIDI clock and start" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo and start with Play" />
             <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />

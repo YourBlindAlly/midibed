@@ -50,7 +50,7 @@ describe('whole screen smoke test', () => {
     expect(labels(tree)).toEqual(expect.arrayContaining(['Play', 'Scene 1', 'Scene 4']));
 
     // Live
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Bass drone layer', 'Percussion layer', 'Tempo', 'Swing']));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Bass drone layer', 'Percussion layer', 'Tempo', 'Swing', 'Bass: stay normal for', 'Pad: stay normal for', 'Drums: play for', 'Right now']));
     expect(labels(tree)).not.toContain('Progression preset');
 
     await tabPress('Harmony');
@@ -65,7 +65,7 @@ describe('whole screen smoke test', () => {
     expect(labels(tree)).toEqual(expect.arrayContaining(['Cutoff wander', 'Bass drone fade in', 'Chord pad program']));
 
     await tabPress('Setup');
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Send MIDI', 'Built-in test sound', 'Drums app profile']));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Send MIDI', 'Built-in test sound', 'Announce breathing changes', 'Drums app profile']));
 
     // The strip is still there on every tab.
     expect(labels(tree)).toEqual(expect.arrayContaining(['Play', 'Scene 2']));

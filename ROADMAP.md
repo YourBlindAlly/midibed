@@ -70,7 +70,7 @@ or two as the change happens.
 - Per scene (or per song): "transition in" clip, lead in beats, level; a "transition out" clip for fades.
 - The ambience layer's own fade could also be used as the "fade out within a beat or two" transition.
 
-### 5a. Scene "breathing": automatic variations (Rusty's design, 2026-10-08; REPLACES the earlier overlay idea)
+### 5a. BUILT 2026-10-08 (round 17), awaiting device test. Scene "breathing": automatic variations (Rusty's design)
 After hearing "bass follows chords" and the fifths pad, Rusty likes the subtle or not so subtle shifts and wants
 a scene to make them by itself. His design: independent per-layer rules, counted in bars from the start of the
 scene.
@@ -94,6 +94,14 @@ Claude's refinements (to confirm with Rusty):
 - Small enough to build BEFORE the full auto-advance plan (item 5); they will share the bar counter.
 - Open questions: what exactly the pad flips (follows on/off, full chords vs fifths, or both); uneven lengths
   wanted or not; breakdown styles wanted; announce changes or only show them.
+
+### 4c. Fills (Rusty, 2026-10-08)
+A fill option, probably just the sample player told to play a particular sample as a fill or transition
+before, during or after the 4th, 8th (or any) bar. Ties together with scene breathing and 4b:
+- Trigger points: a bar number counted from the scene start, "every N bars", or "when a breakdown ends".
+- Timing: before (lead-in that ends exactly on the bar line), during, or after the bar.
+- Samples: imported by Rusty (the same import mechanism as the ambience player).
+- Natural first uses: a fill as the drums return from a breakdown, a swell before a scene change.
 
 ### 5. Repeat a scene, or auto-advance after N repeats
 - Per scene: "repeat N times, then go to": next scene / a chosen scene / random of a few / stay (hold).

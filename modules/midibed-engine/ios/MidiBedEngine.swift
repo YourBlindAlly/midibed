@@ -6,6 +6,7 @@ import AVFoundation
 
 struct MidiBedDrumConfig: Decodable {
   var enabled: Bool
+  var role: String          // "kick", "snare" or "other" (which drums a breakdown silences)
   var note: Int
   var channel: Int
   var steps: Int
@@ -20,6 +21,7 @@ struct MidiBedDroneConfig: Decodable {
   var enabled: Bool
   var channel: Int
   var chords: [[Int]]       // MIDI notes per chord; one entry = a steady drone
+  var altChords: [[Int]]    // the same bass the other way round (follow <-> steady), for breathing
   var velocity: Int
   var retriggerBars: Int    // 0 = hold until stopped
 }
@@ -41,6 +43,7 @@ struct MidiBedPadConfig: Decodable {
   var humanize: Double      // 0...1 random velocity wobble
   var strumMs: Double       // spread between chord-tone onsets, ascending
   var chords: [[Int]]       // MIDI notes per chord (one entry = a steady chord), computed on the JS side
+  var altChords: [[Int]]    // what the pad flips to (a steady fifths drone), for breathing
 }
 
 /// The chord loop's timing. What each layer plays comes from its own `chords`
@@ -76,6 +79,28 @@ struct MidiBedLoopsConfig: Decodable {
   var stopCC: Int           // 0 = use startCC
 }
 
+/// "Breathing": a layer stays in its normal state for baseBars, then (with
+/// probability chance, percent) flips to its alternate for altBars, and so on,
+/// counted in bars from the start of the scene. baseBars 0 = off.
+struct MidiBedMotionRule: Decodable {
+  var baseBars: Int
+  var altBars: Int
+  var chance: Double
+}
+
+struct MidiBedBreakdown: Decodable {
+  var baseBars: Int         // bars of normal drums; 0 = off
+  var breakBars: Int
+  var chance: Double
+  var style: Int            // 0 all drums out, 1 kick and snare out, 2 everything but the kick out
+}
+
+struct MidiBedMotionConfig: Decodable {
+  var bass: MidiBedMotionRule
+  var pad: MidiBedMotionRule
+  var drums: MidiBedBreakdown
+}
+
 struct MidiBedConfig: Decodable {
   var bpm: Double
   var swing: Double         // 0...1, delays every other 16th
@@ -85,6 +110,7 @@ struct MidiBedConfig: Decodable {
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
   var harmony: MidiBedHarmonyConfig
+  var motion: MidiBedMotionConfig
   var pad: MidiBedPadConfig
   var loops: MidiBedLoopsConfig
   var fade: MidiBedFadeConfig
@@ -115,6 +141,9 @@ final class MidiBedEngine {
   /// Called on the main queue once per beat with (bar, beat), both 1-based.
   var onBeat: ((Int, Int) -> Void)?
 
+  /// Called on the main queue when a breathing rule changes (or restarts with a scene).
+  var onMotion: (([String: Any?]) -> Void)?
+
   // Control state (queue-only).
   private var config: MidiBedConfig?
   /// A scene switch waiting for the next bar line. While set, further settings
@@ -144,6 +173,15 @@ final class MidiBedEngine {
   private var heldPad: [HeldNote] = []
   /// Which chord of the harmony loop we are on.
   private var chordIndex = 0
+
+  // Breathing state: alt = the layer is currently in its alternate state.
+  private struct RuleRuntime {
+    var alt = false
+    var barsLeft = 0
+  }
+  private var bassRT = RuleRuntime()
+  private var padRT = RuleRuntime()
+  private var drumRT = RuleRuntime()
 
   // Fade state: 0...1 per layer. Drone/pad levels go out as CC on their channel
   // (squared, for a more natural volume taper); drum levels scale velocity.
@@ -233,6 +271,7 @@ final class MidiBedEngine {
       self.channelLastCC.removeAll()
       self.initDrumLevels()
       self.syncWanderers()
+      if let c = self.config { self.resetMotion(c) }
       self.reconcileDrone()
       let t = DispatchSource.makeTimerSource(flags: .strict, queue: self.queue)
       t.schedule(deadline: .now(), repeating: .milliseconds(2), leeway: .microseconds(200))
@@ -332,6 +371,7 @@ final class MidiBedEngine {
         // drone on chord 1 straight away instead of on the old position.
         chordIndex = 0
         padStartTick = tickIndex
+        resetMotion(p)
         install(p, atBar: true)
       }
       guard let current = config else { break }
@@ -367,6 +407,10 @@ final class MidiBedEngine {
     }
     if tick == 0 { startLoops(cfg, at: time) }
 
+    // Breathing: at every bar line after the scene's first, step each rule.
+    let sceneTick = tick - padStartTick
+    if sceneTick > 0, sceneTick % barTicks == 0 { stepMotion(at: time, cfg: cfg) }
+
     // Harmony: the chord loop changes chord every `barsPerChord` bars (counted from
     // the last scene switch). The pad and a following bass both change then.
     // Common tones are left sounding, never retriggered, so changes glide. Nothing
@@ -375,10 +419,11 @@ final class MidiBedEngine {
     let rel = tick - padStartTick
     if rel >= 0, rel % chordTicks == 0 {
       chordIndex = (rel / chordTicks) % max(1, cfg.harmony.count)
-      if cfg.pad.enabled, !cfg.pad.chords.isEmpty {
-        playPad(cfg.pad.chords[chordIndex % cfg.pad.chords.count], pad: cfg.pad, at: time, retrigger: false)
+      let padList = activePadChords(cfg)
+      if cfg.pad.enabled, !padList.isEmpty {
+        playPad(padList[chordIndex % padList.count], pad: cfg.pad, at: time, retrigger: false)
       }
-      if cfg.drone.enabled, cfg.drone.chords.count > 1, !heldDrone.isEmpty {
+      if cfg.drone.enabled, activeDroneChords(cfg).count > 1, !heldDrone.isEmpty {
         reconcileDrone(keepLevel: true)
       }
     }
@@ -425,6 +470,84 @@ final class MidiBedEngine {
     return (position * hits) % steps < hits
   }
 
+  // MARK: Breathing
+
+  private func activeDroneChords(_ cfg: MidiBedConfig) -> [[Int]] {
+    bassRT.alt && !cfg.drone.altChords.isEmpty ? cfg.drone.altChords : cfg.drone.chords
+  }
+
+  private func activePadChords(_ cfg: MidiBedConfig) -> [[Int]] {
+    padRT.alt && !cfg.pad.altChords.isEmpty ? cfg.pad.altChords : cfg.pad.chords
+  }
+
+  /// A drum plays if it is switched on and the current breakdown (if one is in
+  /// progress) does not silence it.
+  private func drumIsOn(_ d: MidiBedDrumConfig, _ cfg: MidiBedConfig) -> Bool {
+    guard d.enabled else { return false }
+    guard drumRT.alt else { return true }
+    switch cfg.motion.drums.style {
+    case 1: return !(d.role == "kick" || d.role == "snare")
+    case 2: return d.role == "kick"
+    default: return false
+    }
+  }
+
+  /// Must behave exactly like `stepRule` in src/motion.ts (which is unit-tested).
+  private func stepRule(_ rt: inout RuleRuntime, baseBars: Int, altBars: Int, chance: Double) -> Bool {
+    if baseBars <= 0 {
+      let changed = rt.alt
+      rt = RuleRuntime(alt: false, barsLeft: 0)
+      return changed
+    }
+    if rt.barsLeft <= 0 { rt.barsLeft = rt.alt ? max(1, altBars) : baseBars }
+    rt.barsLeft -= 1
+    if rt.barsLeft > 0 { return false }
+    var changed = false
+    if Double.random(in: 0..<1, using: &rng) * 100 < chance {
+      rt.alt.toggle()
+      changed = true
+    }
+    rt.barsLeft = rt.alt ? max(1, altBars) : baseBars
+    return changed
+  }
+
+  /// A new scene (or Play) starts every rule from its normal state.
+  private func resetMotion(_ cfg: MidiBedConfig) {
+    bassRT = RuleRuntime(alt: false, barsLeft: max(0, cfg.motion.bass.baseBars))
+    padRT = RuleRuntime(alt: false, barsLeft: max(0, cfg.motion.pad.baseBars))
+    drumRT = RuleRuntime(alt: false, barsLeft: max(0, cfg.motion.drums.baseBars))
+    emitMotion("reset")
+  }
+
+  private func emitMotion(_ reason: String) {
+    let body: [String: Any?] = ["bass": bassRT.alt, "pad": padRT.alt, "drums": drumRT.alt, "reason": reason]
+    let cb = onMotion
+    DispatchQueue.main.async { cb?(body) }
+  }
+
+  private func stepMotion(at time: Double, cfg: MidiBedConfig) {
+    var changed = false
+    let m = cfg.motion
+    if stepRule(&bassRT, baseBars: m.bass.baseBars, altBars: m.bass.altBars, chance: m.bass.chance) {
+      changed = true
+      // The bass notes change right now, on the bar line; shared notes keep sounding.
+      if cfg.drone.enabled { reconcileDrone(keepLevel: true) }
+    }
+    if stepRule(&padRT, baseBars: m.pad.baseBars, altBars: m.pad.altBars, chance: m.pad.chance) {
+      changed = true
+      let list = activePadChords(cfg)
+      if cfg.pad.enabled, !list.isEmpty {
+        playPad(list[chordIndex % list.count], pad: cfg.pad, at: time, retrigger: false)
+      }
+    }
+    // A drum breakdown needs no note changes: drumIsOn() decides who plays and the
+    // drum fade times ease them out and back in.
+    if stepRule(&drumRT, baseBars: m.drums.baseBars, altBars: m.drums.breakBars, chance: m.drums.chance) {
+      changed = true
+    }
+    if changed { emitMotion("flip") }
+  }
+
   // MARK: Fades
 
   private func stepLevel(_ level: Double, up: Bool, dt: Double, fadeIn: Double, fadeOut: Double) -> Double {
@@ -447,7 +570,7 @@ final class MidiBedEngine {
       drumLevels.removeLast(drumLevels.count - cfg.drums.count)
     }
     for (i, d) in cfg.drums.enumerated() {
-      drumLevels[i] = stepLevel(drumLevels[i], up: d.enabled, dt: tickDur, fadeIn: cfg.fade.drumIn, fadeOut: cfg.fade.drumOut)
+      drumLevels[i] = stepLevel(drumLevels[i], up: drumIsOn(d, cfg), dt: tickDur, fadeIn: cfg.fade.drumIn, fadeOut: cfg.fade.drumOut)
     }
   }
 
@@ -537,7 +660,8 @@ final class MidiBedEngine {
       return
     }
 
-    let notes = d.chords.isEmpty ? [] : d.chords[chordIndex % d.chords.count]
+    let list = activeDroneChords(cfg)
+    let notes = list.isEmpty ? [] : list[chordIndex % list.count]
     let wanted = notes.map { HeldNote(channel: ch, note: max(0, min(127, $0))) }
     let vel = UInt8(max(1, min(127, d.velocity)))
     let startingFromSilence = heldDrone.isEmpty
@@ -674,8 +798,9 @@ final class MidiBedEngine {
         releasePad()
         padLevel = 0
       }
-    } else if heldPad.isEmpty, !cfg.pad.chords.isEmpty {
-      playPad(cfg.pad.chords[chordIndex % cfg.pad.chords.count], pad: cfg.pad, at: ProcessInfo.processInfo.systemUptime, retrigger: false)
+    } else if heldPad.isEmpty, !activePadChords(cfg).isEmpty {
+      let list = activePadChords(cfg)
+      playPad(list[chordIndex % list.count], pad: cfg.pad, at: ProcessInfo.processInfo.systemUptime, retrigger: false)
     }
   }
 

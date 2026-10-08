@@ -1,4 +1,4 @@
-import type { BeatPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
+import type { BeatPayload, MotionPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
 
 /**
  * Thin wrapper over the native module with a silent fallback so the UI still
@@ -16,6 +16,7 @@ type Native = {
   sendNote(channel: number, note: number, velocity: number, durationMs: number): void;
   sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number): void;
   addListener(name: 'onBeat', cb: (e: BeatPayload) => void): unknown;
+  addListener(name: 'onMotion', cb: (e: MotionPayload) => void): unknown;
 };
 
 let native: Native | null = null;
@@ -40,6 +41,23 @@ export function onBeat(cb: (e: BeatPayload) => void): () => void {
   beatSubscribers.add(cb);
   return () => {
     beatSubscribers.delete(cb);
+  };
+}
+
+const motionSubscribers = new Set<(e: MotionPayload) => void>();
+let motionHooked = false;
+
+/** Breathing rules changing something (or restarting with a scene). One native listener, fanned out. */
+export function onMotion(cb: (e: MotionPayload) => void): () => void {
+  if (native && !motionHooked) {
+    motionHooked = true;
+    native.addListener('onMotion', (e) => {
+      motionSubscribers.forEach((fn) => fn(e));
+    });
+  }
+  motionSubscribers.add(cb);
+  return () => {
+    motionSubscribers.delete(cb);
   };
 }
 

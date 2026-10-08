@@ -1,4 +1,5 @@
 import { buildBassChords, buildPadChords } from './chords';
+import { MotionState, defaultMotion, drumRole } from './motion';
 import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice } from './profiles';
 
@@ -142,6 +143,10 @@ export type BedState = {
   wanderers: WandererState[];
   loops: LoopsState;
   harmony: HarmonyState;
+  /** Per-scene rules that flip layers between two states every so many bars (see motion.ts). */
+  motion: MotionState;
+  /** Speak a short message when a rule changes something. Off by default. */
+  announce: boolean;
   pad: PadState;
   fade: FadeState;
   sounds: SoundSlot[];
@@ -161,6 +166,7 @@ export type SceneData = {
   percussion: boolean;
   drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow'>;
   harmony: HarmonyState;
+  motion: MotionState;
   pad: Omit<PadState, 'channel'>;
   drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
   wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'speed' | 'smooth'>[];
@@ -169,7 +175,7 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -185,6 +191,7 @@ export function captureScene(s: SceneSource): SceneData {
       follow: s.drone.follow,
     },
     harmony: { ...s.harmony, degrees: [...s.harmony.degrees] },
+    motion: { bass: { ...s.motion.bass }, pad: { ...s.motion.pad }, drums: { ...s.motion.drums } },
     pad: { ...pad },
     drums: s.drums.map((d) => ({
       enabled: d.enabled,
@@ -214,6 +221,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     percussion: sc.percussion,
     drone: { ...s.drone, ...sc.drone },
     harmony: { ...sc.harmony, degrees: [...sc.harmony.degrees] },
+    motion: { bass: { ...sc.motion.bass }, pad: { ...sc.motion.pad }, drums: { ...sc.motion.drums } },
     pad: { ...s.pad, ...sc.pad },
     drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
     wanderers: s.wanderers.map((w, i) => ({ ...w, ...sc.wanderers[i] })),
@@ -289,6 +297,8 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
     voiceLead: true,
     strumMs: 40,
   },
+  motion: defaultMotion,
+  announce: false,
   harmony: {
     mode: 1, // Dorian
     preset: 5, // Folk turn
@@ -381,6 +391,25 @@ export function droneChords(s: BedState): number[][] {
   });
 }
 
+/** The bass the OTHER way round: following the chords if it normally is steady, and the reverse. */
+export function droneAltChords(s: BedState): number[][] {
+  return droneChords({ ...s, drone: { ...s.drone, follow: !s.drone.follow } });
+}
+
+/** Is the pad's normal setting already a steady fifths drone (the thing its breathing rule flips to)? */
+export function padIsSteadyFifths(p: PadState): boolean {
+  return !p.follow && p.style === 6;
+}
+
+/**
+ * What the pad flips to: a steady root-and-fifth drone. If it already is one, it flips to
+ * following the chords (plain triads) instead.
+ */
+export function padAltChords(s: BedState): number[][] {
+  const alt: PadState = padIsSteadyFifths(s.pad) ? { ...s.pad, follow: true, style: 0 } : { ...s.pad, follow: false, style: 6 };
+  return padChords({ ...s, pad: alt });
+}
+
 export function droneNotes(d: DroneState): number[] {
   const notes = [d.root];
   if (d.octave) notes.push(d.root + 12);
@@ -468,6 +497,7 @@ export function toEngineJson(s: BedState): string {
     },
     drums: s.drums.map((d) => ({
       enabled: s.percussion && d.enabled,
+      role: drumRole(d.name),
       note: d.note,
       channel: d.channel,
       steps: d.steps,
@@ -481,6 +511,7 @@ export function toEngineJson(s: BedState): string {
       enabled: s.drone.enabled,
       channel: s.drone.channel,
       chords: droneChords(s),
+      altChords: droneAltChords(s),
       velocity: s.drone.velocity,
       retriggerBars: s.drone.retriggerBars,
     },
@@ -491,7 +522,9 @@ export function toEngineJson(s: BedState): string {
       humanize: s.pad.humanize / 100,
       strumMs: s.pad.strumMs,
       chords: padChords(s),
+      altChords: padAltChords(s),
     },
+    motion: s.motion,
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
     fade: {
       cc: s.fade.cc,
