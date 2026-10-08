@@ -98,6 +98,25 @@ G. **MIDI file capture.** Record what the bed played to a .mid file so a good pa
 H. **Backups.** Export/import all settings to the Files app. Settings now live only on the phone.
 I. **Spoken status (optional).** Quiet announcements of scene or song changes, off by default.
 
+## Interface structure (proposal, 2026-10-08, awaiting Rusty's answers)
+
+Problem: one very long screen. Proposal: tabs, with the live controls always one gesture away.
+- A slim strip at the TOP of every tab: Play/Stop, bar.beat position, and the four scene buttons. Never hidden.
+- Tabs (each a short list):
+  1. Live: layer switches, tempo and swing, later song/scene advance controls, Freeze, Energy.
+  2. Harmony: harmony loop, chord pad, drone and bass.
+  3. Rhythm: percussion (each drum can become a collapsible group) and loops.
+  4. Sound: filter wanderers, fades, sounds in the other app (program/bank/favorites).
+  5. Setup: output switches, MIDI clock, apps and devices, routing, test buttons.
+- Tab bar position: bottom (conventional) or top (faster for VoiceOver swiping). Rusty to choose.
+- Tabs are plain buttons with role "tab" and a selected state; NO custom swipe gestures (one-finger swipes
+  belong to VoiceOver). Keep every control's state in the one shared settings object so nothing resets when
+  switching tabs.
+- Within a tab, headings stay (VoiceOver rotor > Headings jumps between sections).
+
+VoiceOver magic tap (two-finger double tap anywhere): BUILT 2026-10-08, starts/stops playback and announces
+"Playing" / "Stopped". Other possible magic-tap uses are not planned.
+
 ## Suggested build order
 1. Harmony as its own layer + "Drone follows chords" + drone voicing choices (items 1 and 2). Small,
    audible payoff, and the rest builds on it.

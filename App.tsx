@@ -103,6 +103,15 @@ export default function App() {
     }
   };
 
+  // VoiceOver "magic tap" (two-finger double tap, anywhere on the screen) starts or
+  // stops playback. The handler sits on a plain wrapper View, NOT an accessible one,
+  // so every control inside stays individually reachable by VoiceOver.
+  const onMagicTap = () => {
+    const stopping = playing;
+    togglePlay();
+    setTimeout(() => AccessibilityInfo.announceForAccessibility(stopping ? 'Stopped' : 'Playing'), 300);
+  };
+
   const patch = (p: Partial<BedState>) => setState((s) => ({ ...s, ...p }));
 
   // Device profiles: names and shortcuts for the apps being driven (src/profiles.ts).
@@ -197,6 +206,7 @@ export default function App() {
     <SafeAreaProvider>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <StatusBar style="light" />
+        <View style={styles.fill} onMagicTap={onMagicTap}>
         <ScrollView contentContainerStyle={styles.scroll}>
           <Text style={styles.title} accessibilityRole="header">
             MidiBed
@@ -695,6 +705,7 @@ export default function App() {
             </Section>
           ))}
         </ScrollView>
+        </View>
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -702,6 +713,7 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
+  fill: { flex: 1 },
   scroll: { padding: 16, paddingBottom: 60 },
   title: { color: colors.text, fontSize: 30, fontWeight: '700', marginBottom: 12 },
   warn: { color: '#ffb86b', marginBottom: 12, fontSize: 15 },
