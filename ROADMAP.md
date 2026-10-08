@@ -62,6 +62,11 @@ or two as the change happens.
   for auto-advance (item 5) it knows far ahead, so that case is easy.
 - Manual switch: if fewer beats remain before the next bar line than the clip's lead (say a 2-beat swell
   pressed on beat 4), defer the switch to the bar after, so the swell still has room. Make that a visible rule.
+- Rusty's refinement (arranger-keyboard behavior): if you trigger too close to the bar line, don't always
+  wait a whole bar. Play PART of the fill/swell, starting the clip partway through so it still ends exactly on
+  the change. His old keyboard's limit was about one beat, possibly half a beat: closer than that and the fill
+  is skipped (or the change waits for the next bar). Make the minimum remaining time a setting. Options for
+  a late trigger: partial clip / wait for the next bar / skip the clip and just change.
 - Per scene (or per song): "transition in" clip, lead in beats, level; a "transition out" clip for fades.
 - The ambience layer's own fade could also be used as the "fade out within a beat or two" transition.
 
