@@ -95,6 +95,26 @@ Claude's refinements (to confirm with Rusty):
 - Open questions: what exactly the pad flips (follows on/off, full chords vs fifths, or both); uneven lengths
   wanted or not; breakdown styles wanted; announce changes or only show them.
 
+### 4d. Built-in noise transitions (Rusty's idea, 2026-10-08; recommended as the FIRST transition/fill element)
+A noise generator inside MidiBed (white, pink, brown) shaped by a filter and a volume envelope into the usual
+producer transitions. No sample files, no licensing, tiny, and fully timed by the engine.
+- Colors: white (bright hiss), pink (balanced, natural), brown (deep rumble, good for subtle washes).
+- Shapes: RISER (low-pass opens up and gets louder, ending exactly on the bar line), DOWNLIFT (after the change,
+  the filter closes and fades), SWELL (volume swell that cuts at the change), IMPACT (short burst on the bar
+  line, with a decay), WASH (long gentle brown/pink bed under a change).
+- Settings: color, shape, length in beats (a half beat to 8), level, filter range.
+- Triggers: before / on / after a scene change; just before the drums return from a breakdown (a riser into the
+  kick); when a bass or pad drop-out ends; every N bars inside a scene; a manual button. Each scene owns its settings.
+- Late triggers (Rusty's arranger-keyboard example): because a synthesized riser's shape is a function of time left
+  until the bar line, starting late simply joins the curve part-way. Smooth, no glitch, and exactly on the beat.
+  A minimum remaining time (about one beat) below which it is skipped can be a setting.
+- Where the sound comes from: MidiBed's own audio output (like the built-in test sound). It mixes with other apps
+  at the iPhone/Bluetooth output but is NOT routed through another app's mixer (e.g. AUM strips), and its level is
+  set in MidiBed only.
+- Same trigger system will later drive imported samples (4b, 4c, the ambience player), so build the triggers once.
+- Related, separate: generated DRUM fills (a short rising snare/tom burst on the last beat of every Nth bar, as MIDI to
+  DrumJam or whatever plays the drums). Probably better than noise for rhythmic fills.
+
 ### 4c. Fills (Rusty, 2026-10-08)
 A fill option, probably just the sample player told to play a particular sample as a fill or transition
 before, during or after the 4th, 8th (or any) bar. Ties together with scene breathing and 4b:
