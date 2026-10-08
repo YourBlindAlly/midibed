@@ -5,9 +5,9 @@ import { colors } from './controls';
 
 export const TABS = [
   { id: 'live', label: 'Live' },
+  { id: 'breathe', label: 'Breathe' },
   { id: 'harmony', label: 'Harmony' },
   { id: 'rhythm', label: 'Rhythm' },
-  { id: 'breathe', label: 'Breathe' },
   { id: 'sound', label: 'Sound' },
   { id: 'setup', label: 'Setup' },
 ] as const;

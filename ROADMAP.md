@@ -95,7 +95,7 @@ Claude's refinements (to confirm with Rusty):
 - Open questions: what exactly the pad flips (follows on/off, full chords vs fifths, or both); uneven lengths
   wanted or not; breakdown styles wanted; announce changes or only show them.
 
-### 4d. Built-in noise transitions (Rusty's idea, 2026-10-08; recommended as the FIRST transition/fill element)
+### 4d. Built-in noise transitions. v1 BUILT 2026-10-08 (round 20): scene start + drum return triggers; see CLAUDE.md. Original plan:
 A noise generator inside MidiBed (white, pink, brown) shaped by a filter and a volume envelope into the usual
 producer transitions. No sample files, no licensing, tiny, and fully timed by the engine.
 - Colors: white (bright hiss), pink (balanced, natural), brown (deep rumble, good for subtle washes).

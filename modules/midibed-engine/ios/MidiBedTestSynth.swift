@@ -62,6 +62,15 @@ final class MidiBedTestSynth {
   private var drums: UnsafeMutablePointer<DrumVoice>
   private let padCount = 16
   private let drumCount = 8
+
+  // Transition noise (see "Transition noise" below). Its commands travel in their own
+  // small ring, protected by the same lock as the MIDI events.
+  private let noiseCapacity = 32
+  private var noiseRing: UnsafeMutablePointer<NoiseCommand>
+  private var noiseRead = 0
+  private var noiseWrite = 0
+  private let noiseVoiceCount = 4
+  private var noiseVoices: UnsafeMutablePointer<NoiseVoice>
   private var cutoffCC: Float = 70   // CC 74, pad channels
   private var resonanceCC: Float = 70 // CC 71, pad channels
   private var drumCutoffCC: Float = 127 // CC 74 on channel 10: wide open by default
@@ -91,6 +100,10 @@ final class MidiBedTestSynth {
     expTarget.initialize(repeating: 1, count: 16)
     expCurrent = UnsafeMutablePointer<Float>.allocate(capacity: 16)
     expCurrent.initialize(repeating: 1, count: 16)
+    noiseRing = UnsafeMutablePointer<NoiseCommand>.allocate(capacity: noiseCapacity)
+    noiseRing.initialize(repeating: NoiseCommand(), count: noiseCapacity)
+    noiseVoices = UnsafeMutablePointer<NoiseVoice>.allocate(capacity: noiseVoiceCount)
+    noiseVoices.initialize(repeating: NoiseVoice(), count: noiseVoiceCount)
   }
 
   deinit {
@@ -101,6 +114,8 @@ final class MidiBedTestSynth {
     drums.deallocate()
     expTarget.deallocate()
     expCurrent.deallocate()
+    noiseRing.deallocate()
+    noiseVoices.deallocate()
   }
 
   func startEngine() {
@@ -198,6 +213,20 @@ final class MidiBedTestSynth {
     os_unfair_lock_unlock(lock)
   }
 
+  /// Start one transition sound. `pre` seconds lead up to the bar line, `post` seconds
+  /// follow it; `offset` is how far into the lead-up to begin (a late trigger joins the
+  /// sweep part-way instead of starting from the beginning).
+  func postNoise(shape: Int, color: Int, pre: Double, post: Double, offset: Double, level: Double) {
+    os_unfair_lock_lock(lock)
+    let next = (noiseWrite + 1) % noiseCapacity
+    if next != noiseRead {
+      noiseRing[noiseWrite] = NoiseCommand(
+        shape: shape, color: color, pre: Float(pre), post: Float(post), offset: Float(offset), level: Float(level))
+      noiseWrite = next
+    }
+    os_unfair_lock_unlock(lock)
+  }
+
   // MARK: - Audio thread
 
   private func drainEvents() {
@@ -206,6 +235,11 @@ final class MidiBedTestSynth {
       let e = ring[readIndex]
       readIndex = (readIndex + 1) % capacity
       handle(e)
+    }
+    while noiseRead != noiseWrite {
+      let c = noiseRing[noiseRead]
+      noiseRead = (noiseRead + 1) % noiseCapacity
+      startNoise(c)
     }
     os_unfair_lock_unlock(lock)
   }
@@ -276,6 +310,143 @@ final class MidiBedTestSynth {
     noiseState ^= noiseState >> 17
     noiseState ^= noiseState << 5
     return Float(Int32(bitPattern: noiseState)) / Float(Int32.max)
+  }
+
+  // MARK: - Transition noise
+
+  private struct NoiseCommand {
+    var shape: Int = 0
+    var color: Int = 0
+    var pre: Float = 0
+    var post: Float = 0
+    var offset: Float = 0
+    var level: Float = 0
+  }
+
+  private struct NoiseVoice {
+    var active = false
+    var shape = 0
+    var color = 0
+    var t: Float = 0
+    var pre: Float = 0
+    var post: Float = 0
+    var level: Float = 0
+    var ic1: Float = 0
+    var ic2: Float = 0
+    var b0: Float = 0
+    var b1: Float = 0
+    var b2: Float = 0
+    var brown: Float = 0
+    var hpState: Float = 0
+    var phase: Float = 0
+  }
+
+  /// Level correction per shape (rows: Wave, Wind, Thunder, Boom, Crash) and colour
+  /// (columns: white, pink, brown). Measured offline so every combination comes out at a
+  /// similar loudness: a low-passed white Thunder or a high-passed brown Crash would
+  /// otherwise be nearly silent next to the pink versions.
+  private let noiseGains: [Float] = [
+    2.3, 0.85, 2.3,
+    2.4, 1.2, 3.2,
+    8.0, 1.2, 2.5,
+    1.1, 1.1, 1.1,
+    3.5, 3.5, 10.0,
+  ]
+
+  private func startNoise(_ c: NoiseCommand) {
+    var slot = 0
+    for i in 0..<noiseVoiceCount where !noiseVoices[i].active { slot = i; break }
+    noiseVoices[slot] = NoiseVoice(
+      active: true, shape: c.shape, color: c.color, t: c.offset, pre: c.pre, post: c.post, level: c.level)
+  }
+
+  /// One sample of one transition voice. Shapes (the bar line is at t = pre):
+  /// 0 Wave: swells up into the bar line and falls away after it.
+  /// 1 Wind: filtered noise rises into the bar line, then a short cut.
+  /// 2 Thunder: low rumble rolling in on the bar, slowly fading.
+  /// 3 Boom: a low thump on the bar.
+  /// 4 Crash: a bright burst on the bar that closes and fades.
+  @inline(__always)
+  private func renderNoise(_ i: Int, dt: Float, sr: Float) -> Float {
+    let t = noiseVoices[i].t
+    let pre = noiseVoices[i].pre
+    let post = noiseVoices[i].post
+    if t >= pre + post {
+      noiseVoices[i].active = false
+      return 0
+    }
+
+    // Raw noise in the chosen colour.
+    let w = nextNoise()
+    var n: Float
+    switch noiseVoices[i].color {
+    case 1: // pink (Paul Kellet's economy filter)
+      noiseVoices[i].b0 = 0.99765 * noiseVoices[i].b0 + w * 0.0990460
+      noiseVoices[i].b1 = 0.96300 * noiseVoices[i].b1 + w * 0.2965164
+      noiseVoices[i].b2 = 0.57000 * noiseVoices[i].b2 + w * 1.0526913
+      n = (noiseVoices[i].b0 + noiseVoices[i].b1 + noiseVoices[i].b2 + w * 0.1848) * 0.3
+    case 2: // brown (leaky-integrated white)
+      noiseVoices[i].brown = (noiseVoices[i].brown + 0.02 * w) / 1.02
+      n = noiseVoices[i].brown * 3.2
+    default: // white
+      n = w * 0.6
+    }
+
+    var amp: Float = 0
+    var fc: Float = 1000
+    var tone: Float = 0
+    switch noiseVoices[i].shape {
+    case 0: // Wave
+      if t < pre {
+        let s = sinf(t / max(0.001, pre) * Float.pi / 2)
+        amp = s * s
+      } else {
+        let c = cosf(min(1, (t - pre) / max(0.001, post)) * Float.pi / 2)
+        amp = c * c
+      }
+      fc = 300 * powf(24, amp)
+    case 1: // Wind
+      if t < pre {
+        let x = t / max(0.001, pre)
+        amp = powf(x, 2.2)
+        fc = 250 * powf(56, x)
+      } else {
+        let y = min(1, (t - pre) / max(0.05, post))
+        amp = (1 - y) * (1 - y)
+        fc = 14000
+      }
+    case 2: // Thunder
+      amp = (1 - expf(-t / 0.15)) * expf(-t * 3.5 / max(0.5, post)) * (0.75 + 0.25 * sinf(t * 7)) * 2.4
+      fc = 110 + 260 * amp
+    case 3: // Boom
+      noiseVoices[i].phase += (38 + 100 * expf(-t * 22)) * dt
+      if noiseVoices[i].phase >= 1 { noiseVoices[i].phase -= 1 }
+      tone = sinf(2 * Float.pi * noiseVoices[i].phase) * expf(-t * 5 / max(0.4, post))
+      amp = expf(-t * 12) * 0.5
+      fc = 220
+    default: // Crash
+      let attack: Float = t < 0.004 ? t / 0.004 : 1
+      amp = expf(-t * 5 / max(0.3, post)) * attack
+      fc = 2500 + 11000 * expf(-t * 3 / max(0.3, post))
+      noiseVoices[i].hpState += 0.2 * (n - noiseVoices[i].hpState)
+      n -= noiseVoices[i].hpState // take out the lows
+    }
+
+    // 12 dB/oct low-pass whose cutoff follows the shape.
+    let cutoff = min(max(fc, 40), 0.45 * sr)
+    let g = tanf(Float.pi * cutoff / sr)
+    let k: Float = 1.2
+    let a1 = 1 / (1 + g * (g + k))
+    let a2 = g * a1
+    let a3 = g * a2
+    let v3 = n - noiseVoices[i].ic2
+    let v1 = a1 * noiseVoices[i].ic1 + a2 * v3
+    let v2 = noiseVoices[i].ic2 + a2 * noiseVoices[i].ic1 + a3 * v3
+    noiseVoices[i].ic1 = 2 * v1 - noiseVoices[i].ic1
+    noiseVoices[i].ic2 = 2 * v2 - noiseVoices[i].ic2
+    noiseVoices[i].t = t + dt
+    let gain = noiseGains[min(4, max(0, noiseVoices[i].shape)) * 3 + min(2, max(0, noiseVoices[i].color))]
+    return (v2 * amp + tone) * noiseVoices[i].level * 0.5 * gain
   }
 
   private func render(frameCount: Int, bufferList: UnsafeMutablePointer<AudioBufferList>) {
@@ -378,9 +549,15 @@ final class MidiBedTestSynth {
       drumIc2 = 2 * dv2 - drumIc2
       out += dv2
 
+      // The built-in test sound switch silences the instruments, but NOT the
+      // transition noise: you want that even when another app makes the music.
       if !on { out = 0 }
+      var noiseOut: Float = 0
+      for i in 0..<noiseVoiceCount where noiseVoices[i].active {
+        noiseOut += renderNoise(i, dt: dt, sr: sr)
+      }
       // gentle soft clip so stacked voices can't blast
-      out = tanhf(out)
+      out = tanhf(out + noiseOut)
 
       for buffer in abl {
         let p = buffer.mData!.assumingMemoryBound(to: Float.self)

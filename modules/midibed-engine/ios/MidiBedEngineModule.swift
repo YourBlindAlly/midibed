@@ -45,6 +45,10 @@ public class MidiBedEngineModule: Module {
       self.engine.sendNote(channel: channel, note: note, velocity: velocity, durationMs: durationMs)
     }
 
+    Function("playTransitionNow") { (shape: Int, color: Int, beats: Double, level: Double) in
+      self.engine.playTransitionNow(shape: shape, color: color, beats: beats, level: level)
+    }
+
     Function("sendProgramChange") { (channel: Int, program: Int, bankMSB: Int, bankLSB: Int) in
       self.engine.sendProgramChange(channel: channel, program: program, bankMSB: bankMSB, bankLSB: bankLSB)
     }

@@ -102,6 +102,23 @@ struct MidiBedMotionConfig: Decodable {
   var drums: MidiBedBreakdown
 }
 
+/// A transition sound: shape 0 Wave, 1 Wind, 2 Thunder, 3 Boom, 4 Crash; colour 0 white,
+/// 1 pink, 2 brown. Wave and Wind are LEAD-INS (they rise into the bar line over
+/// `beats`); the others play ON the bar line.
+struct MidiBedTransitionSlot: Decodable {
+  var on: Bool
+  var shape: Int
+  var color: Int
+  var beats: Double
+  var level: Double         // 0...1
+}
+
+struct MidiBedTransitionConfig: Decodable {
+  var minLeadBeats: Double  // a lead-in needs at least this long before the bar line, else its "downer" plays on the bar
+  var entrance: MidiBedTransitionSlot   // when a scene starts
+  var drumReturn: MidiBedTransitionSlot // as the drums come back from a breakdown
+}
+
 struct MidiBedConfig: Decodable {
   var bpm: Double
   var swing: Double         // 0...1, delays every other 16th
@@ -112,6 +129,7 @@ struct MidiBedConfig: Decodable {
   var drone: MidiBedDroneConfig
   var harmony: MidiBedHarmonyConfig
   var motion: MidiBedMotionConfig
+  var transitions: MidiBedTransitionConfig
   var pad: MidiBedPadConfig
   var loops: MidiBedLoopsConfig
   var fade: MidiBedFadeConfig
@@ -166,6 +184,18 @@ final class MidiBedEngine {
   }
   private var pending: [Pending] = []
 
+  private struct PendingNoise {
+    var time: Double
+    var tag: Int // 0 scene entrance, 1 drum return
+    var shape: Int
+    var color: Int
+    var pre: Double
+    var post: Double
+    var offset: Double
+    var level: Double
+  }
+  private var pendingNoise: [PendingNoise] = []
+
   private struct HeldNote: Equatable {
     var channel: Int
     var note: Int
@@ -179,6 +209,8 @@ final class MidiBedEngine {
   private struct RuleRuntime {
     var alt = false
     var barsLeft = 0
+    /// A chance roll decided one bar early (the drums' return), so a lead-in can play into it.
+    var roll: Double? = nil
   }
   private var bassRT = RuleRuntime()
   private var padRT = RuleRuntime()
@@ -234,6 +266,14 @@ final class MidiBedEngine {
     queue.async {
       if self.running && (queued || self.pendingConfig != nil) {
         self.pendingConfig = decoded
+        if queued {
+          // A scene switch was just requested: its entrance sound is timed to the next
+          // bar line. A newer request replaces an older one that has not started yet.
+          self.pendingNoise.removeAll { $0.tag == 0 }
+          if let cur = self.config {
+            self.scheduleTransition(decoded.transitions.entrance, tag: 0, barTime: self.nextBarTime(cur), cfg: decoded)
+          }
+        }
         return
       }
       self.pendingConfig = nil
@@ -289,6 +329,7 @@ final class MidiBedEngine {
       self.timer?.cancel()
       self.timer = nil
       self.pending.removeAll()
+      self.pendingNoise.removeAll()
       // A scene switch that was still waiting for its bar line takes effect now.
       if let p = self.pendingConfig {
         self.pendingConfig = nil
@@ -385,6 +426,7 @@ final class MidiBedEngine {
     updateWanderers(now: now, cfg: live)
     updateFades(now: now, cfg: live)
     drainPending(now: now)
+    drainNoise(now: now)
   }
 
   private func processTick(_ tick: Int, at time: Double, tickDur: Double, cfg: MidiBedConfig) {
@@ -471,6 +513,79 @@ final class MidiBedEngine {
     return (position * hits) % steps < hits
   }
 
+  // MARK: Transitions
+
+  /// When the next bar line falls, in the engine's clock.
+  private func nextBarTime(_ cfg: MidiBedConfig) -> Double {
+    let barTicks = ticksPerBeat * beatsPerBar
+    let tickDur = 60.0 / (max(20.0, min(300.0, cfg.bpm)) * Double(ticksPerBeat))
+    let toBar = (barTicks - (tickIndex % barTicks)) % barTicks
+    return nextTickTime + Double(toBar) * tickDur
+  }
+
+  /// Seconds of lead-up (before the bar line) and tail (after it) for a shape.
+  private func noiseSeconds(shape: Int, beats: Double, bpm: Double) -> (pre: Double, post: Double) {
+    let len = max(0.25, beats) * 60.0 / bpm
+    switch shape {
+    case 0: return (len, len)                       // Wave: rises into the bar, falls away after
+    case 1: return (len, 0.18)                      // Wind: rises into the bar, then a short cut
+    case 2: return (0, max(len, 1.5))               // Thunder
+    case 3: return (0, max(min(len, 3.0), 0.7))     // Boom
+    default: return (0, len)                        // Crash
+    }
+  }
+
+  /// Must behave exactly like `planTransition` in src/transitions.ts (which is unit-tested):
+  /// enough room -> the lead-in plays, joining its sweep part-way if it is late; too close
+  /// (less than minLeadBeats) -> only the "downer" on the bar: Wave its falling half, Wind a Crash.
+  private func scheduleTransition(_ slot: MidiBedTransitionSlot, tag: Int, barTime: Double, cfg: MidiBedConfig) {
+    guard slot.on else { return }
+    let bpm = max(20.0, min(300.0, cfg.bpm))
+    let beat = 60.0 / bpm
+    let now = ProcessInfo.processInfo.systemUptime
+    var shape = slot.shape
+    var (pre, post) = noiseSeconds(shape: shape, beats: slot.beats, bpm: bpm)
+    var offset = 0.0
+    if pre > 0 {
+      let remaining = barTime - now
+      if remaining >= cfg.transitions.minLeadBeats * beat {
+        offset = max(0, pre - remaining)
+      } else if shape == 0 {
+        offset = pre
+      } else {
+        shape = 4
+        (pre, post) = noiseSeconds(shape: 4, beats: slot.beats, bpm: bpm)
+        offset = 0
+      }
+    }
+    pendingNoise.append(
+      PendingNoise(
+        time: max(now, barTime - (pre - offset)), tag: tag, shape: shape, color: slot.color,
+        pre: pre, post: post, offset: offset, level: slot.level))
+  }
+
+  /// Play a transition right now, for hearing what a setting sounds like.
+  func playTransitionNow(shape: Int, color: Int, beats: Double, level: Double) {
+    queue.async {
+      let bpm = max(20.0, min(300.0, self.config?.bpm ?? 88))
+      let secs = self.noiseSeconds(shape: shape, beats: beats, bpm: bpm)
+      self.synth.postNoise(shape: shape, color: color, pre: secs.pre, post: secs.post, offset: 0, level: level)
+    }
+  }
+
+  private func drainNoise(now: Double) {
+    guard !pendingNoise.isEmpty else { return }
+    var later: [PendingNoise] = []
+    for n in pendingNoise {
+      if n.time <= now {
+        synth.postNoise(shape: n.shape, color: n.color, pre: n.pre, post: n.post, offset: n.offset, level: n.level)
+      } else {
+        later.append(n)
+      }
+    }
+    pendingNoise = later
+  }
+
   // MARK: Breathing
 
   /// The notes to play: the other version only when the rule's alternate IS another
@@ -515,7 +630,9 @@ final class MidiBedEngine {
     rt.barsLeft -= 1
     if rt.barsLeft > 0 { return false }
     var changed = false
-    if Double.random(in: 0..<1, using: &rng) * 100 < chance {
+    let r = rt.roll ?? Double.random(in: 0..<1, using: &rng)
+    rt.roll = nil
+    if r * 100 < chance {
       rt.alt.toggle()
       changed = true
     }
@@ -580,6 +697,17 @@ final class MidiBedEngine {
         for (i, d) in cfg.drums.enumerated() where i < drumLevels.count && drumIsOn(d, cfg) {
           drumLevels[i] = 1
         }
+      }
+    }
+    // Lookahead: on the FINAL bar of a drum breakdown, settle the chance roll for the
+    // coming return now (once), so a lead-in can rise into the kick on the downbeat.
+    if m.drums.baseBars > 0, drumRT.alt, drumRT.barsLeft == 1, drumRT.roll == nil {
+      let r = Double.random(in: 0..<1, using: &rng)
+      drumRT.roll = r
+      if r * 100 < m.drums.chance {
+        let tickDur = 60.0 / (max(20.0, min(300.0, cfg.bpm)) * Double(ticksPerBeat))
+        let barDur = tickDur * Double(ticksPerBeat * beatsPerBar)
+        scheduleTransition(cfg.transitions.drumReturn, tag: 1, barTime: time + barDur, cfg: cfg)
       }
     }
     if changed { emitMotion("flip") }

@@ -64,7 +64,7 @@ describe('whole screen smoke test', () => {
 
     await tabPress('Breathe');
     expect(labels(tree)).toEqual(
-      expect.arrayContaining(['Breathing preset', 'Right now', 'Bass: stay normal for', 'Pad: stay normal for', 'Drums: play for']),
+      expect.arrayContaining(['Breathing preset', 'Right now', 'Bass: stay normal for', 'Pad: stay normal for', 'Drums: play for', 'Shortest lead-in', 'Scene start sound', 'Drum return sound']),
     );
     expect(labels(tree)).not.toContain('Kick hits');
 

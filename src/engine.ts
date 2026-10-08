@@ -14,6 +14,7 @@ type Native = {
   applyConfig(json: string, queued: boolean): void;
   sendControlChange(channel: number, cc: number, value: number): void;
   sendNote(channel: number, note: number, velocity: number, durationMs: number): void;
+  playTransitionNow(shape: number, color: number, beats: number, level: number): void;
   sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number): void;
   addListener(name: 'onBeat', cb: (e: BeatPayload) => void): unknown;
   addListener(name: 'onMotion', cb: (e: MotionPayload) => void): unknown;
@@ -70,6 +71,9 @@ export const engine = {
   /** One note, for auditioning which channel and note a receiving app answers to. */
   sendNote: (channel: number, note: number, velocity = 100, durationMs = 250) =>
     native?.sendNote(channel, note, velocity, durationMs),
+  /** Hear a transition sound right now (for choosing settings). */
+  playTransitionNow: (shape: number, color: number, beats: number, level: number) =>
+    native?.playTransitionNow(shape, color, beats, level),
   /** bank values < 0 are skipped (no Bank Select sent). */
   sendProgramChange: (channel: number, program: number, bankMSB = -1, bankLSB = -1) =>
     native?.sendProgramChange(channel, program, bankMSB, bankLSB),

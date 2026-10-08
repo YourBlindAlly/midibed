@@ -44,6 +44,7 @@ import {
 } from './src/motion';
 import { PROFILES, ProfileRole, ccName, getProfile, profileForChannel, profileIndex, profileNoteName, stepDrumNote } from './src/profiles';
 import { loadState, saveState } from './src/storage';
+import { NOISE_COLOR_NAMES, NOISE_SHAPE_HINTS, NOISE_SHAPE_NAMES, TransitionSlot, eighthsText, isLeadIn } from './src/transitions';
 import { Pager } from './src/Pager';
 import { TabBar, TabId, neighborTab, tabAnnouncement } from './src/tabs';
 
@@ -231,6 +232,8 @@ export default function App() {
   const patchPad = (p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
   const patchMotionRule = (layer: 'bass' | 'pad', p: Partial<MotionRule>) =>
     setState((s) => ({ ...s, motion: { ...s.motion, preset: 0, [layer]: { ...s.motion[layer], ...p } } }));
+  const patchTransition = (which: 'entrance' | 'drumReturn', p: Partial<TransitionSlot>) =>
+    setState((s) => ({ ...s, transitions: { ...s.transitions, [which]: { ...s.transitions[which], ...p } } }));
   const patchBreakdown = (p: Partial<DrumBreakdown>) =>
     setState((s) => ({ ...s, motion: { ...s.motion, preset: 0, drums: { ...s.motion.drums, ...p } } }));
   const chooseMotionPreset = (idx: number) =>
@@ -716,6 +719,63 @@ export default function App() {
               </>
             )}
           </Section>
+
+          <Section title="Transitions">
+            <Text style={styles.note}>
+              Sounds made inside MidiBed from noise, to mark a change. A lead-in (Wave, Wind) starts before the change and rises into it. Thunder, Boom and Crash play on the change itself. Each scene has its own settings. They play through MidiBed's own sound, even when the built-in test sound is off, and their level is set here in MidiBed.
+            </Text>
+            <Stepper
+              label="Shortest lead-in"
+              value={state.transitionMinEighths}
+              onChange={(v) => patch({ transitionMinEighths: v })}
+              min={0}
+              max={8}
+              format={eighthsText}
+              hint="If a lead-in has less time than this before the change, it is skipped and only its falling sound plays on the beat. Wave plays its falling half, Wind plays a Crash. This setting is the same for every scene."
+            />
+          </Section>
+
+          {([
+            ['entrance', 'Scene start', 'Plays when this scene starts, timed to the bar line. Switching scenes while playing waits for the next bar.'],
+            ['drumReturn', 'Drums return', 'Plays as the drums come back from a breakdown, so a lead-in rises into the kick on the downbeat.'],
+          ] as const).map(([which, title, about]) => {
+            const t = state.transitions[which];
+            const word = title === 'Scene start' ? 'Scene start' : 'Drum return';
+            return (
+              <Section key={which} title={`${title} sound`}>
+                <Text style={styles.note}>{about}</Text>
+                <Toggle label={`${word} sound`} value={t.on} onChange={(v) => patchTransition(which, { on: v })} />
+                {t.on && (
+                  <>
+                    <Stepper
+                      label={`${word}: shape`}
+                      value={t.shape}
+                      onChange={(v) => patchTransition(which, { shape: v })}
+                      min={0}
+                      max={NOISE_SHAPE_NAMES.length - 1}
+                      format={(v) => NOISE_SHAPE_NAMES[v]}
+                      hint={NOISE_SHAPE_HINTS[t.shape]}
+                    />
+                    <Stepper label={`${word}: noise colour`} value={t.color} onChange={(v) => patchTransition(which, { color: v })} min={0} max={NOISE_COLOR_NAMES.length - 1} format={(v) => NOISE_COLOR_NAMES[v]} hint="White is bright, pink is balanced, brown is deep" />
+                    <Stepper
+                      label={isLeadIn(t.shape) ? `${word}: rises over` : `${word}: lasts`}
+                      value={t.beats}
+                      onChange={(v) => patchTransition(which, { beats: v })}
+                      min={1}
+                      max={16}
+                      format={(v) => (v === 1 ? '1 beat' : `${v} beats`)}
+                    />
+                    <Stepper label={`${word}: level`} value={t.level} onChange={(v) => patchTransition(which, { level: v })} min={5} max={100} step={5} format={(v) => `${v} percent`} />
+                    <ActionButton
+                      label={`Hear the ${word.toLowerCase()} sound`}
+                      hint="Plays it once now, so you can judge the shape, colour and level"
+                      onPress={() => engine.playTransitionNow(t.shape, t.color, t.beats, t.level / 100)}
+                    />
+                  </>
+                )}
+              </Section>
+            );
+          })}
             </>
           )}
           {tab === 'sound' && (

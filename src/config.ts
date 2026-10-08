@@ -1,5 +1,6 @@
 import { buildBassChords, buildPadChords } from './chords';
 import { MotionState, defaultMotion, drumRole } from './motion';
+import { TransitionsState, defaultTransitions } from './transitions';
 import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice } from './profiles';
 
@@ -147,6 +148,10 @@ export type BedState = {
   motion: MotionState;
   /** Speak a short message when a rule changes something. Off by default. */
   announce: boolean;
+  /** Transition sounds per scene (how it starts, how the drums return). */
+  transitions: TransitionsState;
+  /** A lead-in needs at least this many eighth notes before the change, or only its downer plays on the beat. */
+  transitionMinEighths: number;
   pad: PadState;
   fade: FadeState;
   sounds: SoundSlot[];
@@ -167,6 +172,7 @@ export type SceneData = {
   drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow'>;
   harmony: HarmonyState;
   motion: MotionState;
+  transitions: TransitionsState;
   pad: Omit<PadState, 'channel'>;
   drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
   wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'speed' | 'smooth'>[];
@@ -175,7 +181,7 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'transitions' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -192,6 +198,7 @@ export function captureScene(s: SceneSource): SceneData {
     },
     harmony: { ...s.harmony, degrees: [...s.harmony.degrees] },
     motion: { preset: s.motion.preset, bass: { ...s.motion.bass }, pad: { ...s.motion.pad }, drums: { ...s.motion.drums } },
+    transitions: { entrance: { ...s.transitions.entrance }, drumReturn: { ...s.transitions.drumReturn } },
     pad: { ...pad },
     drums: s.drums.map((d) => ({
       enabled: d.enabled,
@@ -222,6 +229,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     drone: { ...s.drone, ...sc.drone },
     harmony: { ...sc.harmony, degrees: [...sc.harmony.degrees] },
     motion: { preset: sc.motion.preset, bass: { ...sc.motion.bass }, pad: { ...sc.motion.pad }, drums: { ...sc.motion.drums } },
+    transitions: { entrance: { ...sc.transitions.entrance }, drumReturn: { ...sc.transitions.drumReturn } },
     pad: { ...s.pad, ...sc.pad },
     drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
     wanderers: s.wanderers.map((w, i) => ({ ...w, ...sc.wanderers[i] })),
@@ -299,6 +307,8 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
   },
   motion: defaultMotion,
   announce: false,
+  transitions: defaultTransitions,
+  transitionMinEighths: 1,
   harmony: {
     mode: 1, // Dorian
     preset: 5, // Folk turn
@@ -540,6 +550,11 @@ export function toEngineJson(s: BedState): string {
       altChords: padAltChords(s),
     },
     motion: s.motion,
+    transitions: {
+      minLeadBeats: s.transitionMinEighths / 2,
+      entrance: { ...s.transitions.entrance, level: s.transitions.entrance.level / 100 },
+      drumReturn: { ...s.transitions.drumReturn, level: s.transitions.drumReturn.level / 100 },
+    },
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
     fade: {
       cc: s.fade.cc,
