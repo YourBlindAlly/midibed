@@ -1,4 +1,4 @@
-import { breakdownMutes, defaultMotion, describeMotion, drumRole, startRule, stepRule } from '../src/motion';
+import { MOTION_PRESET_NAMES, breakdownMutes, defaultMotion, describeMotion, drumRole, motionPreset, startRule, stepRule } from '../src/motion';
 
 // Run a rule for `bars` bars (bar 0 is the scene's first bar, no step) and record alt per bar.
 function run(rule: { baseBars: number; altBars: number; chance: number }, bars: number, rolls: number[] = []) {
@@ -106,5 +106,45 @@ describe('describing what is happening', () => {
     expect(defaultMotion.bass.baseBars).toBe(0);
     expect(defaultMotion.pad.baseBars).toBe(0);
     expect(defaultMotion.drums.baseBars).toBe(0);
+  });
+});
+
+describe('drop-outs and presets', () => {
+  it('describes a bass or pad that drops out, instead of following or fifths', () => {
+    const base = { bassFollows: false, padSteadyFifths: false };
+    const kinds = { bass: 1, pad: 1 };
+    expect(describeMotion({ bass: true, pad: true, drums: false }, base, 0, kinds)).toMatchObject({ bass: 'Bass dropped out', pad: 'Pad dropped out' });
+    expect(describeMotion({ bass: false, pad: false, drums: false }, base, 0, kinds)).toMatchObject({ bass: 'Bass playing', pad: 'Pad playing' });
+  });
+
+  it('has Custom as the first preset, which changes nothing, and four ready-made ones', () => {
+    expect(MOTION_PRESET_NAMES).toEqual(['Custom', 'Off', 'Gentle', 'Wide', 'Sparse']);
+    expect(motionPreset(0)).toBeNull();
+    for (let i = 1; i < MOTION_PRESET_NAMES.length; i++) expect(motionPreset(i)?.preset).toBe(i);
+  });
+
+  it('Off switches everything off and Sparse is the one that drops layers out', () => {
+    const off = motionPreset(1)!;
+    expect([off.bass.baseBars, off.pad.baseBars, off.drums.baseBars]).toEqual([0, 0, 0]);
+    const sparse = motionPreset(4)!;
+    expect(sparse.bass.kind).toBe(1);
+    expect(sparse.pad.kind).toBe(1);
+    expect(motionPreset(2)!.bass.kind).toBe(0);
+    expect(motionPreset(3)!.pad.kind).toBe(0);
+  });
+
+  it('keeps every preset value in the ranges the screen allows', () => {
+    for (let i = 1; i < MOTION_PRESET_NAMES.length; i++) {
+      const m = motionPreset(i)!;
+      for (const r of [m.bass, m.pad]) {
+        expect(r.baseBars).toBeGreaterThanOrEqual(0);
+        expect(r.baseBars).toBeLessThanOrEqual(64);
+        expect(r.altBars).toBeGreaterThanOrEqual(1);
+        expect(r.chance).toBeGreaterThanOrEqual(10);
+        expect(r.chance).toBeLessThanOrEqual(100);
+        expect([0, 1]).toContain(r.kind);
+      }
+      expect([0, 1, 2]).toContain(m.drums.style);
+    }
   });
 });

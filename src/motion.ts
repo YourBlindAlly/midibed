@@ -8,11 +8,18 @@
  * `chance`, flips to the alternate for `altBars`, then flips back, and so on.
  * If the roll fails it simply stays where it is for another interval.
  * `baseBars` of 0 switches the rule off.
+ *
+ * What the alternate IS is `kind`: 0 = the layer's other version (the bass
+ * following the chords or not; the pad on a steady fifths drone), 1 = the layer
+ * drops out completely. Drop-outs ease out with the layer's fade-out time but
+ * COME BACK IMMEDIATELY at full strength on the bar line, to land on the beat.
+ * A returning layer comes back in its normal (scene default) state.
  */
 export type MotionRule = {
   baseBars: number; // 0 = off
   altBars: number;
   chance: number; // percent 1-100
+  kind: number; // 0 = other version, 1 = drop out
 };
 
 export type DrumBreakdown = {
@@ -23,6 +30,7 @@ export type DrumBreakdown = {
 };
 
 export type MotionState = {
+  preset: number; // index into MOTION_PRESET_NAMES (0 = custom)
   bass: MotionRule;
   pad: MotionRule;
   drums: DrumBreakdown;
@@ -30,11 +38,48 @@ export type MotionState = {
 
 export const BREAKDOWN_NAMES = ['Full: all drums out', 'Light: kick and snare out', 'Kick only: everything else out'];
 
+export const BASS_KIND_NAMES = ['Follows the chords, or stays on the key', 'Drops out'];
+export const PAD_KIND_NAMES = ['Switches to steady fifths', 'Drops out'];
+
+export const MOTION_PRESET_NAMES = ['Custom', 'Off', 'Gentle', 'Wide', 'Sparse'];
+
 export const defaultMotion: MotionState = {
-  bass: { baseBars: 0, altBars: 4, chance: 100 },
-  pad: { baseBars: 0, altBars: 4, chance: 100 },
+  preset: 1,
+  bass: { baseBars: 0, altBars: 4, chance: 100, kind: 0 },
+  pad: { baseBars: 0, altBars: 4, chance: 100, kind: 0 },
   drums: { baseBars: 0, breakBars: 2, chance: 100, style: 0 },
 };
+
+/** The ready-made settings for a preset, or null for Custom (which changes nothing). */
+export function motionPreset(index: number): MotionState | null {
+  switch (index) {
+    case 1: // Off
+      return { ...defaultMotion, preset: 1 };
+    case 2: // Gentle: slow, occasional shifts, no drum breakdowns
+      return {
+        preset: 2,
+        bass: { baseBars: 16, altBars: 8, chance: 70, kind: 0 },
+        pad: { baseBars: 16, altBars: 8, chance: 60, kind: 0 },
+        drums: { baseBars: 0, breakBars: 2, chance: 100, style: 1 },
+      };
+    case 3: // Wide: clear, regular movement in all three
+      return {
+        preset: 3,
+        bass: { baseBars: 8, altBars: 4, chance: 100, kind: 0 },
+        pad: { baseBars: 12, altBars: 4, chance: 80, kind: 0 },
+        drums: { baseBars: 16, breakBars: 2, chance: 100, style: 1 },
+      };
+    case 4: // Sparse: layers drop out completely and come back on the beat
+      return {
+        preset: 4,
+        bass: { baseBars: 8, altBars: 2, chance: 80, kind: 1 },
+        pad: { baseBars: 8, altBars: 4, chance: 70, kind: 1 },
+        drums: { baseBars: 8, breakBars: 4, chance: 80, style: 0 },
+      };
+    default:
+      return null;
+  }
+}
 
 export type RuleRuntime = { alt: boolean; barsLeft: number };
 
@@ -87,12 +132,13 @@ export function describeMotion(
   now: MotionNow,
   base: { bassFollows: boolean; padSteadyFifths: boolean },
   style: number,
+  kinds: { bass: number; pad: number } = { bass: 0, pad: 0 },
 ): { bass: string; pad: string; drums: string } {
   const bassFollowing = base.bassFollows !== now.bass;
   const padShowsFifths = base.padSteadyFifths !== now.pad;
   return {
-    bass: bassFollowing ? 'Bass following the chords' : 'Bass steady on the key',
-    pad: padShowsFifths ? 'Pad on steady fifths' : 'Pad on chords',
+    bass: kinds.bass === 1 ? (now.bass ? 'Bass dropped out' : 'Bass playing') : bassFollowing ? 'Bass following the chords' : 'Bass steady on the key',
+    pad: kinds.pad === 1 ? (now.pad ? 'Pad dropped out' : 'Pad playing') : padShowsFifths ? 'Pad on steady fifths' : 'Pad on chords',
     drums: now.drums ? `Drums ${['breakdown', 'light breakdown', 'kick only'][style] ?? 'breakdown'}` : 'Drums playing',
   };
 }

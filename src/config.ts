@@ -191,7 +191,7 @@ export function captureScene(s: SceneSource): SceneData {
       follow: s.drone.follow,
     },
     harmony: { ...s.harmony, degrees: [...s.harmony.degrees] },
-    motion: { bass: { ...s.motion.bass }, pad: { ...s.motion.pad }, drums: { ...s.motion.drums } },
+    motion: { preset: s.motion.preset, bass: { ...s.motion.bass }, pad: { ...s.motion.pad }, drums: { ...s.motion.drums } },
     pad: { ...pad },
     drums: s.drums.map((d) => ({
       enabled: d.enabled,
@@ -221,7 +221,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     percussion: sc.percussion,
     drone: { ...s.drone, ...sc.drone },
     harmony: { ...sc.harmony, degrees: [...sc.harmony.degrees] },
-    motion: { bass: { ...sc.motion.bass }, pad: { ...sc.motion.pad }, drums: { ...sc.motion.drums } },
+    motion: { preset: sc.motion.preset, bass: { ...sc.motion.bass }, pad: { ...sc.motion.pad }, drums: { ...sc.motion.drums } },
     pad: { ...s.pad, ...sc.pad },
     drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
     wanderers: s.wanderers.map((w, i) => ({ ...w, ...sc.wanderers[i] })),
@@ -458,11 +458,26 @@ function liftHarmony(raw: unknown): unknown {
   return r;
 }
 
+// Breathing settings saved before presets existed have rules but no preset: they are "Custom",
+// not the default "Off", or the screen would name them wrongly.
+function markCustomMotion(raw: unknown): unknown {
+  if (raw === null || typeof raw !== 'object') return raw;
+  const r = { ...(raw as Record<string, unknown>) };
+  const m = r.motion;
+  if (m !== null && typeof m === 'object' && (m as Record<string, unknown>).preset === undefined) {
+    r.motion = { ...(m as Record<string, unknown>), preset: 0 };
+  }
+  return r;
+}
+
 export function migrateState(rawInput: unknown): BedState {
-  const lifted = liftHarmony(rawInput);
+  const lifted = markCustomMotion(liftHarmony(rawInput));
   const raw =
     lifted !== null && typeof lifted === 'object' && Array.isArray((lifted as Record<string, unknown>).scenes)
-      ? { ...(lifted as Record<string, unknown>), scenes: ((lifted as Record<string, unknown>).scenes as unknown[]).map(liftHarmony) }
+      ? {
+          ...(lifted as Record<string, unknown>),
+          scenes: ((lifted as Record<string, unknown>).scenes as unknown[]).map((sc) => markCustomMotion(liftHarmony(sc))),
+        }
       : lifted;
   const merged = mergeDefaults(defaultState, raw);
   const active = Math.max(0, Math.min(merged.scenes.length - 1, Math.round(merged.activeScene)));

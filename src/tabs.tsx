@@ -7,6 +7,7 @@ export const TABS = [
   { id: 'live', label: 'Live' },
   { id: 'harmony', label: 'Harmony' },
   { id: 'rhythm', label: 'Rhythm' },
+  { id: 'breathe', label: 'Breathe' },
   { id: 'sound', label: 'Sound' },
   { id: 'setup', label: 'Setup' },
 ] as const;

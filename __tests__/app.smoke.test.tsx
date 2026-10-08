@@ -50,8 +50,9 @@ describe('whole screen smoke test', () => {
     expect(labels(tree)).toEqual(expect.arrayContaining(['Play', 'Scene 1', 'Scene 4']));
 
     // Live
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Bass drone layer', 'Percussion layer', 'Tempo', 'Swing', 'Bass: stay normal for', 'Pad: stay normal for', 'Drums: play for', 'Right now']));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Bass drone layer', 'Percussion layer', 'Tempo', 'Swing']));
     expect(labels(tree)).not.toContain('Progression preset');
+    expect(labels(tree)).not.toContain('Bass: stay normal for');
 
     await tabPress('Harmony');
     expect(labels(tree)).toEqual(expect.arrayContaining(['Key (root note)', 'Progression preset', 'Mode', 'Bass follows chords', 'Pad follows chords']));
@@ -60,6 +61,12 @@ describe('whole screen smoke test', () => {
 
     await tabPress('Rhythm');
     expect(labels(tree)).toEqual(expect.arrayContaining(['Kick hits', 'Loops', 'Loop program']));
+
+    await tabPress('Breathe');
+    expect(labels(tree)).toEqual(
+      expect.arrayContaining(['Breathing preset', 'Right now', 'Bass: stay normal for', 'Pad: stay normal for', 'Drums: play for']),
+    );
+    expect(labels(tree)).not.toContain('Kick hits');
 
     await tabPress('Sound');
     expect(labels(tree)).toEqual(expect.arrayContaining(['Cutoff wander', 'Bass drone fade in', 'Chord pad program']));

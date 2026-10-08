@@ -15,7 +15,8 @@ const pcs = (notes: number[]) => notes.map((n) => n % 12).sort((a, b) => a - b);
 describe('breathing: what is sent to the engine', () => {
   it('sends the rules, the drum roles, and an alternate note list for the bass and the pad', () => {
     const j = JSON.parse(toEngineJson(defaultState));
-    expect(j.motion.bass).toEqual({ baseBars: 0, altBars: 4, chance: 100 });
+    expect(j.motion.bass).toEqual({ baseBars: 0, altBars: 4, chance: 100, kind: 0 });
+    expect(j.motion.preset).toBe(1);
     expect(j.motion.drums).toEqual({ baseBars: 0, breakBars: 2, chance: 100, style: 0 });
     expect(j.drums.map((d: { role: string }) => d.role)).toEqual(['kick', 'snare', 'other', 'other']);
     expect(j.drone.altChords.length).toBeGreaterThan(0);
@@ -57,11 +58,11 @@ describe('breathing: what is sent to the engine', () => {
 
 describe('breathing: scenes, saving and announcements', () => {
   it('each scene has its own rules', () => {
-    const live = { ...defaultState, motion: { ...defaultState.motion, bass: { baseBars: 8, altBars: 4, chance: 75 } } };
+    const live = { ...defaultState, motion: { ...defaultState.motion, bass: { baseBars: 8, altBars: 4, chance: 75, kind: 1 } } };
     const away = switchScene(live, 1);
     expect(away.motion.bass.baseBars).toBe(0); // scene 2 has its own (off)
     const back = switchScene(away, 0);
-    expect(back.motion.bass).toEqual({ baseBars: 8, altBars: 4, chance: 75 });
+    expect(back.motion.bass).toEqual({ baseBars: 8, altBars: 4, chance: 75, kind: 1 });
   });
 
   it('fills the new settings into old saved settings, with everything off and no announcements', () => {
@@ -75,5 +76,23 @@ describe('breathing: scenes, saving and announcements', () => {
 
   it('keeps announce out of the scenes (it is a global setting)', () => {
     expect(Object.keys(defaultState.scenes[0])).not.toContain('announce');
+  });
+});
+
+describe('breathing presets and old saved settings', () => {
+  it('saved rules from before presets existed are Custom, not Off', () => {
+    const old = { motion: { bass: { baseBars: 8, altBars: 4, chance: 100 } } };
+    const s = migrateState(old);
+    expect(s.motion.preset).toBe(0);
+    expect(s.motion.bass.baseBars).toBe(8);
+    expect(s.motion.bass.kind).toBe(0);
+  });
+
+  it('a fresh install is Off, and each scene remembers its own preset', () => {
+    expect(migrateState({}).motion.preset).toBe(1);
+    const live = { ...defaultState, motion: { ...defaultState.motion, preset: 4 } };
+    const away = switchScene(live, 1);
+    expect(away.motion.preset).toBe(1);
+    expect(switchScene(away, 0).motion.preset).toBe(4);
   });
 });

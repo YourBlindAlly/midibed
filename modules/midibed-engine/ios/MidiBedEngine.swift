@@ -86,6 +86,7 @@ struct MidiBedMotionRule: Decodable {
   var baseBars: Int
   var altBars: Int
   var chance: Double
+  var kind: Int             // 0 = the layer's other version (follow/steady, or steady fifths), 1 = drop out completely
 }
 
 struct MidiBedBreakdown: Decodable {
@@ -248,7 +249,7 @@ final class MidiBedEngine {
       reconcileDrone()
       // At a bar line, processTick starts the new pad chord itself right after
       // this; starting it here too would double-trigger it.
-      if !atBar || !decoded.pad.enabled { reconcilePadEnabled() }
+      if !atBar || !padOn(decoded) { reconcilePadEnabled() }
       reconcileLoops(decoded)
     }
   }
@@ -420,16 +421,16 @@ final class MidiBedEngine {
     if rel >= 0, rel % chordTicks == 0 {
       chordIndex = (rel / chordTicks) % max(1, cfg.harmony.count)
       let padList = activePadChords(cfg)
-      if cfg.pad.enabled, !padList.isEmpty {
+      if padOn(cfg), !padList.isEmpty {
         playPad(padList[chordIndex % padList.count], pad: cfg.pad, at: time, retrigger: false)
       }
-      if cfg.drone.enabled, activeDroneChords(cfg).count > 1, !heldDrone.isEmpty {
+      if droneOn(cfg), activeDroneChords(cfg).count > 1, !heldDrone.isEmpty {
         reconcileDrone(keepLevel: true)
       }
     }
 
     // Drone retrigger (keeps the current fade level, so it does not fade in again).
-    if cfg.drone.enabled, cfg.drone.retriggerBars > 0, tick > 0,
+    if droneOn(cfg), cfg.drone.retriggerBars > 0, tick > 0,
       tick % (barTicks * cfg.drone.retriggerBars) == 0
     {
       releaseDrone()
@@ -472,12 +473,23 @@ final class MidiBedEngine {
 
   // MARK: Breathing
 
+  /// The notes to play: the other version only when the rule's alternate IS another
+  /// version (kind 0). A drop-out (kind 1) keeps the normal notes; the layer is just off.
   private func activeDroneChords(_ cfg: MidiBedConfig) -> [[Int]] {
-    bassRT.alt && !cfg.drone.altChords.isEmpty ? cfg.drone.altChords : cfg.drone.chords
+    bassRT.alt && cfg.motion.bass.kind == 0 && !cfg.drone.altChords.isEmpty ? cfg.drone.altChords : cfg.drone.chords
   }
 
   private func activePadChords(_ cfg: MidiBedConfig) -> [[Int]] {
-    padRT.alt && !cfg.pad.altChords.isEmpty ? cfg.pad.altChords : cfg.pad.chords
+    padRT.alt && cfg.motion.pad.kind == 0 && !cfg.pad.altChords.isEmpty ? cfg.pad.altChords : cfg.pad.chords
+  }
+
+  /// Switched on AND not currently dropped out by its breathing rule.
+  private func droneOn(_ cfg: MidiBedConfig) -> Bool {
+    cfg.drone.enabled && !(bassRT.alt && cfg.motion.bass.kind == 1)
+  }
+
+  private func padOn(_ cfg: MidiBedConfig) -> Bool {
+    cfg.pad.enabled && !(padRT.alt && cfg.motion.pad.kind == 1)
   }
 
   /// A drum plays if it is switched on and the current breakdown (if one is in
@@ -530,13 +542,29 @@ final class MidiBedEngine {
     let m = cfg.motion
     if stepRule(&bassRT, baseBars: m.bass.baseBars, altBars: m.bass.altBars, chance: m.bass.chance) {
       changed = true
-      // The bass notes change right now, on the bar line; shared notes keep sounding.
-      if cfg.drone.enabled { reconcileDrone(keepLevel: true) }
+      if m.bass.kind == 1 {
+        // Drop-out: going out eases out through updateFades. Coming back is immediate:
+        // full level, notes on right now, on the bar line.
+        if !bassRT.alt, cfg.drone.enabled {
+          droneLevel = 1
+          if !heldDrone.isEmpty { sendChannelLevel(cfg.drone.channel, force: true) }
+          reconcileDrone(keepLevel: true, immediate: true)
+        }
+      } else if cfg.drone.enabled {
+        // The bass notes change right now, on the bar line; shared notes keep sounding.
+        reconcileDrone(keepLevel: true)
+      }
     }
     if stepRule(&padRT, baseBars: m.pad.baseBars, altBars: m.pad.altBars, chance: m.pad.chance) {
       changed = true
       let list = activePadChords(cfg)
-      if cfg.pad.enabled, !list.isEmpty {
+      if m.pad.kind == 1 {
+        if !padRT.alt, cfg.pad.enabled, !list.isEmpty {
+          padLevel = 1
+          if !heldPad.isEmpty { sendChannelLevel(cfg.pad.channel, force: true) }
+          playPad(list[chordIndex % list.count], pad: cfg.pad, at: time, retrigger: false, immediate: true)
+        }
+      } else if cfg.pad.enabled, !list.isEmpty {
         playPad(list[chordIndex % list.count], pad: cfg.pad, at: time, retrigger: false)
       }
     }
@@ -625,13 +653,13 @@ final class MidiBedEngine {
 
     guard cfg.fade.cc > 0 else {
       // CC fades were switched off while something was mid-fade: finish cleanly.
-      if !cfg.drone.enabled, !heldDrone.isEmpty { releaseDrone() }
-      if !cfg.pad.enabled, !heldPad.isEmpty { releasePad() }
+      if !droneOn(cfg), !heldDrone.isEmpty { releaseDrone() }
+      if !padOn(cfg), !heldPad.isEmpty { releasePad() }
       return
     }
 
     if !heldDrone.isEmpty {
-      let up = cfg.drone.enabled
+      let up = droneOn(cfg)
       droneLevel = stepLevel(droneLevel, up: up, dt: dt, fadeIn: cfg.fade.droneIn, fadeOut: cfg.fade.droneOut)
       sendChannelLevel(cfg.drone.channel)
       if !up, droneLevel <= 0.001 {
@@ -641,7 +669,7 @@ final class MidiBedEngine {
       }
     }
     if !heldPad.isEmpty {
-      let up = cfg.pad.enabled
+      let up = padOn(cfg)
       padLevel = stepLevel(padLevel, up: up, dt: dt, fadeIn: cfg.fade.padIn, fadeOut: cfg.fade.padOut)
       sendChannelLevel(cfg.pad.channel)
       if !up, padLevel <= 0.001 {
@@ -654,12 +682,12 @@ final class MidiBedEngine {
 
   // MARK: Drone
 
-  private func reconcileDrone(keepLevel: Bool = false) {
+  private func reconcileDrone(keepLevel: Bool = false, immediate: Bool = false) {
     guard let cfg = config else { return }
     let d = cfg.drone
     let ch = max(0, min(15, d.channel))
 
-    guard d.enabled, running else {
+    guard droneOn(cfg), running else {
       // Switched off. With a fade-out and CC fading on, the notes stay held and
       // updateFades ramps them down, then releases. Otherwise stop right away.
       if !running || cfg.fade.cc <= 0 || cfg.fade.droneOut <= 0 {
@@ -678,7 +706,9 @@ final class MidiBedEngine {
     let toStart = wanted.filter { !heldDrone.contains($0) }
 
     heldDrone = wanted
-    if startingFromSilence && !keepLevel {
+    if startingFromSilence && immediate {
+      droneLevel = 1 // a return on the beat comes in at full strength, no fade-in
+    } else if startingFromSilence && !keepLevel {
       droneLevel = (cfg.fade.cc > 0 && cfg.fade.droneIn > 0) ? 0 : 1
     }
     // Set the starting volume BEFORE the notes so they never blip at the old level.
@@ -758,7 +788,7 @@ final class MidiBedEngine {
 
   // MARK: Chord pad
 
-  private func playPad(_ notes: [Int], pad: MidiBedPadConfig, at time: Double, retrigger: Bool) {
+  private func playPad(_ notes: [Int], pad: MidiBedPadConfig, at time: Double, retrigger: Bool, immediate: Bool = false) {
     let ch = max(0, min(15, pad.channel))
     let wanted = notes.map { HeldNote(channel: ch, note: max(0, min(127, $0))) }
     let startingFromSilence = heldPad.isEmpty
@@ -768,7 +798,7 @@ final class MidiBedEngine {
 
     heldPad = wanted
     if startingFromSilence, let cfg = config {
-      padLevel = (cfg.fade.cc > 0 && cfg.fade.padIn > 0) ? 0 : 1
+      padLevel = (!immediate && cfg.fade.cc > 0 && cfg.fade.padIn > 0) ? 0 : 1
       sendChannelLevel(ch, force: true)
     }
 
@@ -801,7 +831,7 @@ final class MidiBedEngine {
   /// Handles the Pad switch being toggled while playing.
   private func reconcilePadEnabled() {
     guard let cfg = config else { return }
-    if !cfg.pad.enabled {
+    if !padOn(cfg) {
       // With a fade-out and CC fading on, updateFades ramps down then releases.
       if cfg.fade.cc <= 0 || cfg.fade.padOut <= 0 {
         releasePad()
