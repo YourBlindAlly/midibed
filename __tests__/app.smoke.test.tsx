@@ -64,12 +64,12 @@ describe('whole screen smoke test', () => {
 
     await tabPress('Breathe');
     expect(labels(tree)).toEqual(
-      expect.arrayContaining(['Breathing preset', 'Right now', 'Bass: stay normal for', 'Pad: stay normal for', 'Drums: play for', 'Scene start sound in this scene', 'Drums break sound in this scene', 'Drums return sound in this scene']),
+      expect.arrayContaining(['Breathing preset', 'Right now', 'Bass: stay normal for', 'Pad: stay normal for', 'Drums: play for', 'Scene start sound in this scene', 'Drums break sound in this scene', 'Drums return sound in this scene', 'Recurring sound in this scene']),
     );
     expect(labels(tree)).not.toContain('Kick hits');
 
     await tabPress('Sound');
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Cutoff wander', 'Bass drone fade in', 'Chord pad program', 'Shortest lead-in', 'Scene start sound', 'Drums break sound', 'Drums return sound']));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Cutoff wander', 'Bass drone fade in', 'Chord pad program', 'Shortest lead-in', 'Scene start sound', 'Drums break sound', 'Drums return sound', 'Recurring sound']));
 
     await tabPress('Setup');
     expect(labels(tree)).toEqual(expect.arrayContaining(['Send MIDI', 'Built-in test sound', 'Announce breathing changes', 'Drums app profile']));

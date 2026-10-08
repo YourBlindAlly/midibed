@@ -44,7 +44,19 @@ import {
 } from './src/motion';
 import { PROFILES, ProfileRole, ccName, getProfile, profileForChannel, profileIndex, profileNoteName, stepDrumNote } from './src/profiles';
 import { loadState, saveState } from './src/storage';
-import { NOISE_COLOR_NAMES, NOISE_SHAPE_HINTS, NOISE_SHAPE_NAMES, TransitionSlot, eighthsText, isLeadIn } from './src/transitions';
+import {
+  NOISE_COLOR_NAMES,
+  NOISE_SHAPE_HINTS,
+  NOISE_SHAPE_NAMES,
+  RECURRING_COLOR_NAMES,
+  RECURRING_VARY_NAMES,
+  RECURRING_WHEN_NAMES,
+  RecurringState,
+  TransitionSlot,
+  eighthsText,
+  isLeadIn,
+  recurringSpacing,
+} from './src/transitions';
 import { Pager } from './src/Pager';
 import { TabBar, TabId, neighborTab, tabAnnouncement } from './src/tabs';
 
@@ -234,7 +246,10 @@ export default function App() {
     setState((s) => ({ ...s, motion: { ...s.motion, preset: 0, [layer]: { ...s.motion[layer], ...p } } }));
   const patchTransition = (which: 'entrance' | 'drumBreak' | 'drumReturn', p: Partial<TransitionSlot>) =>
     setState((s) => ({ ...s, transitions: { ...s.transitions, [which]: { ...s.transitions[which], ...p } } }));
-  const patchTransitionUse = (which: 'entrance' | 'drumBreak' | 'drumReturn', on: boolean) =>
+  const patchRecurring = (p: Partial<RecurringState>) => setState((s) => ({ ...s, recurring: { ...s.recurring, ...p } }));
+  const toggleRecurringShape = (i: number, on: boolean) =>
+    setState((s) => ({ ...s, recurring: { ...s.recurring, shapes: s.recurring.shapes.map((v, k) => (k === i ? on : v)) } }));
+  const patchTransitionUse = (which: 'entrance' | 'drumBreak' | 'drumReturn' | 'recurring', on: boolean) =>
     setState((s) => ({ ...s, transitionUse: { ...s.transitionUse, [which]: on } }));
   const patchBreakdown = (p: Partial<DrumBreakdown>) =>
     setState((s) => ({ ...s, motion: { ...s.motion, preset: 0, drums: { ...s.motion.drums, ...p } } }));
@@ -729,6 +744,7 @@ export default function App() {
             <Toggle label="Scene start sound in this scene" value={state.transitionUse.entrance} onChange={(v) => patchTransitionUse('entrance', v)} hint="Plays as this scene starts" />
             <Toggle label="Drums break sound in this scene" value={state.transitionUse.drumBreak} onChange={(v) => patchTransitionUse('drumBreak', v)} hint="Plays as the drums drop out in a breakdown" />
             <Toggle label="Drums return sound in this scene" value={state.transitionUse.drumReturn} onChange={(v) => patchTransitionUse('drumReturn', v)} hint="Plays as the drums come back" />
+            <Toggle label="Recurring sound in this scene" value={state.transitionUse.recurring} onChange={(v) => patchTransitionUse('recurring', v)} hint="The sound that comes round every so many bars or at the end of each chord loop" />
           </Section>
             </>
           )}
@@ -924,6 +940,49 @@ export default function App() {
               </Section>
             );
           })}
+
+          <Section title="Recurring sound">
+            <Text style={styles.note}>
+              A sound that comes round now and then inside a scene: every few bars, or at the end of each chord loop. It skips the first loop of a scene, which is where the scene start sound belongs. The settings are the same in every scene; each scene can switch it off on the Breathe tab. If the rise is longer than the gap between sounds, a later sound joins its sweep part-way.
+            </Text>
+            <Toggle label="Recurring sound" value={state.recurring.on} onChange={(v) => patchRecurring({ on: v })} />
+            {state.recurring.on && (
+              <>
+                <Stepper label="Recurring: when" value={state.recurring.when} onChange={(v) => patchRecurring({ when: v })} min={0} max={RECURRING_WHEN_NAMES.length - 1} format={(v) => RECURRING_WHEN_NAMES[v]} hint="Either every so many bars, or at the end of each run through the chords" />
+                {state.recurring.when === 0 ? (
+                  <Stepper label="Recurring: every" value={state.recurring.everyBars} onChange={(v) => patchRecurring({ everyBars: v })} min={1} max={64} bigStep={4} format={(v) => (v === 1 ? '1 bar' : `${v} bars`)} />
+                ) : (
+                  <View accessible accessibilityLabel="Chord loop length" accessibilityValue={{ text: `${recurringSpacing(state.recurring, state.harmony)} bars` }}>
+                    <Text style={styles.note}>The chord loop is {recurringSpacing(state.recurring, state.harmony)} bars long.</Text>
+                  </View>
+                )}
+                <Stepper label="Recurring: chance" value={state.recurring.chance} onChange={(v) => patchRecurring({ chance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} hint="At 100 it plays every time. Lower, and it sometimes lets a turn pass." />
+                <Stepper label="Recurring: variety" value={state.recurring.vary} onChange={(v) => patchRecurring({ vary: v })} min={0} max={RECURRING_VARY_NAMES.length - 1} format={(v) => RECURRING_VARY_NAMES[v]} />
+                {state.recurring.vary === 0 ? (
+                  <Stepper label="Recurring: shape" value={state.recurring.shape} onChange={(v) => patchRecurring({ shape: v })} min={0} max={NOISE_SHAPE_NAMES.length - 1} format={(v) => NOISE_SHAPE_NAMES[v]} hint={NOISE_SHAPE_HINTS[state.recurring.shape]} />
+                ) : (
+                  NOISE_SHAPE_NAMES.map((name, i) => (
+                    <Toggle key={name} label={`Recurring: use ${name}`} value={state.recurring.shapes[i]} onChange={(v) => toggleRecurringShape(i, v)} hint={NOISE_SHAPE_HINTS[i]} />
+                  ))
+                )}
+                <Stepper label="Recurring: colour choice" value={state.recurring.colorMode} onChange={(v) => patchRecurring({ colorMode: v })} min={0} max={RECURRING_COLOR_NAMES.length - 1} format={(v) => RECURRING_COLOR_NAMES[v]} />
+                {state.recurring.colorMode === 0 && (
+                  <Stepper label="Recurring: noise colour" value={state.recurring.color} onChange={(v) => patchRecurring({ color: v })} min={0} max={NOISE_COLOR_NAMES.length - 1} format={(v) => NOISE_COLOR_NAMES[v]} />
+                )}
+                <Stepper label="Recurring: length" value={state.recurring.beats} onChange={(v) => patchRecurring({ beats: v })} min={1} max={32} bigStep={4} format={(v) => (v === 1 ? '1 beat' : `${v} beats`)} hint="One length for every shape. Lead-ins rise over this long; the others last this long." />
+                <Stepper label="Recurring: level" value={state.recurring.level} onChange={(v) => patchRecurring({ level: v })} min={5} max={100} step={5} format={(v) => `${v} percent`} />
+                <ActionButton
+                  label="Hear the recurring sound"
+                  hint="Plays one now, with the first shape you have ticked or chosen"
+                  onPress={() => {
+                    const r = state.recurring;
+                    const shape = r.vary === 0 ? r.shape : Math.max(0, r.shapes.findIndex(Boolean));
+                    engine.playTransitionNow(shape, r.colorMode === 1 ? 1 : r.color, r.beats, r.level / 100);
+                  }}
+                />
+              </>
+            )}
+          </Section>
             </>
           )}
           {tab === 'setup' && (

@@ -1,5 +1,15 @@
 import { defaultState, migrateState, switchScene, toEngineJson } from '../src/config';
-import { NOISE_SHAPE_NAMES, defaultTransitions, eighthsText, isLeadIn, planTransition } from '../src/transitions';
+import {
+  NOISE_SHAPE_NAMES,
+  defaultRecurring,
+  defaultTransitions,
+  eighthsText,
+  isLeadIn,
+  planTransition,
+  recurringSpacing,
+  shapeMask,
+  simulateRecurring,
+} from '../src/transitions';
 
 describe('transition names and kinds', () => {
   it('uses Rusty\'s names', () => {
@@ -56,8 +66,8 @@ describe('transition settings are global, with a per-scene switch', () => {
   });
 
   it('every scene uses the sounds unless it switches them off', () => {
-    expect(defaultState.transitionUse).toEqual({ entrance: true, drumBreak: true, drumReturn: true });
-    expect(defaultState.scenes.every((sc) => sc.transitionUse.entrance && sc.transitionUse.drumBreak && sc.transitionUse.drumReturn)).toBe(true);
+    expect(defaultState.transitionUse).toEqual({ entrance: true, drumBreak: true, drumReturn: true, recurring: true });
+    expect(defaultState.scenes.every((sc) => Object.values(sc.transitionUse).every(Boolean))).toBe(true);
   });
 
   it('are sent to the engine with level as 0 to 1 and the minimum in beats', () => {
@@ -131,5 +141,93 @@ describe('upgrading levels saved before the level scale changed', () => {
     const once = migrateState(old);
     const twice = migrateState(JSON.parse(JSON.stringify(once)));
     expect(twice.transitions.entrance.level).toBe(25);
+  });
+});
+
+describe('the recurring sound', () => {
+  it('starts switched off, at the end of each chord loop, with some chance and variety', () => {
+    expect(defaultRecurring.on).toBe(false);
+    expect(defaultRecurring.when).toBe(1);
+    expect(defaultRecurring.vary).toBe(1);
+    expect(defaultRecurring.chance).toBeLessThan(100);
+    expect(defaultRecurring.shapes).toHaveLength(NOISE_SHAPE_NAMES.length);
+  });
+
+  it('works out the gap between sounds from the bars, or from the chord loop', () => {
+    expect(recurringSpacing({ when: 0, everyBars: 6 }, { barsPerChord: 2, count: 4 })).toBe(6);
+    expect(recurringSpacing({ when: 1, everyBars: 6 }, { barsPerChord: 2, count: 4 })).toBe(8);
+    expect(recurringSpacing({ when: 1, everyBars: 6 }, { barsPerChord: 4, count: 2 })).toBe(8);
+    expect(recurringSpacing({ when: 1, everyBars: 6 }, { barsPerChord: 1, count: 1 })).toBe(1);
+  });
+
+  it('turns the ticked shapes into a bit mask', () => {
+    expect(shapeMask([true, true, false, false, true])).toBe(0b10011);
+    expect(shapeMask([false, false, false, false, false])).toBe(0);
+    expect(shapeMask([true, true, true, true, true])).toBe(31);
+  });
+
+  it('is sent to the engine, on only if it is on globally AND the scene uses it', () => {
+    const on = { ...defaultState, recurring: { ...defaultState.recurring, on: true, level: 30 } };
+    const j = JSON.parse(toEngineJson(on));
+    expect(j.transitions.recurring).toMatchObject({ on: true, when: 1, shapeMask: 0b10011, beats: 8, level: 0.3, chance: 70 });
+    const muted = { ...on, transitionUse: { ...on.transitionUse, recurring: false } };
+    expect(JSON.parse(toEngineJson(muted)).transitions.recurring.on).toBe(false);
+    expect(JSON.parse(toEngineJson(defaultState)).transitions.recurring.on).toBe(false);
+  });
+
+  it('is global; only the per-scene switch is saved in a scene', () => {
+    const live = { ...defaultState, recurring: { ...defaultState.recurring, on: true } };
+    expect(switchScene(live, 1).recurring.on).toBe(true);
+    expect(Object.keys(defaultState.scenes[0])).not.toContain('recurring');
+  });
+
+  it('fills in for old saved settings', () => {
+    const s = migrateState({ bpm: 100 });
+    expect(s.recurring.on).toBe(false);
+    expect(s.recurring.shapes).toEqual(defaultRecurring.shapes);
+    expect(s.transitionUse.recurring).toBe(true);
+  });
+});
+
+describe('when the recurring sound is scheduled', () => {
+  const yes = Array(20).fill(true);
+
+  it('skips the first boundary, so nothing plays in the first loop', () => {
+    const ev = simulateRecurring({ spacing: 4, preBars: 0, bars: 30, plays: yes });
+    expect(ev[0].boundary).toBe(8); // not 4
+    expect(ev.map((e) => e.boundary)).toEqual([8, 12, 16, 20, 24, 28]);
+  });
+
+  it('a sound that plays on the boundary is scheduled at that very bar line (not lost)', () => {
+    const ev = simulateRecurring({ spacing: 4, preBars: 0, bars: 12, plays: yes });
+    expect(ev).toEqual([
+      { boundary: 8, scheduledAtBar: 8, late: false },
+      { boundary: 12, scheduledAtBar: 12, late: false },
+    ]);
+  });
+
+  it('a lead-in is scheduled early enough to rise its full length into the boundary', () => {
+    // Two bars of rise: starts at bar 6 for the boundary at bar 8.
+    const ev = simulateRecurring({ spacing: 4, preBars: 2, bars: 12, plays: yes });
+    expect(ev[0]).toEqual({ boundary: 8, scheduledAtBar: 6, late: false });
+    expect(ev[1]).toEqual({ boundary: 12, scheduledAtBar: 10, late: false });
+  });
+
+  it('a lead-in longer than the gap joins its sweep part-way, and is marked late', () => {
+    const ev = simulateRecurring({ spacing: 2, preBars: 3, bars: 12, plays: yes });
+    expect(ev[0]).toEqual({ boundary: 4, scheduledAtBar: 2, late: true });
+    expect(ev.every((e) => e.late)).toBe(true);
+  });
+
+  it('the chance decides each boundary once, and a failed roll just lets that turn pass', () => {
+    const ev = simulateRecurring({ spacing: 4, preBars: 0, bars: 24, plays: [true, false, true, true] });
+    expect(ev.map((e) => e.boundary)).toEqual([8, 16, 20]);
+    expect(simulateRecurring({ spacing: 4, preBars: 0, bars: 24, plays: [] })).toEqual([]);
+  });
+
+  it('every bar: the first bar is skipped and then every bar has a sound', () => {
+    const ev = simulateRecurring({ spacing: 1, preBars: 0, bars: 6, plays: yes });
+    expect(ev.map((e) => e.boundary)).toEqual([2, 3, 4, 5, 6, 7].slice(0, ev.length));
+    expect(ev[0].boundary).toBe(2);
   });
 });

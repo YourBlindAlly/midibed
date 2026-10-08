@@ -1,6 +1,15 @@
 import { buildBassChords, buildPadChords } from './chords';
 import { MotionState, defaultMotion, drumRole } from './motion';
-import { NOISE_VERSION, TransitionUse, TransitionsState, defaultTransitionUse, defaultTransitions } from './transitions';
+import {
+  NOISE_VERSION,
+  RecurringState,
+  TransitionUse,
+  TransitionsState,
+  defaultRecurring,
+  defaultTransitionUse,
+  defaultTransitions,
+  shapeMask,
+} from './transitions';
 import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice } from './profiles';
 
@@ -150,6 +159,8 @@ export type BedState = {
   announce: boolean;
   /** The transition sounds (how a scene starts, how the drums break down and return). Global. */
   transitions: TransitionsState;
+  /** The recurring sound (every N bars or at the end of each chord loop). Global. */
+  recurring: RecurringState;
   /** Per scene: which of those sounds this scene plays. */
   transitionUse: TransitionUse;
   /** Level-scale version of the saved transition levels (see NOISE_VERSION). */
@@ -312,6 +323,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
   motion: defaultMotion,
   announce: false,
   transitions: defaultTransitions,
+  recurring: defaultRecurring,
   transitionUse: defaultTransitionUse,
   noiseVersion: NOISE_VERSION,
   transitionMinEighths: 1,
@@ -581,6 +593,19 @@ export function toEngineJson(s: BedState): string {
       entrance: { ...s.transitions.entrance, on: s.transitions.entrance.on && s.transitionUse.entrance, level: s.transitions.entrance.level / 100 },
       drumBreak: { ...s.transitions.drumBreak, on: s.transitions.drumBreak.on && s.transitionUse.drumBreak, level: s.transitions.drumBreak.level / 100 },
       drumReturn: { ...s.transitions.drumReturn, on: s.transitions.drumReturn.on && s.transitionUse.drumReturn, level: s.transitions.drumReturn.level / 100 },
+      recurring: {
+        on: s.recurring.on && s.transitionUse.recurring,
+        when: s.recurring.when,
+        everyBars: s.recurring.everyBars,
+        chance: s.recurring.chance,
+        vary: s.recurring.vary,
+        shape: s.recurring.shape,
+        shapeMask: shapeMask(s.recurring.shapes),
+        colorMode: s.recurring.colorMode,
+        color: s.recurring.color,
+        beats: s.recurring.beats,
+        level: s.recurring.level / 100,
+      },
     },
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
     fade: {

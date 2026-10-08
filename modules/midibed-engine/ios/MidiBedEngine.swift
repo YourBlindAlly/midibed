@@ -113,11 +113,28 @@ struct MidiBedTransitionSlot: Decodable {
   var level: Double         // 0...1
 }
 
+/// A sound that comes round now and then inside a scene (every N bars, or at the end of each
+/// chord loop), with a chance, and optionally varying its shape and colour.
+struct MidiBedRecurring: Decodable {
+  var on: Bool
+  var when: Int             // 0 every `everyBars` bars, 1 end of each chord loop
+  var everyBars: Int
+  var chance: Double        // percent
+  var vary: Int             // 0 the same shape each time, 1 random from shapeMask, 2 shapeMask in turn
+  var shape: Int
+  var shapeMask: Int        // bit 0 = Wave ... bit 4 = Crash
+  var colorMode: Int        // 0 the chosen colour, 1 a random colour each time
+  var color: Int
+  var beats: Double
+  var level: Double         // 0...1
+}
+
 struct MidiBedTransitionConfig: Decodable {
   var minLeadBeats: Double  // a lead-in needs at least this long before the bar line, else its "downer" plays on the bar
   var entrance: MidiBedTransitionSlot   // when a scene starts
   var drumBreak: MidiBedTransitionSlot  // as the drums drop out in a breakdown
   var drumReturn: MidiBedTransitionSlot // as the drums come back from a breakdown
+  var recurring: MidiBedRecurring
 }
 
 struct MidiBedConfig: Decodable {
@@ -187,7 +204,7 @@ final class MidiBedEngine {
 
   private struct PendingNoise {
     var time: Double
-    var tag: Int // 0 scene entrance, 1 drum return, 2 drum break
+    var tag: Int // 0 scene entrance, 1 drum return, 2 drum break, 3 recurring
     var shape: Int
     var color: Int
     var pre: Double
@@ -196,6 +213,15 @@ final class MidiBedEngine {
     var level: Double
   }
   private var pendingNoise: [PendingNoise] = []
+
+  // The recurring sound: the bar (counted from the scene start) of the next boundary, whether
+  // that boundary gets a sound, which, and whether it has been scheduled yet.
+  private var recurBoundary = 0
+  private var recurPlay = false
+  private var recurShape = 0
+  private var recurColor = 0
+  private var recurScheduled = true
+  private var recurTurn = 0
 
   private struct HeldNote: Equatable {
     var channel: Int
@@ -453,7 +479,10 @@ final class MidiBedEngine {
 
     // Breathing: at every bar line after the scene's first, step each rule.
     let sceneTick = tick - padStartTick
-    if sceneTick > 0, sceneTick % barTicks == 0 { stepMotion(at: time, cfg: cfg) }
+    if sceneTick > 0, sceneTick % barTicks == 0 {
+      stepMotion(at: time, cfg: cfg)
+      stepRecurring(time: time, bar: sceneTick / barTicks, cfg: cfg)
+    }
 
     // Harmony: the chord loop changes chord every `barsPerChord` bars (counted from
     // the last scene switch). The pad and a following bass both change then.
@@ -587,6 +616,69 @@ final class MidiBedEngine {
     pendingNoise = later
   }
 
+  // MARK: Recurring sound
+
+  /// Bars between recurring sounds.
+  private func recurringSpacing(_ cfg: MidiBedConfig) -> Int {
+    let r = cfg.transitions.recurring
+    return r.when == 0 ? max(1, r.everyBars) : max(1, cfg.harmony.barsPerChord) * max(1, cfg.harmony.count)
+  }
+
+  /// Decide, once, what the next boundary will play (or whether it lets its turn pass).
+  private func rollRecurring(_ rec: MidiBedRecurring) {
+    recurScheduled = false
+    recurPlay = Double.random(in: 0..<1, using: &rng) * 100 < rec.chance
+    guard recurPlay else { return }
+    let allowed = (0..<5).filter { rec.shapeMask & (1 << $0) != 0 }
+    if rec.vary == 1, let pick = allowed.randomElement(using: &rng) {
+      recurShape = pick
+    } else if rec.vary == 2, !allowed.isEmpty {
+      recurShape = allowed[recurTurn % allowed.count]
+      recurTurn += 1
+    } else {
+      recurShape = rec.shape
+    }
+    recurColor = rec.colorMode == 1 ? Int.random(in: 0..<3, using: &rng) : rec.color
+  }
+
+  /// Must behave exactly like `simulateRecurring` in src/transitions.ts (which is unit-tested).
+  /// Called at every bar line after the scene's first, with the bar number counted from the
+  /// scene start. A sound is scheduled at the first bar line whose bar contains its start
+  /// (its boundary minus its lead-up); if that moment has already passed, scheduleTransition
+  /// makes it join its sweep part-way.
+  private func stepRecurring(time: Double, bar r: Int, cfg: MidiBedConfig) {
+    let rec = cfg.transitions.recurring
+    guard rec.on else {
+      recurPlay = false
+      return
+    }
+    let spacing = recurringSpacing(cfg)
+    // 1. A sound already waiting goes out first, if its start falls in this bar. (A sound that
+    //    plays ON the boundary is due at the very bar line where that boundary is reached, so it
+    //    must be scheduled BEFORE the next boundary is rolled, or the roll would replace it.)
+    scheduleRecurringIfDue(time: time, bar: r, cfg: cfg)
+    // 2. Reaching a boundary: decide the next one, and schedule it at once if it is already due.
+    if recurBoundary <= r {
+      recurBoundary = (r / spacing + 1) * spacing
+      rollRecurring(rec)
+      scheduleRecurringIfDue(time: time, bar: r, cfg: cfg)
+    }
+  }
+
+  private func scheduleRecurringIfDue(time: Double, bar r: Int, cfg: MidiBedConfig) {
+    guard recurPlay, !recurScheduled else { return }
+    let rec = cfg.transitions.recurring
+    let bpm = max(20.0, min(300.0, cfg.bpm))
+    let barDur = 60.0 / bpm * Double(beatsPerBar)
+    let pre = noiseSeconds(shape: recurShape, beats: rec.beats, bpm: bpm).pre
+    let boundaryTime = time - Double(r) * barDur + Double(recurBoundary) * barDur
+    if boundaryTime - pre < time + barDur {
+      let slot = MidiBedTransitionSlot(on: true, shape: recurShape, color: recurColor, beats: rec.beats, level: rec.level)
+      scheduleTransition(slot, tag: 3, barTime: boundaryTime, cfg: cfg)
+      recurScheduled = true
+    }
+  }
+
   // MARK: Breathing
 
   /// The notes to play: the other version only when the rule's alternate IS another
@@ -646,6 +738,14 @@ final class MidiBedEngine {
     bassRT = RuleRuntime(alt: false, barsLeft: max(0, cfg.motion.bass.baseBars))
     padRT = RuleRuntime(alt: false, barsLeft: max(0, cfg.motion.pad.baseBars))
     drumRT = RuleRuntime(alt: false, barsLeft: max(0, cfg.motion.drums.baseBars))
+    // Lead-ins the old scene had scheduled but not started are dropped (the new scene's own
+    // scene-start sound, tag 0, is kept: it is due on this very bar line).
+    pendingNoise.removeAll { $0.tag != 0 }
+    // The recurring sound: the first boundary is skipped, so nothing recurring plays in the first loop.
+    recurBoundary = recurringSpacing(cfg)
+    recurPlay = false
+    recurScheduled = true
+    recurTurn = 0
     emitMotion("reset")
   }
 
