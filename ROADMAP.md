@@ -98,7 +98,7 @@ G. **MIDI file capture.** Record what the bed played to a .mid file so a good pa
 H. **Backups.** Export/import all settings to the Files app. Settings now live only on the phone.
 I. **Spoken status (optional).** Quiet announcements of scene or song changes, off by default.
 
-## Interface structure (proposal, 2026-10-08, awaiting Rusty's answers)
+## Interface structure (BUILT 2026-10-08 as round 14; bottom tab bar, tempo+swing on Live)
 
 Problem: one very long screen. Proposal: tabs, with the live controls always one gesture away.
 - A slim strip at the TOP of every tab: Play/Stop, bar.beat position, and the four scene buttons. Never hidden.

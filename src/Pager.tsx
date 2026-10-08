@@ -1,0 +1,38 @@
+import React from 'react';
+import { View, type StyleProp, type ViewStyle } from 'react-native';
+
+/**
+ * Wraps the screen so VoiceOver's three-finger left/right swipe (and the matching
+ * braille-keyboard command) can move between tabs. See ios/MidiBedPagerView.swift.
+ * Falls back to a plain View where there is no native engine (Jest, a browser).
+ */
+let NativePager: React.ComponentType<{
+  style?: StyleProp<ViewStyle>;
+  onPage?: (e: { nativeEvent: { direction: 'next' | 'previous' } }) => void;
+  children?: React.ReactNode;
+}> | null = null;
+
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { requireNativeViewManager } = require('expo-modules-core');
+  NativePager = requireNativeViewManager('MidiBedEngine');
+} catch {
+  NativePager = null;
+}
+
+export function Pager({
+  onPage,
+  style,
+  children,
+}: {
+  onPage: (direction: 'next' | 'previous') => void;
+  style?: StyleProp<ViewStyle>;
+  children?: React.ReactNode;
+}) {
+  if (!NativePager) return <View style={style}>{children}</View>;
+  return (
+    <NativePager style={style} onPage={(e) => onPage(e.nativeEvent.direction)}>
+      {children}
+    </NativePager>
+  );
+}

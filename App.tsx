@@ -32,8 +32,21 @@ import { describePattern, patternText } from './src/euclid';
 import { engine, hasNativeEngine, onBeat, testSweep } from './src/engine';
 import { PROFILES, ProfileRole, ccName, getProfile, profileForChannel, profileIndex, profileNoteName, stepDrumNote } from './src/profiles';
 import { loadState, saveState } from './src/storage';
+import { Pager } from './src/Pager';
+import { TabBar, TabId, neighborTab, tabAnnouncement } from './src/tabs';
 
 const KEEP_AWAKE_TAG = 'midibed-playing';
+// Speak a short status after a user action. Kept off the main path and wrapped so a
+// missing screen reader (tests, web) can never break the app.
+function announceLater(message: string, delay = 400) {
+  setTimeout(() => {
+    try {
+      AccessibilityInfo.announceForAccessibility(message);
+    } catch {
+      // ignore
+    }
+  }, delay);
+}
 const channelText = (v: number) => String(v + 1);
 const fadeText = (v: number) => (v === 0 ? 'none' : `${(v / 10).toFixed(1)} seconds`);
 
@@ -103,13 +116,21 @@ export default function App() {
     }
   };
 
+  // Tabs. A three-finger swipe (or the braille-keyboard equivalent) moves between them.
+  const [tab, setTab] = useState<TabId>('live');
+  const selectTab = (id: TabId, announce = false) => {
+    setTab(id);
+    if (announce) announceLater(tabAnnouncement(id), 400);
+  };
+  const handlePage = (direction: 'next' | 'previous') => selectTab(neighborTab(tab, direction), true);
+
   // VoiceOver "magic tap" (two-finger double tap, anywhere on the screen) starts or
   // stops playback. The handler sits on a plain wrapper View, NOT an accessible one,
   // so every control inside stays individually reachable by VoiceOver.
   const onMagicTap = () => {
     const stopping = playing;
     togglePlay();
-    setTimeout(() => AccessibilityInfo.announceForAccessibility(stopping ? 'Stopped' : 'Playing'), 300);
+    announceLater(stopping ? 'Stopped' : 'Playing', 300);
   };
 
   const patch = (p: Partial<BedState>) => setState((s) => ({ ...s, ...p }));
@@ -140,13 +161,13 @@ export default function App() {
     setState(next);
     setQueuedScene(queued ? to : null);
     const msg = queued ? `Scene ${to + 1}, starts at the next bar` : `Scene ${to + 1}`;
-    setTimeout(() => AccessibilityInfo.announceForAccessibility(msg), 500);
+    announceLater(msg, 500);
   };
 
   const copySceneTo = (to: number) => {
     if (to === state.activeScene) return;
     setState((s) => copyScene(s, to));
-    setTimeout(() => AccessibilityInfo.announceForAccessibility(`Copied scene ${state.activeScene + 1} to scene ${to + 1}`), 500);
+    announceLater(`Copied scene ${state.activeScene + 1} to scene ${to + 1}`, 500);
   };
 
   const patchFade =(p: Partial<FadeState>) => setState((s) => ({ ...s, fade: { ...s.fade, ...p } }));
@@ -204,10 +225,11 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <StatusBar style="light" />
-        <View style={styles.fill} onMagicTap={onMagicTap}>
-        <ScrollView contentContainerStyle={styles.scroll}>
+        <Pager style={styles.fill} onPage={handlePage}>
+          <View style={styles.fill} onMagicTap={onMagicTap}>
+            <View style={styles.strip}>
           <Text style={styles.title} accessibilityRole="header">
             MidiBed
           </Text>
@@ -231,22 +253,6 @@ export default function App() {
             <Text style={styles.position}>{position}</Text>
           </View>
 
-          <Section title="Layers">
-            <Text style={styles.note}>
-              Quick on and off for each part. Switching one fades it in or out using your fade times. Saved in each scene.
-            </Text>
-            <Toggle label="Drone layer" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
-            <Toggle label="Chord pad layer" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
-            <Toggle
-              label="Percussion layer"
-              value={state.percussion}
-              onChange={(v) => patch({ percussion: v })}
-              hint="Turns all the drums on or off together. Each drum keeps its own setting"
-            />
-            <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
-          </Section>
-
-          <Section title="Scenes">
             <View style={styles.sceneRow}>
               {Array.from({ length: SCENE_COUNT }, (_, i) => {
                 const active = i === state.activeScene;
@@ -271,6 +277,31 @@ export default function App() {
                 ? `Scene ${state.activeScene + 1} starts at the next bar`
                 : `Scene ${state.activeScene + 1} is playing`}
             </Text>
+            </View>
+            <ScrollView key={tab} style={styles.fill} contentContainerStyle={styles.scroll}>
+          {tab === 'live' && (
+            <>
+          <Section title="Layers">
+            <Text style={styles.note}>
+              Quick on and off for each part. Switching one fades it in or out using your fade times. Saved in each scene.
+            </Text>
+            <Toggle label="Drone layer" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
+            <Toggle label="Chord pad layer" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
+            <Toggle
+              label="Percussion layer"
+              value={state.percussion}
+              onChange={(v) => patch({ percussion: v })}
+              hint="Turns all the drums on or off together. Each drum keeps its own setting"
+            />
+            <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
+          </Section>
+
+          <Section title="Tempo and swing">
+            <Stepper label="Tempo" value={state.bpm} onChange={(v) => patch({ bpm: v })} min={40} max={200} bigStep={10} format={(v) => `${v} BPM`} />
+            <Stepper label="Swing" value={state.swing} onChange={(v) => patch({ swing: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+          </Section>
+
+          <Section title="Scene tools">
             <Text style={styles.note}>
               Each scene remembers its drums, drone on/off and voicing, chord pad, swing, and filter movement. Tempo, drone root, outputs, fades and MIDI routing stay the same in every scene. Changes you make are saved into the current scene.
             </Text>
@@ -287,59 +318,291 @@ export default function App() {
               onPress={() => copySceneTo(copyTarget - 1)}
             />
           </Section>
-
-          <Section title="Tempo and output">
-            <Stepper label="Tempo" value={state.bpm} onChange={(v) => patch({ bpm: v })} min={40} max={200} bigStep={10} format={(v) => `${v} BPM`} />
-            <Stepper label="Swing" value={state.swing} onChange={(v) => patch({ swing: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
-            <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
-            <Toggle label="Send MIDI clock and start" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo and start with Play" />
-            <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />
+            </>
+          )}
+          {tab === 'harmony' && (
+            <>
+          <Section title="Harmony">
+            <Text style={styles.note}>
+              The chord loop. The chord pad and the bass drone can follow it. Chords are built on the drone root note, in the mode you choose. The loop keeps time even if nothing is following it.
+            </Text>
+            <Stepper
+              label="Progression preset"
+              value={state.harmony.preset}
+              onChange={choosePreset}
+              min={0}
+              max={PRESETS.length - 1}
+              format={(v) => PRESETS[v]?.name ?? 'Custom'}
+              hint="Swipe to choose a chord pattern. It follows the mode and the drone root."
+            />
+            <Stepper
+              label="Mode"
+              value={state.harmony.mode}
+              onChange={(v) => patchHarmony({ mode: v })}
+              min={0}
+              max={MODE_NAMES.length - 1}
+              format={(v) => MODE_NAMES[v]}
+              hint="The scale the chords come from, built on the drone root note."
+            />
+            <Stepper label="Chords in loop" value={state.harmony.count} onChange={(v) => patchHarmony({ count: v, preset: 0 })} min={1} max={4} />
+            {state.harmony.degrees.slice(0, state.harmony.count).map((d, i) => (
+              <Stepper
+                key={i}
+                label={`Chord ${i + 1} scale degree`}
+                value={d}
+                onChange={(v) => setDegree(i, v)}
+                min={1}
+                max={7}
+                format={(v) => `${v}, ${chordLabel(state.drone.root, state.harmony.mode, v, 0)}`}
+              />
+            ))}
+            <View accessible accessibilityLabel="Chord loop" accessibilityValue={{ text: `${harmonySummary}, ${state.harmony.barsPerChord} bars each` }}>
+              <Text style={styles.note}>{harmonySummary}</Text>
+            </View>
+            <Stepper
+              label="Bars per chord"
+              value={state.harmony.barsPerChord}
+              onChange={(v) => patchHarmony({ barsPerChord: v })}
+              min={1}
+              max={8}
+              format={(v) => (v === 1 ? '1 bar' : `${v} bars`)}
+            />
           </Section>
 
-          <Section title="Apps and devices">
+          <Section title="Drone and bass">
+            <Toggle label="Drone" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
+            <Stepper label="Drone MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the bass drone plays on" />
+            <ActionButton label="Play drone test note" hint="Plays the drone root for a moment on the drone channel, to check routing" onPress={() => engine.sendNote(state.drone.channel, state.drone.root, state.drone.velocity, 1500)} />
+            <Stepper
+              label="Root note"
+              value={state.drone.root}
+              onChange={(v) => patchDrone({ root: v })}
+              min={24}
+              max={60}
+              bigStep={12}
+              format={noteName}
+            />
+            <Toggle
+              label="Drone follows chords"
+              value={state.drone.follow}
+              onChange={(v) => patchDrone({ follow: v })}
+              hint="Off: the drone stays on the root note. On: it plays the root of each chord of the harmony, changing with the chords"
+            />
+            <Toggle label="Add octave" value={state.drone.octave} onChange={(v) => patchDrone({ octave: v })} />
+            <Toggle
+              label="Add fifth"
+              value={state.drone.fifth}
+              onChange={(v) => patchDrone({ fifth: v })}
+              hint="For a root and fifth drone, turn this on and turn the octave off"
+            />
+            <Stepper label="Drone velocity" value={state.drone.velocity} onChange={(v) => patchDrone({ velocity: v })} min={1} max={127} step={5} />
+            <Stepper
+              label="Retrigger every"
+              value={state.drone.retriggerBars}
+              onChange={(v) => patchDrone({ retriggerBars: v })}
+              min={0}
+              max={32}
+              format={(v) => (v === 0 ? 'never' : `${v} bars`)}
+            />
+            {(() => {
+              const text = state.drone.follow
+                ? `Follows the chords: ${droneChords(state).map((c) => c.map(noteName).join(' ')).join(', then ')}`
+                : `Plays ${droneNotes(state.drone).map(noteName).join(' ')}`;
+              return (
+                <Text style={styles.note} accessibilityLabel={text}>
+                  {text}
+                </Text>
+              );
+            })()}
+          </Section>
+
+          <Section title="Chord pad">
+            <Toggle label="Chord pad" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
+            <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the chords play on. Use the drone channel to play both with one sound" />
+            <Toggle
+              label="Pad follows chords"
+              value={state.pad.follow}
+              onChange={(v) => patchPad({ follow: v })}
+              hint="On: plays each chord of the harmony in turn. Off: one steady chord on the key. With the Fifth only chord type, that is a fifths drone"
+            />
+            <Stepper label="Chord type" value={state.pad.style} onChange={(v) => patchPad({ style: v })} min={0} max={STYLE_NAMES.length - 1} format={(v) => STYLE_NAMES[v]} hint="Fifth only plays just the root and the fifth" />
+            <Stepper label="Lowest pad note" value={state.pad.register} onChange={(v) => patchPad({ register: v })} min={36} max={72} bigStep={12} format={noteName} hint="Where the pad sits. The drone stays low." />
+            <Toggle label="Smooth voice leading" value={state.pad.voiceLead} onChange={(v) => patchPad({ voiceLead: v })} hint="Each chord moves as little as possible from the last one" />
+            <Toggle label="Open spread voicing" value={state.pad.spread} onChange={(v) => patchPad({ spread: v })} hint="Lifts the second note an octave. With smooth voice leading it applies to the first chord only" />
+            <Stepper label="Strum" value={state.pad.strumMs} onChange={(v) => patchPad({ strumMs: v })} min={0} max={300} step={10} format={(v) => (v === 0 ? 'none' : `${v} milliseconds`)} />
+            <Stepper label="Pad velocity" value={state.pad.velocity} onChange={(v) => patchPad({ velocity: v })} min={1} max={127} step={5} />
+            <Stepper label="Pad humanize" value={state.pad.humanize} onChange={(v) => patchPad({ humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+          </Section>
+            </>
+          )}
+          {tab === 'rhythm' && (
+            <>
+          {state.drums.map((d, i) => (
+            <Section key={d.name} title={d.name}>
+              <Toggle label={`${d.name} on`} value={d.enabled} onChange={(v) => patchDrum(i, { enabled: v })} />
+              <Stepper
+                label={`${d.name} note`}
+                value={d.note}
+                onChange={(v) =>
+                  patchDrum(i, { note: drumProfile.drumNotes ? stepDrumNote(drumProfile, d.note, v > d.note ? 1 : -1) : v })
+                }
+                min={0}
+                max={127}
+                bigStep={drumProfile.drumNotes ? undefined : 10}
+                format={noteLabel}
+                hint="MIDI note sent. With the General MIDI profile this steps between named drums only."
+              />
+              <Stepper label={`${d.name} MIDI channel`} value={d.channel} onChange={(v) => patchDrum(i, { channel: v })} min={0} max={15} format={channelText} hint="Channel 10 is General MIDI drums." />
+              <ActionButton label={`Play ${d.name} test hit`} hint="Sends this note on this channel once, to check what the other app does with it" onPress={() => engine.sendNote(d.channel, d.note, d.velocity, 200)} />
+              <Stepper label={`${d.name} hits`} value={d.hits} onChange={(v) => patchDrum(i, { hits: v })} min={0} max={d.steps} />
+              <Stepper
+                label={`${d.name} steps`}
+                value={d.steps}
+                onChange={(v) => patchDrum(i, { steps: v, hits: Math.min(d.hits, v) })}
+                min={2}
+                max={32}
+                hint="Loop length in sixteenth notes. Different lengths drift against each other."
+              />
+              <Stepper label={`${d.name} rotation`} value={d.rotation} onChange={(v) => patchDrum(i, { rotation: v })} min={0} max={Math.max(0, d.steps - 1)} />
+              <Stepper label={`${d.name} velocity`} value={d.velocity} onChange={(v) => patchDrum(i, { velocity: v })} min={1} max={127} step={5} />
+              <Stepper label={`${d.name} chance`} value={d.probability} onChange={(v) => patchDrum(i, { probability: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+              <Stepper label={`${d.name} humanize`} value={d.humanize} onChange={(v) => patchDrum(i, { humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+              <View accessible accessibilityLabel={`${d.name} pattern`} accessibilityValue={{ text: describePattern(d.hits, d.steps, d.rotation) }}>
+                <Text style={styles.pattern}>{patternText(d.hits, d.steps, d.rotation)}</Text>
+              </View>
+            </Section>
+          ))}
+          <Section title="Loops">
             <Text style={styles.note}>
-              Tell MidiBed which app each part is sent to. It then shows real names and offers shortcuts. It works the same with no profile chosen.
+              For an app that plays its own loops, like DrumJam. MidiBed does not send notes here. It picks a loop, then starts and stops it. Which loop, and whether it plays, is saved in each scene. Turn on "Send MIDI clock and start" so the loops follow this tempo.
             </Text>
-            {(
-              [
-                ['drums', 'Drums app', drumProfile],
-                ['drone', 'Drone app', droneProfile],
-                ['pad', 'Chord pad app', padProfile],
-                ['loops', 'Loops app', loopsProfile],
-              ] as const
-            ).map(([role, label, prof]) => (
-              <View key={role} style={styles.group}>
+            <Toggle label="Loops" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} hint="Starts the loops, or stops them. While playing, a scene change does this on the next bar" />
+            <Stepper label="Loops MIDI channel" value={state.loops.channel} onChange={(v) => patchLoops({ channel: v })} min={0} max={15} format={channelText} />
+            <Stepper
+              label="Loop program"
+              value={state.loops.program}
+              onChange={(v) => patchLoops({ program: v }, true)}
+              min={0}
+              max={127}
+              bigStep={10}
+              hint="Swipe up or down to choose a loop or preset. Sends right away unless the loops are playing, then it changes on the spot."
+            />
+            {(() => {
+              const favs = parseFavorites(state.loops.favorites);
+              const idx = favs.indexOf(state.loops.program);
+              return (
+                <>
+                  {favs.length > 0 && (
+                    <Stepper
+                      label="Loop favorite"
+                      value={idx}
+                      onChange={(v) => patchLoops({ program: favs[Math.max(0, v)] }, true)}
+                      min={-1}
+                      max={favs.length - 1}
+                      format={(v) => (v < 0 ? 'current loop is not a favorite' : `program ${favs[v]}, ${v + 1} of ${favs.length}`)}
+                      hint="Step through only your favorite loops"
+                    />
+                  )}
+                  {idx < 0 ? (
+                    <ActionButton label={`Add loop program ${state.loops.program} to favorites`} onPress={() => patchLoops({ favorites: addFavorite(state.loops.favorites, state.loops.program) })} />
+                  ) : (
+                    <ActionButton label={`Remove loop program ${state.loops.program} from favorites`} onPress={() => patchLoops({ favorites: removeFavorite(state.loops.favorites, state.loops.program) })} />
+                  )}
+                </>
+              );
+            })()}
+            <Toggle label="Loops send bank select" value={state.loops.sendBank} onChange={(v) => patchLoops({ sendBank: v }, true)} />
+            {state.loops.sendBank && (
+              <>
+                <Stepper label="Loops bank MSB" value={state.loops.bankMSB} onChange={(v) => patchLoops({ bankMSB: v }, true)} min={0} max={127} />
+                <Stepper label="Loops bank LSB" value={state.loops.bankLSB} onChange={(v) => patchLoops({ bankLSB: v }, true)} min={0} max={127} />
+              </>
+            )}
+            <Stepper
+              label="Loops start control"
+              value={state.loops.startCC}
+              onChange={(v) => patchLoops({ startCC: v })}
+              min={0}
+              max={127}
+              bigStep={10}
+              format={(v) => (v === 0 ? 'none' : `CC ${v}`)}
+              hint="The control change that starts the loops. Use the Apps and devices profile to fill this in."
+            />
+            <Stepper
+              label="Loops stop control"
+              value={state.loops.stopCC}
+              onChange={(v) => patchLoops({ stopCC: v })}
+              min={0}
+              max={127}
+              bigStep={10}
+              format={(v) => (v === 0 ? 'same as start' : `CC ${v}`)}
+              hint="Zero means the start control is a play toggle and is sent again to stop."
+            />
+            <ActionButton
+              label="Send loops start now"
+              hint="Sends the start control once, to check that the other app reacts"
+              onPress={() => state.loops.startCC > 0 && engine.sendControlChange(state.loops.channel, state.loops.startCC, 127)}
+            />
+            <ActionButton
+              label="Send loops stop now"
+              hint="Sends the stop control once"
+              onPress={() => {
+                const cc = state.loops.stopCC > 0 ? state.loops.stopCC : state.loops.startCC;
+                if (cc > 0) engine.sendControlChange(state.loops.channel, cc, 127);
+              }}
+            />
+            <ActionButton label="Send loop choice now" onPress={() => sendLoopChoice(state.loops)} />
+          </Section>
+            </>
+          )}
+          {tab === 'sound' && (
+            <>
+          <Section title="Filter wanderers">
+            <Text style={styles.note}>
+              To teach a synth which control to move: put it in MIDI learn, touch the control, then press the test sweep button here. Press Stop first so only the sweep is sent.
+            </Text>
+            {state.wanderers.map((w, i) => (
+              <View key={w.name} style={styles.group}>
+                <Toggle label={`${w.name} wander`} value={w.enabled} onChange={(v) => patchWanderer(i, { enabled: v })} />
+                {(() => {
+                  const prof = profileForChannel(state, w.channel);
+                  const idx = prof.ccs.findIndex((c) => c.cc === w.cc);
+                  return prof.ccs.length > 0 ? (
+                    <Stepper
+                      label={`${w.name} target control`}
+                      value={idx}
+                      onChange={(v) => patchWanderer(i, { cc: prof.ccs[Math.max(0, v)].cc })}
+                      min={-1}
+                      max={prof.ccs.length - 1}
+                      format={(v) => (v < 0 ? `custom, CC ${w.cc}` : `${prof.ccs[v].name}, CC ${prof.ccs[v].cc}`)}
+                      hint={`Controls known for ${prof.name}. Swipe to choose what this wanderer moves.`}
+                    />
+                  ) : null;
+                })()}
                 <Stepper
-                  label={`${label} profile`}
-                  value={profileIndex(state.profiles[role])}
-                  onChange={(v) => patchProfile(role, PROFILES[v].id)}
+                  label={`${w.name} CC number`}
+                  value={w.cc}
+                  onChange={(v) => patchWanderer(i, { cc: v })}
                   min={0}
-                  max={PROFILES.length - 1}
-                  format={(v) => PROFILES[v].name}
+                  max={127}
+                  bigStep={10}
+                  format={(v) => {
+                    const name = ccName(profileForChannel(state, w.channel), v);
+                    return name ? `${v}, ${name}` : String(v);
+                  }}
                 />
-                <Text style={styles.note}>{prof.about}</Text>
+                <Stepper label={`${w.name} MIDI channel`} value={w.channel} onChange={(v) => patchWanderer(i, { channel: v })} min={0} max={15} format={channelText} />
+                <ActionButton
+                  label={`Send ${w.name} test sweep`}
+                  hint="Sweeps this control change from zero to full and back over three seconds, for MIDI learn"
+                  onPress={() => testSweep(w.channel, w.cc)}
+                />
+                <Stepper label={`${w.name} lowest`} value={w.min} onChange={(v) => patchWanderer(i, { min: Math.min(v, w.max) })} min={0} max={127} bigStep={10} />
+                <Stepper label={`${w.name} highest`} value={w.max} onChange={(v) => patchWanderer(i, { max: Math.max(v, w.min) })} min={0} max={127} bigStep={10} />
+                <Stepper label={`${w.name} speed`} value={w.speed} onChange={(v) => patchWanderer(i, { speed: v })} min={1} max={40} format={(v) => `${v} percent per second`} />
+                <Stepper label={`${w.name} smoothing`} value={w.smooth} onChange={(v) => patchWanderer(i, { smooth: v })} min={1} max={100} step={5} format={(v) => `${(v / 10).toFixed(1)} seconds`} />
               </View>
             ))}
-            {droneProfile.mono && (state.drone.octave || state.drone.fifth) && (
-              <ActionButton
-                label="Drone app plays one note: use a single drone note"
-                hint="Turns off the octave and the fifth"
-                onPress={() => patchDrone({ octave: false, fifth: false })}
-              />
-            )}
-            {loopsProfile.loopControls &&
-              (state.loops.startCC !== loopsProfile.loopControls.startCC || state.loops.stopCC !== loopsProfile.loopControls.stopCC) && (
-                <ActionButton
-                  label={`Use ${loopsProfile.name} loop controls, start CC ${loopsProfile.loopControls.startCC}, stop CC ${loopsProfile.loopControls.stopCC}`}
-                  onPress={() => patchLoops({ startCC: loopsProfile.loopControls?.startCC ?? 0, stopCC: loopsProfile.loopControls?.stopCC ?? 0 })}
-                />
-              )}
-            {fadeProfile?.fadeCC !== undefined && state.fade.cc !== fadeProfile.fadeCC && (
-              <ActionButton
-                label={`Use ${fadeProfile.name} volume control, CC ${fadeProfile.fadeCC}, for fades`}
-                onPress={() => patchFade({ cc: fadeProfile.fadeCC as number })}
-              />
-            )}
           </Section>
 
           <Section title="Fades">
@@ -426,286 +689,67 @@ export default function App() {
               </View>
             ))}
           </Section>
-
-          <Section title="Drone and bass">
-            <Toggle label="Drone" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
-            <Stepper label="Drone MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the bass drone plays on" />
-            <ActionButton label="Play drone test note" hint="Plays the drone root for a moment on the drone channel, to check routing" onPress={() => engine.sendNote(state.drone.channel, state.drone.root, state.drone.velocity, 1500)} />
-            <Stepper
-              label="Root note"
-              value={state.drone.root}
-              onChange={(v) => patchDrone({ root: v })}
-              min={24}
-              max={60}
-              bigStep={12}
-              format={noteName}
-            />
-            <Toggle
-              label="Drone follows chords"
-              value={state.drone.follow}
-              onChange={(v) => patchDrone({ follow: v })}
-              hint="Off: the drone stays on the root note. On: it plays the root of each chord of the harmony, changing with the chords"
-            />
-            <Toggle label="Add octave" value={state.drone.octave} onChange={(v) => patchDrone({ octave: v })} />
-            <Toggle
-              label="Add fifth"
-              value={state.drone.fifth}
-              onChange={(v) => patchDrone({ fifth: v })}
-              hint="For a root and fifth drone, turn this on and turn the octave off"
-            />
-            <Stepper label="Drone velocity" value={state.drone.velocity} onChange={(v) => patchDrone({ velocity: v })} min={1} max={127} step={5} />
-            <Stepper
-              label="Retrigger every"
-              value={state.drone.retriggerBars}
-              onChange={(v) => patchDrone({ retriggerBars: v })}
-              min={0}
-              max={32}
-              format={(v) => (v === 0 ? 'never' : `${v} bars`)}
-            />
-            {(() => {
-              const text = state.drone.follow
-                ? `Follows the chords: ${droneChords(state).map((c) => c.map(noteName).join(' ')).join(', then ')}`
-                : `Plays ${droneNotes(state.drone).map(noteName).join(' ')}`;
-              return (
-                <Text style={styles.note} accessibilityLabel={text}>
-                  {text}
-                </Text>
-              );
-            })()}
+            </>
+          )}
+          {tab === 'setup' && (
+            <>
+          <Section title="Output">
+            <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
+            <Toggle label="Send MIDI clock and start" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo and start with Play" />
+            <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />
           </Section>
 
-          <Section title="Harmony">
+          <Section title="Apps and devices">
             <Text style={styles.note}>
-              The chord loop. The chord pad and the bass drone can follow it. Chords are built on the drone root note, in the mode you choose. The loop keeps time even if nothing is following it.
+              Tell MidiBed which app each part is sent to. It then shows real names and offers shortcuts. It works the same with no profile chosen.
             </Text>
-            <Stepper
-              label="Progression preset"
-              value={state.harmony.preset}
-              onChange={choosePreset}
-              min={0}
-              max={PRESETS.length - 1}
-              format={(v) => PRESETS[v]?.name ?? 'Custom'}
-              hint="Swipe to choose a chord pattern. It follows the mode and the drone root."
-            />
-            <Stepper
-              label="Mode"
-              value={state.harmony.mode}
-              onChange={(v) => patchHarmony({ mode: v })}
-              min={0}
-              max={MODE_NAMES.length - 1}
-              format={(v) => MODE_NAMES[v]}
-              hint="The scale the chords come from, built on the drone root note."
-            />
-            <Stepper label="Chords in loop" value={state.harmony.count} onChange={(v) => patchHarmony({ count: v, preset: 0 })} min={1} max={4} />
-            {state.harmony.degrees.slice(0, state.harmony.count).map((d, i) => (
-              <Stepper
-                key={i}
-                label={`Chord ${i + 1} scale degree`}
-                value={d}
-                onChange={(v) => setDegree(i, v)}
-                min={1}
-                max={7}
-                format={(v) => `${v}, ${chordLabel(state.drone.root, state.harmony.mode, v, 0)}`}
-              />
-            ))}
-            <View accessible accessibilityLabel="Chord loop" accessibilityValue={{ text: `${harmonySummary}, ${state.harmony.barsPerChord} bars each` }}>
-              <Text style={styles.note}>{harmonySummary}</Text>
-            </View>
-            <Stepper
-              label="Bars per chord"
-              value={state.harmony.barsPerChord}
-              onChange={(v) => patchHarmony({ barsPerChord: v })}
-              min={1}
-              max={8}
-              format={(v) => (v === 1 ? '1 bar' : `${v} bars`)}
-            />
-          </Section>
-
-          <Section title="Chord pad">
-            <Toggle label="Chord pad" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
-            <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the chords play on. Use the drone channel to play both with one sound" />
-            <Toggle
-              label="Pad follows chords"
-              value={state.pad.follow}
-              onChange={(v) => patchPad({ follow: v })}
-              hint="On: plays each chord of the harmony in turn. Off: one steady chord on the key. With the Fifth only chord type, that is a fifths drone"
-            />
-            <Stepper label="Chord type" value={state.pad.style} onChange={(v) => patchPad({ style: v })} min={0} max={STYLE_NAMES.length - 1} format={(v) => STYLE_NAMES[v]} hint="Fifth only plays just the root and the fifth" />
-            <Stepper label="Lowest pad note" value={state.pad.register} onChange={(v) => patchPad({ register: v })} min={36} max={72} bigStep={12} format={noteName} hint="Where the pad sits. The drone stays low." />
-            <Toggle label="Smooth voice leading" value={state.pad.voiceLead} onChange={(v) => patchPad({ voiceLead: v })} hint="Each chord moves as little as possible from the last one" />
-            <Toggle label="Open spread voicing" value={state.pad.spread} onChange={(v) => patchPad({ spread: v })} hint="Lifts the second note an octave. With smooth voice leading it applies to the first chord only" />
-            <Stepper label="Strum" value={state.pad.strumMs} onChange={(v) => patchPad({ strumMs: v })} min={0} max={300} step={10} format={(v) => (v === 0 ? 'none' : `${v} milliseconds`)} />
-            <Stepper label="Pad velocity" value={state.pad.velocity} onChange={(v) => patchPad({ velocity: v })} min={1} max={127} step={5} />
-            <Stepper label="Pad humanize" value={state.pad.humanize} onChange={(v) => patchPad({ humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
-          </Section>
-
-          <Section title="Loops">
-            <Text style={styles.note}>
-              For an app that plays its own loops, like DrumJam. MidiBed does not send notes here. It picks a loop, then starts and stops it. Which loop, and whether it plays, is saved in each scene. Turn on "Send MIDI clock and start" so the loops follow this tempo.
-            </Text>
-            <Toggle label="Loops" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} hint="Starts the loops, or stops them. While playing, a scene change does this on the next bar" />
-            <Stepper label="Loops MIDI channel" value={state.loops.channel} onChange={(v) => patchLoops({ channel: v })} min={0} max={15} format={channelText} />
-            <Stepper
-              label="Loop program"
-              value={state.loops.program}
-              onChange={(v) => patchLoops({ program: v }, true)}
-              min={0}
-              max={127}
-              bigStep={10}
-              hint="Swipe up or down to choose a loop or preset. Sends right away unless the loops are playing, then it changes on the spot."
-            />
-            {(() => {
-              const favs = parseFavorites(state.loops.favorites);
-              const idx = favs.indexOf(state.loops.program);
-              return (
-                <>
-                  {favs.length > 0 && (
-                    <Stepper
-                      label="Loop favorite"
-                      value={idx}
-                      onChange={(v) => patchLoops({ program: favs[Math.max(0, v)] }, true)}
-                      min={-1}
-                      max={favs.length - 1}
-                      format={(v) => (v < 0 ? 'current loop is not a favorite' : `program ${favs[v]}, ${v + 1} of ${favs.length}`)}
-                      hint="Step through only your favorite loops"
-                    />
-                  )}
-                  {idx < 0 ? (
-                    <ActionButton label={`Add loop program ${state.loops.program} to favorites`} onPress={() => patchLoops({ favorites: addFavorite(state.loops.favorites, state.loops.program) })} />
-                  ) : (
-                    <ActionButton label={`Remove loop program ${state.loops.program} from favorites`} onPress={() => patchLoops({ favorites: removeFavorite(state.loops.favorites, state.loops.program) })} />
-                  )}
-                </>
-              );
-            })()}
-            <Toggle label="Loops send bank select" value={state.loops.sendBank} onChange={(v) => patchLoops({ sendBank: v }, true)} />
-            {state.loops.sendBank && (
-              <>
-                <Stepper label="Loops bank MSB" value={state.loops.bankMSB} onChange={(v) => patchLoops({ bankMSB: v }, true)} min={0} max={127} />
-                <Stepper label="Loops bank LSB" value={state.loops.bankLSB} onChange={(v) => patchLoops({ bankLSB: v }, true)} min={0} max={127} />
-              </>
-            )}
-            <Stepper
-              label="Loops start control"
-              value={state.loops.startCC}
-              onChange={(v) => patchLoops({ startCC: v })}
-              min={0}
-              max={127}
-              bigStep={10}
-              format={(v) => (v === 0 ? 'none' : `CC ${v}`)}
-              hint="The control change that starts the loops. Use the Apps and devices profile to fill this in."
-            />
-            <Stepper
-              label="Loops stop control"
-              value={state.loops.stopCC}
-              onChange={(v) => patchLoops({ stopCC: v })}
-              min={0}
-              max={127}
-              bigStep={10}
-              format={(v) => (v === 0 ? 'same as start' : `CC ${v}`)}
-              hint="Zero means the start control is a play toggle and is sent again to stop."
-            />
-            <ActionButton
-              label="Send loops start now"
-              hint="Sends the start control once, to check that the other app reacts"
-              onPress={() => state.loops.startCC > 0 && engine.sendControlChange(state.loops.channel, state.loops.startCC, 127)}
-            />
-            <ActionButton
-              label="Send loops stop now"
-              hint="Sends the stop control once"
-              onPress={() => {
-                const cc = state.loops.stopCC > 0 ? state.loops.stopCC : state.loops.startCC;
-                if (cc > 0) engine.sendControlChange(state.loops.channel, cc, 127);
-              }}
-            />
-            <ActionButton label="Send loop choice now" onPress={() => sendLoopChoice(state.loops)} />
-          </Section>
-
-          <Section title="Filter wanderers">
-            <Text style={styles.note}>
-              To teach a synth which control to move: put it in MIDI learn, touch the control, then press the test sweep button here. Press Stop first so only the sweep is sent.
-            </Text>
-            {state.wanderers.map((w, i) => (
-              <View key={w.name} style={styles.group}>
-                <Toggle label={`${w.name} wander`} value={w.enabled} onChange={(v) => patchWanderer(i, { enabled: v })} />
-                {(() => {
-                  const prof = profileForChannel(state, w.channel);
-                  const idx = prof.ccs.findIndex((c) => c.cc === w.cc);
-                  return prof.ccs.length > 0 ? (
-                    <Stepper
-                      label={`${w.name} target control`}
-                      value={idx}
-                      onChange={(v) => patchWanderer(i, { cc: prof.ccs[Math.max(0, v)].cc })}
-                      min={-1}
-                      max={prof.ccs.length - 1}
-                      format={(v) => (v < 0 ? `custom, CC ${w.cc}` : `${prof.ccs[v].name}, CC ${prof.ccs[v].cc}`)}
-                      hint={`Controls known for ${prof.name}. Swipe to choose what this wanderer moves.`}
-                    />
-                  ) : null;
-                })()}
+            {(
+              [
+                ['drums', 'Drums app', drumProfile],
+                ['drone', 'Drone app', droneProfile],
+                ['pad', 'Chord pad app', padProfile],
+                ['loops', 'Loops app', loopsProfile],
+              ] as const
+            ).map(([role, label, prof]) => (
+              <View key={role} style={styles.group}>
                 <Stepper
-                  label={`${w.name} CC number`}
-                  value={w.cc}
-                  onChange={(v) => patchWanderer(i, { cc: v })}
+                  label={`${label} profile`}
+                  value={profileIndex(state.profiles[role])}
+                  onChange={(v) => patchProfile(role, PROFILES[v].id)}
                   min={0}
-                  max={127}
-                  bigStep={10}
-                  format={(v) => {
-                    const name = ccName(profileForChannel(state, w.channel), v);
-                    return name ? `${v}, ${name}` : String(v);
-                  }}
+                  max={PROFILES.length - 1}
+                  format={(v) => PROFILES[v].name}
                 />
-                <Stepper label={`${w.name} MIDI channel`} value={w.channel} onChange={(v) => patchWanderer(i, { channel: v })} min={0} max={15} format={channelText} />
-                <ActionButton
-                  label={`Send ${w.name} test sweep`}
-                  hint="Sweeps this control change from zero to full and back over three seconds, for MIDI learn"
-                  onPress={() => testSweep(w.channel, w.cc)}
-                />
-                <Stepper label={`${w.name} lowest`} value={w.min} onChange={(v) => patchWanderer(i, { min: Math.min(v, w.max) })} min={0} max={127} bigStep={10} />
-                <Stepper label={`${w.name} highest`} value={w.max} onChange={(v) => patchWanderer(i, { max: Math.max(v, w.min) })} min={0} max={127} bigStep={10} />
-                <Stepper label={`${w.name} speed`} value={w.speed} onChange={(v) => patchWanderer(i, { speed: v })} min={1} max={40} format={(v) => `${v} percent per second`} />
-                <Stepper label={`${w.name} smoothing`} value={w.smooth} onChange={(v) => patchWanderer(i, { smooth: v })} min={1} max={100} step={5} format={(v) => `${(v / 10).toFixed(1)} seconds`} />
+                <Text style={styles.note}>{prof.about}</Text>
               </View>
             ))}
+            {droneProfile.mono && (state.drone.octave || state.drone.fifth) && (
+              <ActionButton
+                label="Drone app plays one note: use a single drone note"
+                hint="Turns off the octave and the fifth"
+                onPress={() => patchDrone({ octave: false, fifth: false })}
+              />
+            )}
+            {loopsProfile.loopControls &&
+              (state.loops.startCC !== loopsProfile.loopControls.startCC || state.loops.stopCC !== loopsProfile.loopControls.stopCC) && (
+                <ActionButton
+                  label={`Use ${loopsProfile.name} loop controls, start CC ${loopsProfile.loopControls.startCC}, stop CC ${loopsProfile.loopControls.stopCC}`}
+                  onPress={() => patchLoops({ startCC: loopsProfile.loopControls?.startCC ?? 0, stopCC: loopsProfile.loopControls?.stopCC ?? 0 })}
+                />
+              )}
+            {fadeProfile?.fadeCC !== undefined && state.fade.cc !== fadeProfile.fadeCC && (
+              <ActionButton
+                label={`Use ${fadeProfile.name} volume control, CC ${fadeProfile.fadeCC}, for fades`}
+                onPress={() => patchFade({ cc: fadeProfile.fadeCC as number })}
+              />
+            )}
           </Section>
-
-          {state.drums.map((d, i) => (
-            <Section key={d.name} title={d.name}>
-              <Toggle label={`${d.name} on`} value={d.enabled} onChange={(v) => patchDrum(i, { enabled: v })} />
-              <Stepper
-                label={`${d.name} note`}
-                value={d.note}
-                onChange={(v) =>
-                  patchDrum(i, { note: drumProfile.drumNotes ? stepDrumNote(drumProfile, d.note, v > d.note ? 1 : -1) : v })
-                }
-                min={0}
-                max={127}
-                bigStep={drumProfile.drumNotes ? undefined : 10}
-                format={noteLabel}
-                hint="MIDI note sent. With the General MIDI profile this steps between named drums only."
-              />
-              <Stepper label={`${d.name} MIDI channel`} value={d.channel} onChange={(v) => patchDrum(i, { channel: v })} min={0} max={15} format={channelText} hint="Channel 10 is General MIDI drums." />
-              <ActionButton label={`Play ${d.name} test hit`} hint="Sends this note on this channel once, to check what the other app does with it" onPress={() => engine.sendNote(d.channel, d.note, d.velocity, 200)} />
-              <Stepper label={`${d.name} hits`} value={d.hits} onChange={(v) => patchDrum(i, { hits: v })} min={0} max={d.steps} />
-              <Stepper
-                label={`${d.name} steps`}
-                value={d.steps}
-                onChange={(v) => patchDrum(i, { steps: v, hits: Math.min(d.hits, v) })}
-                min={2}
-                max={32}
-                hint="Loop length in sixteenth notes. Different lengths drift against each other."
-              />
-              <Stepper label={`${d.name} rotation`} value={d.rotation} onChange={(v) => patchDrum(i, { rotation: v })} min={0} max={Math.max(0, d.steps - 1)} />
-              <Stepper label={`${d.name} velocity`} value={d.velocity} onChange={(v) => patchDrum(i, { velocity: v })} min={1} max={127} step={5} />
-              <Stepper label={`${d.name} chance`} value={d.probability} onChange={(v) => patchDrum(i, { probability: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
-              <Stepper label={`${d.name} humanize`} value={d.humanize} onChange={(v) => patchDrum(i, { humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
-              <View accessible accessibilityLabel={`${d.name} pattern`} accessibilityValue={{ text: describePattern(d.hits, d.steps, d.rotation) }}>
-                <Text style={styles.pattern}>{patternText(d.hits, d.steps, d.rotation)}</Text>
-              </View>
-            </Section>
-          ))}
-        </ScrollView>
-        </View>
+            </>
+          )}
+            </ScrollView>
+            <TabBar selected={tab} onSelect={(id) => selectTab(id)} />
+          </View>
+        </Pager>
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -714,6 +758,7 @@ export default function App() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   fill: { flex: 1 },
+  strip: { paddingHorizontal: 16, paddingTop: 8 },
   scroll: { padding: 16, paddingBottom: 60 },
   title: { color: colors.text, fontSize: 30, fontWeight: '700', marginBottom: 12 },
   warn: { color: '#ffb86b', marginBottom: 12, fontSize: 15 },
