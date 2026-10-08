@@ -544,6 +544,15 @@ final class MidiBedEngine {
     // drum fade times ease them out and back in.
     if stepRule(&drumRT, baseBars: m.drums.baseBars, altBars: m.drums.breakBars, chance: m.drums.chance) {
       changed = true
+      if !drumRT.alt {
+        // Coming back from a breakdown: the drums land at FULL strength on this bar
+        // line, so the kick hits on the downbeat. Easing them in over the drum fade
+        // time would leave that first kick nearly silent. (Going INTO a breakdown
+        // still eases out. This runs before this tick's drum step plays.)
+        for (i, d) in cfg.drums.enumerated() where i < drumLevels.count && drumIsOn(d, cfg) {
+          drumLevels[i] = 1
+        }
+      }
     }
     if changed { emitMotion("flip") }
   }
