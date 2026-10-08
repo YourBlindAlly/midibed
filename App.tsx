@@ -125,8 +125,8 @@ export default function App() {
   const handlePage = (direction: 'next' | 'previous') => selectTab(neighborTab(tab, direction), true);
 
   // VoiceOver "magic tap" (two-finger double tap, anywhere on the screen) starts or
-  // stops playback. The handler sits on a plain wrapper View, NOT an accessible one,
-  // so every control inside stays individually reachable by VoiceOver.
+  // stops playback. It is received by the native Pager view around the whole screen
+  // (not an accessibility element, so every control inside stays reachable).
   const onMagicTap = () => {
     const stopping = playing;
     togglePlay();
@@ -227,8 +227,8 @@ export default function App() {
     <SafeAreaProvider>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <StatusBar style="light" />
-        <Pager style={styles.fill} onPage={handlePage}>
-          <View style={styles.fill} onMagicTap={onMagicTap}>
+        <Pager style={styles.fill} onPage={handlePage} onMagicTap={onMagicTap}>
+          <View style={styles.fill}>
             <View style={styles.strip}>
           <Text style={styles.title} accessibilityRole="header">
             MidiBed

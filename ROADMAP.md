@@ -70,6 +70,20 @@ or two as the change happens.
 - Per scene (or per song): "transition in" clip, lead in beats, level; a "transition out" clip for fades.
 - The ambience layer's own fade could also be used as the "fade out within a beat or two" transition.
 
+### 5a. Automatic variations inside a scene (Rusty, 2026-10-08)
+After hearing "bass follows chords" and the fifths pad, Rusty likes how they create subtle or not so subtle
+shifts and wants a scene to make such variations by itself.
+- Idea: each scene gets a VARIATION, a small set of overrides on top of the scene (bass follows chords on/off,
+  pad follows on/off, pad chord type such as triad vs fifth only, octave/fifth on the bass, maybe mode or
+  drum density), plus a RULE for when it plays: alternate every chord loop; play it every Nth loop; random
+  chance each loop; or hold for N loops then return.
+- Changes land at the END of a chord loop (a bar line) and use the existing machinery: common tones keep
+  ringing, fades are not needed, nothing restarts.
+- Needs the engine to hold both versions and the rule (same architecture as auto-advance, item 5), and to tell
+  the screen which version is playing ("Variation playing"). So build it together with auto-advance.
+- Questions for Rusty: which settings should be allowed to vary; rules he wants; one variation per scene or a
+  short list; whether to announce when it switches.
+
 ### 5. Repeat a scene, or auto-advance after N repeats
 - Per scene: "repeat N times, then go to": next scene / a chosen scene / random of a few / stay (hold).
   Length counted in bars or in chord-loops.

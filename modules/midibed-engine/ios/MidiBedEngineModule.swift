@@ -12,7 +12,7 @@ public class MidiBedEngineModule: Module {
 
     // The screen-wide container that receives VoiceOver's three-finger page swipe.
     View(MidiBedPagerView.self) {
-      Events("onPage")
+      Events("onPage", "onMagicTap")
     }
 
     OnCreate {
