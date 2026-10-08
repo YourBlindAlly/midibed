@@ -40,15 +40,20 @@ describe('device profiles', () => {
     expect(getProfile('aum').fadeCC).toBe(7);
   });
 
+  it('gives DrumJam loop start and stop controls', () => {
+    expect(getProfile('drumjam').loopControls).toEqual({ startCC: 118, stopCC: 117 });
+  });
+
   it('keeps the Synth One pad presets', () => {
     expect(getProfile('synthone').favorites).toBe('12,16,20,26,39,55,63,75,80,82,99,113');
   });
 
   it('picks the profile by what is routed to a channel', () => {
-    const s = { ...defaultState, profiles: { drums: 'drumjam', drone: 'modeld', pad: 'synthone' } };
+    const s = { ...defaultState, profiles: { drums: 'drumjam', drone: 'modeld', pad: 'synthone', loops: 'aum' } };
     expect(profileForChannel(s, 9).id).toBe('drumjam'); // drum channel
     expect(profileForChannel(s, 0).id).toBe('modeld'); // drone channel
     expect(profileForChannel(s, 1).id).toBe('synthone'); // pad channel
+    expect(profileForChannel(s, s.loops.channel).id).toBe('aum'); // loops channel
     expect(profileForChannel(s, 5).id).toBe('none'); // nothing routed there
   });
 

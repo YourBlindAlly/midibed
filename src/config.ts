@@ -100,14 +100,34 @@ export type FadeState = {
   drumOut: number;
 };
 
+/**
+ * A loop-playing app (e.g. DrumJam's loops): no notes, just choose a loop, start
+ * it and stop it. Which loop and whether it plays belong to the scene; the
+ * channel and start/stop controls are routing and stay global.
+ */
+export type LoopsState = {
+  enabled: boolean;
+  channel: number;
+  program: number; // 0-127, as sent
+  sendBank: boolean;
+  bankMSB: number;
+  bankLSB: number;
+  startCC: number; // 0 = none
+  stopCC: number; // 0 = same as start (a play toggle)
+  favorites: string; // comma-separated program numbers
+};
+
 export type BedState = {
   bpm: number;
   swing: number; // percent 0-100
   midiOut: boolean;
   synthOut: boolean;
+  /** Send MIDI clock plus Start/Stop while playing, so other apps can follow the tempo. */
+  clock: boolean;
   drums: DrumState[];
   drone: DroneState;
   wanderers: WandererState[];
+  loops: LoopsState;
   pad: PadState;
   fade: FadeState;
   sounds: SoundSlot[];
@@ -128,11 +148,12 @@ export type SceneData = {
   pad: Omit<PadState, 'channel'>;
   drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
   wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'speed' | 'smooth'>[];
+  loops: Pick<LoopsState, 'enabled' | 'program' | 'sendBank' | 'bankMSB' | 'bankLSB'>;
 };
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'swing' | 'drone' | 'pad' | 'drums' | 'wanderers'>;
+type SceneSource = Pick<BedState, 'swing' | 'drone' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -156,6 +177,13 @@ export function captureScene(s: SceneSource): SceneData {
       humanize: d.humanize,
     })),
     wanderers: s.wanderers.map((w) => ({ enabled: w.enabled, min: w.min, max: w.max, speed: w.speed, smooth: w.smooth })),
+    loops: {
+      enabled: s.loops.enabled,
+      program: s.loops.program,
+      sendBank: s.loops.sendBank,
+      bankMSB: s.loops.bankMSB,
+      bankLSB: s.loops.bankLSB,
+    },
   };
 }
 
@@ -168,6 +196,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     pad: { ...s.pad, ...sc.pad, degrees: [...sc.pad.degrees] },
     drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
     wanderers: s.wanderers.map((w, i) => ({ ...w, ...sc.wanderers[i] })),
+    loops: { ...s.loops, ...sc.loops },
   };
 }
 
@@ -191,6 +220,18 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
   swing: 15,
   midiOut: true,
   synthOut: true,
+  clock: false,
+  loops: {
+    enabled: false,
+    channel: 2,
+    program: 0,
+    sendBank: false,
+    bankMSB: 0,
+    bankLSB: 0,
+    startCC: 0,
+    stopCC: 0,
+    favorites: '',
+  },
   drums: [
     { name: 'Kick', enabled: true, note: 36, channel: 9, steps: 16, hits: 4, rotation: 0, velocity: 100, probability: 100, humanize: 20 },
     { name: 'Snare', enabled: true, note: 38, channel: 9, steps: 16, hits: 2, rotation: 4, velocity: 90, probability: 100, humanize: 25 },
@@ -342,6 +383,16 @@ export function toEngineJson(s: BedState): string {
     swing: s.swing / 100,
     midiOut: s.midiOut,
     synthOut: s.synthOut,
+    clock: s.clock,
+    loops: {
+      enabled: s.loops.enabled,
+      channel: s.loops.channel,
+      program: s.loops.program,
+      bankMSB: s.loops.sendBank ? s.loops.bankMSB : -1,
+      bankLSB: s.loops.sendBank ? s.loops.bankLSB : -1,
+      startCC: s.loops.startCC,
+      stopCC: s.loops.stopCC,
+    },
     drums: s.drums.map((d) => ({
       enabled: d.enabled,
       note: d.note,

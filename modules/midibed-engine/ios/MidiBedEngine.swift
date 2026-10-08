@@ -57,14 +57,29 @@ struct MidiBedFadeConfig: Decodable {
   var drumOut: Double
 }
 
+/// A loop-playing app (like DrumJam's loops): not notes, just "choose this loop,
+/// start, stop". Selection is Bank Select + Program Change; start and stop are
+/// control changes (use the same number for both if the app has a play toggle).
+struct MidiBedLoopsConfig: Decodable {
+  var enabled: Bool
+  var channel: Int
+  var program: Int
+  var bankMSB: Int          // negative = do not send
+  var bankLSB: Int
+  var startCC: Int          // 0 = none
+  var stopCC: Int           // 0 = use startCC
+}
+
 struct MidiBedConfig: Decodable {
   var bpm: Double
   var swing: Double         // 0...1, delays every other 16th
   var midiOut: Bool
   var synthOut: Bool
+  var clock: Bool           // send MIDI clock plus Start/Stop while playing
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
   var pad: MidiBedPadConfig
+  var loops: MidiBedLoopsConfig
   var fade: MidiBedFadeConfig
   var wanderers: [MidiBedWandererConfig]
 }
@@ -188,6 +203,7 @@ final class MidiBedEngine {
       // At a bar line, processTick starts the new pad chord itself right after
       // this; starting it here too would double-trigger it.
       if !atBar || !decoded.pad.enabled { reconcilePadEnabled() }
+      reconcileLoops(decoded)
     }
   }
 
@@ -200,6 +216,8 @@ final class MidiBedEngine {
       self.tickIndex = 0
       self.padStartTick = 0
       self.pendingConfig = nil
+      self.loopsPlaying = false
+      self.lastLoopSelect = []
       self.nextTickTime = ProcessInfo.processInfo.systemUptime + 0.05
       self.lastWandererTime = self.nextTickTime
       self.lastFadeTime = self.nextTickTime
@@ -232,6 +250,10 @@ final class MidiBedEngine {
       self.releaseDrone()
       self.releasePad()
       self.allNotesOff()
+      if let cfg = self.config {
+        if self.loopsPlaying { self.stopLoops(cfg) }
+        if cfg.clock { self.emit(0xFC, 0, 0) } // MIDI Stop
+      }
       if let c = droneCh { self.scheduleCCRestore(c) }
       if let c = padCh { self.scheduleCCRestore(c) }
     }
@@ -324,6 +346,14 @@ final class MidiBedEngine {
     }
 
     updateDrumLevels(tickDur: tickDur, cfg: cfg)
+
+    // MIDI clock: 24 pulses per quarter note = every 4th of our 96 ticks, with
+    // Start on the very first tick, so a follower locks to our tempo.
+    if cfg.clock, tick % 4 == 0 {
+      if tick == 0 { pending.append(Pending(time: time, status: 0xFA, d1: 0, d2: 0)) }
+      pending.append(Pending(time: time + (tick == 0 ? 0.001 : 0), status: 0xF8, d1: 0, d2: 0))
+    }
+    if tick == 0 { startLoops(cfg, at: time) }
 
     // Drone retrigger (keeps the current fade level, so it does not fade in again).
     if cfg.drone.enabled, cfg.drone.retriggerBars > 0, tick > 0,
@@ -519,6 +549,63 @@ final class MidiBedEngine {
     heldDrone = []
   }
 
+  // MARK: Loops (start/stop + choose, no notes)
+
+  private var loopsPlaying = false
+  private var lastLoopSelect: [Int] = []
+
+  private func loopSelectKey(_ l: MidiBedLoopsConfig) -> [Int] {
+    [l.channel, l.program, l.bankMSB, l.bankLSB]
+  }
+
+  /// Bank Select (if set) then Program Change, in order, a couple of ms apart.
+  private func sendLoopSelect(_ l: MidiBedLoopsConfig, at time: Double) {
+    let ch = UInt8(max(0, min(15, l.channel)))
+    var t = time
+    if l.bankMSB >= 0 {
+      pending.append(Pending(time: t, status: 0xB0 | ch, d1: 0, d2: UInt8(min(127, l.bankMSB))))
+      t += 0.002
+    }
+    if l.bankLSB >= 0 {
+      pending.append(Pending(time: t, status: 0xB0 | ch, d1: 32, d2: UInt8(min(127, l.bankLSB))))
+      t += 0.002
+    }
+    pending.append(Pending(time: t, status: 0xC0 | ch, d1: UInt8(max(0, min(127, l.program))), d2: 0))
+    lastLoopSelect = loopSelectKey(l)
+  }
+
+  private func startLoops(_ cfg: MidiBedConfig, at time: Double) {
+    let l = cfg.loops
+    guard l.enabled else { return }
+    sendLoopSelect(l, at: time)
+    if l.startCC > 0 {
+      // Give the loop selection time to land before telling it to play.
+      pending.append(Pending(time: time + 0.05, status: 0xB0 | UInt8(max(0, min(15, l.channel))), d1: UInt8(min(127, l.startCC)), d2: 127))
+    }
+    loopsPlaying = true
+  }
+
+  private func stopLoops(_ cfg: MidiBedConfig) {
+    let l = cfg.loops
+    let cc = l.stopCC > 0 ? l.stopCC : l.startCC
+    if cc > 0 { emit(0xB0 | UInt8(max(0, min(15, l.channel))), UInt8(min(127, cc)), 127) }
+    loopsPlaying = false
+  }
+
+  /// Settings changed while playing: start or stop the loops, or switch to a
+  /// different loop. (Scene changes arrive here on a bar line.)
+  private func reconcileLoops(_ cfg: MidiBedConfig) {
+    let l = cfg.loops
+    let now = ProcessInfo.processInfo.systemUptime
+    if l.enabled && !loopsPlaying {
+      startLoops(cfg, at: now)
+    } else if !l.enabled && loopsPlaying {
+      stopLoops(cfg)
+    } else if l.enabled && loopsPlaying && loopSelectKey(l) != lastLoopSelect {
+      sendLoopSelect(l, at: now)
+    }
+  }
+
   // MARK: Chord pad
 
   private func playPad(_ notes: [Int], pad: MidiBedPadConfig, at time: Double, retrigger: Bool) {
@@ -636,6 +723,11 @@ final class MidiBedEngine {
   }
 
   private func emit(_ status: UInt8, _ d1: UInt8, _ d2: UInt8) {
+    // System messages (clock, start, stop) are for other apps only.
+    if status >= 0xF0 {
+      if config?.midiOut ?? true { sendMIDI(status, d1, d2) }
+      return
+    }
     if config?.midiOut ?? true { sendMIDI(status, d1, d2) }
     if config?.synthOut ?? true { synth.post(status: status, d1: d1, d2: d2) }
     // Note-offs and all-notes-off must always reach the synth even if the
@@ -649,7 +741,14 @@ final class MidiBedEngine {
     guard source != 0 else { return }
     var packetList = MIDIPacketList()
     let packet = MIDIPacketListInit(&packetList)
-    let bytes: [UInt8] = (status & 0xF0) == 0xC0 || (status & 0xF0) == 0xD0 ? [status, d1] : [status, d1, d2]
+    let bytes: [UInt8]
+    if status >= 0xF8 {
+      bytes = [status] // real-time messages (clock, start, stop) are a single byte
+    } else if (status & 0xF0) == 0xC0 || (status & 0xF0) == 0xD0 {
+      bytes = [status, d1]
+    } else {
+      bytes = [status, d1, d2]
+    }
     _ = MIDIPacketListAdd(&packetList, MemoryLayout<MIDIPacketList>.size, packet, 0, bytes.count, bytes)
     MIDIReceived(source, &packetList)
   }

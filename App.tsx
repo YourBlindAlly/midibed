@@ -8,6 +8,7 @@ import {
   BedState,
   DrumState,
   FadeState,
+  LoopsState,
   PadState,
   SCENE_COUNT,
   SoundSlot,
@@ -106,6 +107,7 @@ export default function App() {
   const drumProfile = getProfile(state.profiles.drums);
   const droneProfile = getProfile(state.profiles.drone);
   const padProfile = getProfile(state.profiles.pad);
+  const loopsProfile = getProfile(state.profiles.loops);
   const fadeProfile = [droneProfile, padProfile].find((p) => p.fadeCC !== undefined);
   const patchProfile = (role: ProfileRole, id: string) =>
     setState((s) => ({ ...s, profiles: { ...s.profiles, [role]: id } }));
@@ -137,6 +139,21 @@ export default function App() {
   };
 
   const patchFade =(p: Partial<FadeState>) => setState((s) => ({ ...s, fade: { ...s.fade, ...p } }));
+  const loopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendLoopChoice = (l: LoopsState) =>
+    engine.sendProgramChange(l.channel, l.program, l.sendBank ? l.bankMSB : -1, l.sendBank ? l.bankLSB : -1);
+  // Changing the loop choice sends it right away to audition, unless the loops are
+  // already playing: then the engine sends it itself (once), so it is not doubled.
+  const patchLoops = (p: Partial<LoopsState>, audition = false) => {
+    const next = { ...state.loops, ...p };
+    setState((s) => ({ ...s, loops: { ...s.loops, ...p } }));
+    if (audition) {
+      if (loopTimer.current) clearTimeout(loopTimer.current);
+      loopTimer.current = setTimeout(() => {
+        if (!(next.enabled && playing)) sendLoopChoice(next);
+      }, 200);
+    }
+  };
   const patchPad =(p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
   // Editing the chords by hand turns the preset label into "Custom".
   const setDegree = (i: number, v: number) =>
@@ -244,6 +261,7 @@ export default function App() {
             <Stepper label="Tempo" value={state.bpm} onChange={(v) => patch({ bpm: v })} min={40} max={200} bigStep={10} format={(v) => `${v} BPM`} />
             <Stepper label="Swing" value={state.swing} onChange={(v) => patch({ swing: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
+            <Toggle label="Send MIDI clock and start" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo and start with Play" />
             <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />
           </Section>
 
@@ -256,6 +274,7 @@ export default function App() {
                 ['drums', 'Drums app', drumProfile],
                 ['drone', 'Drone app', droneProfile],
                 ['pad', 'Chord pad app', padProfile],
+                ['loops', 'Loops app', loopsProfile],
               ] as const
             ).map(([role, label, prof]) => (
               <View key={role} style={styles.group}>
@@ -277,6 +296,13 @@ export default function App() {
                 onPress={() => patchDrone({ octave: false, fifth: false })}
               />
             )}
+            {loopsProfile.loopControls &&
+              (state.loops.startCC !== loopsProfile.loopControls.startCC || state.loops.stopCC !== loopsProfile.loopControls.stopCC) && (
+                <ActionButton
+                  label={`Use ${loopsProfile.name} loop controls, start CC ${loopsProfile.loopControls.startCC}, stop CC ${loopsProfile.loopControls.stopCC}`}
+                  onPress={() => patchLoops({ startCC: loopsProfile.loopControls?.startCC ?? 0, stopCC: loopsProfile.loopControls?.stopCC ?? 0 })}
+                />
+              )}
             {fadeProfile?.fadeCC !== undefined && state.fade.cc !== fadeProfile.fadeCC && (
               <ActionButton
                 label={`Use ${fadeProfile.name} volume control, CC ${fadeProfile.fadeCC}, for fades`}
@@ -450,6 +476,88 @@ export default function App() {
             <Stepper label="Strum" value={state.pad.strumMs} onChange={(v) => patchPad({ strumMs: v })} min={0} max={300} step={10} format={(v) => (v === 0 ? 'none' : `${v} milliseconds`)} />
             <Stepper label="Pad velocity" value={state.pad.velocity} onChange={(v) => patchPad({ velocity: v })} min={1} max={127} step={5} />
             <Stepper label="Pad humanize" value={state.pad.humanize} onChange={(v) => patchPad({ humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+          </Section>
+
+          <Section title="Loops">
+            <Text style={styles.note}>
+              For an app that plays its own loops, like DrumJam. MidiBed does not send notes here. It picks a loop, then starts and stops it. Which loop, and whether it plays, is saved in each scene. Turn on "Send MIDI clock and start" so the loops follow this tempo.
+            </Text>
+            <Toggle label="Loops" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} hint="Starts the loops, or stops them. While playing, a scene change does this on the next bar" />
+            <Stepper label="Loops MIDI channel" value={state.loops.channel} onChange={(v) => patchLoops({ channel: v })} min={0} max={15} format={channelText} />
+            <Stepper
+              label="Loop program"
+              value={state.loops.program}
+              onChange={(v) => patchLoops({ program: v }, true)}
+              min={0}
+              max={127}
+              bigStep={10}
+              hint="Swipe up or down to choose a loop or preset. Sends right away unless the loops are playing, then it changes on the spot."
+            />
+            {(() => {
+              const favs = parseFavorites(state.loops.favorites);
+              const idx = favs.indexOf(state.loops.program);
+              return (
+                <>
+                  {favs.length > 0 && (
+                    <Stepper
+                      label="Loop favorite"
+                      value={idx}
+                      onChange={(v) => patchLoops({ program: favs[Math.max(0, v)] }, true)}
+                      min={-1}
+                      max={favs.length - 1}
+                      format={(v) => (v < 0 ? 'current loop is not a favorite' : `program ${favs[v]}, ${v + 1} of ${favs.length}`)}
+                      hint="Step through only your favorite loops"
+                    />
+                  )}
+                  {idx < 0 ? (
+                    <ActionButton label={`Add loop program ${state.loops.program} to favorites`} onPress={() => patchLoops({ favorites: addFavorite(state.loops.favorites, state.loops.program) })} />
+                  ) : (
+                    <ActionButton label={`Remove loop program ${state.loops.program} from favorites`} onPress={() => patchLoops({ favorites: removeFavorite(state.loops.favorites, state.loops.program) })} />
+                  )}
+                </>
+              );
+            })()}
+            <Toggle label="Loops send bank select" value={state.loops.sendBank} onChange={(v) => patchLoops({ sendBank: v }, true)} />
+            {state.loops.sendBank && (
+              <>
+                <Stepper label="Loops bank MSB" value={state.loops.bankMSB} onChange={(v) => patchLoops({ bankMSB: v }, true)} min={0} max={127} />
+                <Stepper label="Loops bank LSB" value={state.loops.bankLSB} onChange={(v) => patchLoops({ bankLSB: v }, true)} min={0} max={127} />
+              </>
+            )}
+            <Stepper
+              label="Loops start control"
+              value={state.loops.startCC}
+              onChange={(v) => patchLoops({ startCC: v })}
+              min={0}
+              max={127}
+              bigStep={10}
+              format={(v) => (v === 0 ? 'none' : `CC ${v}`)}
+              hint="The control change that starts the loops. Use the Apps and devices profile to fill this in."
+            />
+            <Stepper
+              label="Loops stop control"
+              value={state.loops.stopCC}
+              onChange={(v) => patchLoops({ stopCC: v })}
+              min={0}
+              max={127}
+              bigStep={10}
+              format={(v) => (v === 0 ? 'same as start' : `CC ${v}`)}
+              hint="Zero means the start control is a play toggle and is sent again to stop."
+            />
+            <ActionButton
+              label="Send loops start now"
+              hint="Sends the start control once, to check that the other app reacts"
+              onPress={() => state.loops.startCC > 0 && engine.sendControlChange(state.loops.channel, state.loops.startCC, 127)}
+            />
+            <ActionButton
+              label="Send loops stop now"
+              hint="Sends the stop control once"
+              onPress={() => {
+                const cc = state.loops.stopCC > 0 ? state.loops.stopCC : state.loops.startCC;
+                if (cc > 0) engine.sendControlChange(state.loops.channel, cc, 127);
+              }}
+            />
+            <ActionButton label="Send loop choice now" onPress={() => sendLoopChoice(state.loops)} />
           </Section>
 
           <Section title="Filter wanderers">

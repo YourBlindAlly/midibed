@@ -26,6 +26,8 @@ export type Profile = {
   fadeCC?: number;
   /** Good program numbers, loaded into a sound slot on request. */
   favorites?: string;
+  /** CCs that start and stop a loop player (use the same number twice for a play toggle). */
+  loopControls?: { startCC: number; stopCC: number };
 };
 
 const gmNotes: ProfileNote[] = Object.keys(GM_DRUMS)
@@ -52,7 +54,8 @@ export const PROFILES: Profile[] = [
     id: 'drumjam',
     name: 'DrumJam',
     about:
-      "From the developer's version 1.3 notes: pad filter cutoff is CC 74 and resonance is CC 71, the same defaults MidiBed uses. CC 7 is master pad volume, 91 pad reverb send, 18 and 19 delay, 20 crush, 21 lo-fi. Program Change switches kits and presets, and Bank Select MSB chooses between pad instruments and presets. In DrumJam, CC 11 is touch-pad velocity, not volume. Which channel each instrument answers on is not documented, so use the test hits.",
+      "From the developer's version 1.3 notes: pad filter cutoff is CC 74 and resonance is CC 71, the same defaults MidiBed uses. CC 7 is master pad volume, 91 pad reverb send, 18 and 19 delay, 20 crush, 21 lo-fi. Program Change switches kits and presets, and Bank Select MSB chooses between pad instruments and presets. In DrumJam, CC 11 is touch-pad velocity, not volume. CC 118 toggles play and CC 117 stops. Which channel each instrument answers on is not documented, so use the test hits.",
+    loopControls: { startCC: 118, stopCC: 117 },
     ccs: [
       { name: 'Pad filter cutoff', cc: 74 },
       { name: 'Pad filter resonance', cc: 71 },
@@ -108,10 +111,10 @@ export const PROFILES: Profile[] = [
   },
 ];
 
-export type ProfileRole = 'drums' | 'drone' | 'pad';
+export type ProfileRole = 'drums' | 'drone' | 'pad' | 'loops';
 export type ProfileChoice = Record<ProfileRole, string>;
 
-export const defaultProfileChoice: ProfileChoice = { drums: 'gm', drone: 'none', pad: 'synthone' };
+export const defaultProfileChoice: ProfileChoice = { drums: 'gm', drone: 'none', pad: 'synthone', loops: 'drumjam' };
 
 export function getProfile(id: string): Profile {
   return PROFILES.find((p) => p.id === id) ?? PROFILES[0];
@@ -126,6 +129,7 @@ type RoutingView = {
   drums: { channel: number }[];
   drone: { channel: number };
   pad: { channel: number };
+  loops: { channel: number };
   profiles: ProfileChoice;
 };
 
@@ -134,6 +138,7 @@ export function profileForChannel(s: RoutingView, channel: number): Profile {
   if (s.drums.some((d) => d.channel === channel)) return getProfile(s.profiles.drums);
   if (s.drone.channel === channel) return getProfile(s.profiles.drone);
   if (s.pad.channel === channel) return getProfile(s.profiles.pad);
+  if (s.loops.channel === channel) return getProfile(s.profiles.loops);
   return getProfile('none');
 }
 
