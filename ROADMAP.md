@@ -1,0 +1,91 @@
+# MidiBed roadmap (ideas, not promises)
+
+Goal (Rusty, 2026-10-08): a seamless, evolving bed of music and sound that he plays instruments over.
+Only the percussion is rhythmic. Everything else is a sustained bed. Add to this file as ideas come up;
+move an item to CLAUDE.md's status log when it is built.
+
+## Rusty's ideas
+
+### 1. Bass drone follows the chords (on/off)
+Root sets the key. With "Drone follows chords" on, the bass plays the root of each chord instead of
+staying on the key root.
+- Design: separate the chord *progression* (harmony) from the pad *sound*. Today the chord loop lives
+  inside the pad. If it becomes its own layer ("Harmony": mode, preset, degrees, bars per chord), then
+  the pad AND the bass both follow it, and the bass keeps working even with the pad switched off.
+- Engine: JS already computes chord note lists. Add a parallel list of bass notes per chord (the chord
+  root in the drone register) and have the drone change at the same chord boundary as the pad. Old bass
+  note off, new one on, same instant. A monophonic bass synth (Model D) suits this well.
+- Scenes: "follows chords" should be scene-owned. The key root stays global.
+
+### 2. Fifths drone (root + fifth only)
+- ALREADY POSSIBLE today: turn "Add octave" off and leave "Add fifth" on. That plays root plus fifth.
+- Improvements worth doing: one "Drone voicing" choice (root only, root+octave, root+fifth,
+  root+fifth+octave, root+fourth for a suspended feel) instead of two separate switches.
+- Not a separate sound engine. It is just which notes are sent. But it could OPTIONALLY go to its own
+  channel (an extra "fifth channel"), so the fifth could be a different timbre or a different app, and
+  the root could be a clean bass. This is the "two voices, two sounds" idea.
+
+### 3. Multiple sets of scenes ("songs")
+A control you flick up/down to move to the next one. Each has a name. Possibly other overall settings.
+- Name ideas: Song, Set, Bed, Journey, Mood. "Bed" fits the app, "Journey" fits the non-traditional form.
+- Per song (suggested): name, tempo, key (drone root), its scenes (4 now, maybe up to 8), scene order and
+  auto-advance plan (see 5), notes. Global (not per song): routing/channels, device profiles, outputs,
+  fade times, sound slots.
+- UI: a "Song" stepper (flick to change, reads the name), Rename (a text field), Duplicate, Delete.
+- Switching: queued to the next bar line, same as scenes. Tempo and key can change at that point.
+- Storage: state becomes a list of songs plus the active one. Needs a careful migration that wraps
+  today's saved settings into "Song 1" (use `migrateState`).
+- Export/import of songs as files is worth planning early so nothing is lost with the phone.
+
+### 4. Background ambience player (ocean, rain, wind...)
+- A different kind of layer: audio files, not MIDI. MidiBed would play them itself (it already has an
+  audio engine for the test synth, and its audio session mixes with other apps).
+- Looping: gapless, with a cross-fade at the loop point so there is no click or hole. One-shot mode that
+  fires at random intervals (distant thunder, a bird) is a nice extra.
+- Per-scene: which sound, level, on/off, with the usual fade in/out. Possibly a low-pass filter.
+- Where do the sounds come from? Best: let Rusty IMPORT his own files (Files app / document picker).
+  Avoids licensing and keeps the app small. Optionally bundle a few public-domain/CC0 loops later.
+- Alternative: a dedicated ambience app driven by MidiBed's loops layer (start/stop/choose). Works today
+  with the right app, but one player inside MidiBed gives better scene control.
+
+### 5. Repeat a scene, or auto-advance after N repeats
+- Per scene: "repeat N times, then go to": next scene / a chosen scene / random of a few / stay (hold).
+  Length counted in bars or in chord-loops.
+- This must happen NATIVELY on the bar line (like scene switches do), not from the UI, so it stays in
+  time. Plan: send the engine the whole song (all scene configs plus the advance rules); the engine
+  switches by itself and tells the UI which scene is now playing via an event. The UI follows.
+- Needs a "Hold / freeze" control: stop auto-advancing right now while Rusty is mid-solo, and resume later.
+
+## Suggestions (Claude) for the evolving bed
+
+A. **Evolve on repeat.** Each time a scene repeats, nudge a few things within safe limits: a drum's hits
+   by one, its rotation, a chord swapped for a neighbour (relative major/minor, add a 9th), pad voicing
+   inversion, strum, filter range. An "Evolve amount" per scene (0 = identical repeats, higher = more
+   change). This is probably the biggest single step toward "seamless and evolving". Combine with 5.
+B. **Energy macro.** One control (0-100) that scales drum density, velocities, pad brightness and filter
+   range together. A single flick to ease the bed down when Rusty wants room, or up for a build.
+C. **Transitions.** Choose how a scene change sounds: instant, one-bar drum drop, filter sweep, drums
+   thinning out before the change. Makes changes feel composed.
+D. **Freeze / panic.** Freeze = stop evolving and auto-advancing. Panic = all notes off on every channel
+   (cures any hung note in a receiving app).
+E. **Pedal control.** Bluetooth pedal for next scene, next song, freeze (see LyriCue's pedal module in
+   CLAUDE.md for the lessons about key capture).
+F. **Gradual tempo changes.** When a song changes, glide the tempo over a few bars instead of jumping.
+G. **MIDI file capture.** Record what the bed played to a .mid file so a good passage can be reused in
+   Reaper. (Uses the same code the engine already has to know when notes happen.)
+H. **Backups.** Export/import all settings to the Files app. Settings now live only on the phone.
+I. **Spoken status (optional).** Quiet announcements of scene or song changes, off by default.
+
+## Suggested build order
+1. Harmony as its own layer + "Drone follows chords" + drone voicing choices (items 1 and 2). Small,
+   audible payoff, and the rest builds on it.
+2. Auto-advance and the engine learning the whole song (5), with Freeze. Then Evolve on repeat (A).
+3. Songs (3), including export/import.
+4. Ambience player (4).
+5. Energy macro (B), transitions (C), pedal (E).
+
+## Decisions needed from Rusty
+- Name for songs (Song / Set / Bed / Journey / something else).
+- How many scenes per song: stay at 4, or allow up to 8?
+- Ambience sounds: import-your-own only, or also bundle a few?
+- Should key and tempo be allowed to change per song? (Assumed yes. Within a song they stay fixed.)
