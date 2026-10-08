@@ -95,15 +95,33 @@ type ToggleProps = {
   hint?: string;
 };
 
+/**
+ * An on/off switch you can flick: with VoiceOver, swipe UP for on and DOWN for
+ * off (an "adjustable" element, same gesture as every other value control here).
+ * Double-tap still flips it, and so does a plain tap with VoiceOver off. The
+ * state is read out as the value ("On"/"Off") so it is announced after each change.
+ */
+export function toggleAdjust(value: boolean, action: string): boolean {
+  if (action === 'increment') return true;
+  if (action === 'decrement') return false;
+  return value;
+}
+
 export function Toggle({ label, value, onChange, hint }: ToggleProps) {
+  const flickHint = 'Swipe up for on, swipe down for off, or double tap to switch.';
   return (
     <Pressable
       hitSlop={SLOP}
       style={styles.row}
-      accessibilityRole="switch"
+      accessibilityRole="adjustable"
       accessibilityLabel={label}
-      accessibilityState={{ checked: value }}
-      accessibilityHint={hint}
+      accessibilityValue={{ text: value ? 'On' : 'Off' }}
+      accessibilityHint={hint ? `${hint}. ${flickHint}` : flickHint}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={(e) => {
+        const next = toggleAdjust(value, e.nativeEvent.actionName);
+        if (next !== value) onChange(next);
+      }}
       onPress={() => onChange(!value)}
     >
       <Text style={styles.label}>{label}</Text>
