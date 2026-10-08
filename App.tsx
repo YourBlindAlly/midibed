@@ -148,7 +148,7 @@ export default function App() {
     return name ? `${n}, ${name}` : drumNoteLabel(n);
   };
   const slotProfile = (slotName: string) =>
-    slotName === 'Drone synth' ? droneProfile : slotName === 'Percussion' ? drumProfile : padProfile;
+    slotName === 'Bass drone' ? droneProfile : slotName === 'Percussion' ? drumProfile : padProfile;
   const patchDrum = (i: number, p: Partial<DrumState>) =>
     setState((s) => ({ ...s, drums: s.drums.map((d, k) => (k === i ? { ...d, ...p } : d)) }));
   const patchDrone = (p: Partial<BedState['drone']>) => setState((s) => ({ ...s, drone: { ...s.drone, ...p } }));
@@ -285,7 +285,7 @@ export default function App() {
             <Text style={styles.note}>
               Quick on and off for each part. Switching one fades it in or out using your fade times. Saved in each scene.
             </Text>
-            <Toggle label="Drone layer" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
+            <Toggle label="Bass drone layer" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
             <Toggle label="Chord pad layer" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
             <Toggle
               label="Percussion layer"
@@ -303,7 +303,7 @@ export default function App() {
 
           <Section title="Scene tools">
             <Text style={styles.note}>
-              Each scene remembers its drums, drone on/off and voicing, chord pad, swing, and filter movement. Tempo, drone root, outputs, fades and MIDI routing stay the same in every scene. Changes you make are saved into the current scene.
+              Each scene remembers its drums, bass drone on/off and voicing, chord pad, harmony, swing, and filter movement. Tempo, key, outputs, fades and MIDI routing stay the same in every scene. Changes you make are saved into the current scene.
             </Text>
             <Stepper
               label="Copy this scene to scene"
@@ -324,8 +324,18 @@ export default function App() {
             <>
           <Section title="Harmony">
             <Text style={styles.note}>
-              The chord loop. The chord pad and the bass drone can follow it. Chords are built on the drone root note, in the mode you choose. The loop keeps time even if nothing is following it.
+              The chord loop. The chord pad and the bass drone can follow it. Chords are built on the key note, in the mode you choose. The loop keeps time even if nothing is following it.
             </Text>
+            <Stepper
+              label="Key (root note)"
+              value={state.drone.root}
+              onChange={(v) => patchDrone({ root: v })}
+              min={24}
+              max={60}
+              bigStep={12}
+              format={noteName}
+              hint="The key of everything. The bass drone, the chords and the pad are all built on this note."
+            />
             <Stepper
               label="Progression preset"
               value={state.harmony.preset}
@@ -333,7 +343,7 @@ export default function App() {
               min={0}
               max={PRESETS.length - 1}
               format={(v) => PRESETS[v]?.name ?? 'Custom'}
-              hint="Swipe to choose a chord pattern. It follows the mode and the drone root."
+              hint="Swipe to choose a chord pattern. It follows the mode and the key."
             />
             <Stepper
               label="Mode"
@@ -342,7 +352,7 @@ export default function App() {
               min={0}
               max={MODE_NAMES.length - 1}
               format={(v) => MODE_NAMES[v]}
-              hint="The scale the chords come from, built on the drone root note."
+              hint="The scale the chords come from, built on the key note."
             />
             <Stepper label="Chords in loop" value={state.harmony.count} onChange={(v) => patchHarmony({ count: v, preset: 0 })} min={1} max={4} />
             {state.harmony.degrees.slice(0, state.harmony.count).map((d, i) => (
@@ -369,24 +379,15 @@ export default function App() {
             />
           </Section>
 
-          <Section title="Drone and bass">
-            <Toggle label="Drone" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
-            <Stepper label="Drone MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the bass drone plays on" />
-            <ActionButton label="Play drone test note" hint="Plays the drone root for a moment on the drone channel, to check routing" onPress={() => engine.sendNote(state.drone.channel, state.drone.root, state.drone.velocity, 1500)} />
-            <Stepper
-              label="Root note"
-              value={state.drone.root}
-              onChange={(v) => patchDrone({ root: v })}
-              min={24}
-              max={60}
-              bigStep={12}
-              format={noteName}
-            />
+          <Section title="Bass drone">
+            <Toggle label="Bass drone" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
+            <Stepper label="Bass drone MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the bass drone plays on" />
+            <ActionButton label="Play bass drone test note" hint="Plays the key note for a moment on the bass drone channel, to check routing" onPress={() => engine.sendNote(state.drone.channel, state.drone.root, state.drone.velocity, 1500)} />
             <Toggle
-              label="Drone follows chords"
+              label="Bass follows chords"
               value={state.drone.follow}
               onChange={(v) => patchDrone({ follow: v })}
-              hint="Off: the drone stays on the root note. On: it plays the root of each chord of the harmony, changing with the chords"
+              hint="Off: the bass stays on the key note. On: it plays the root of each chord of the harmony, changing with the chords"
             />
             <Toggle label="Add octave" value={state.drone.octave} onChange={(v) => patchDrone({ octave: v })} />
             <Toggle
@@ -395,7 +396,7 @@ export default function App() {
               onChange={(v) => patchDrone({ fifth: v })}
               hint="For a root and fifth drone, turn this on and turn the octave off"
             />
-            <Stepper label="Drone velocity" value={state.drone.velocity} onChange={(v) => patchDrone({ velocity: v })} min={1} max={127} step={5} />
+            <Stepper label="Bass drone velocity" value={state.drone.velocity} onChange={(v) => patchDrone({ velocity: v })} min={1} max={127} step={5} />
             <Stepper
               label="Retrigger every"
               value={state.drone.retriggerBars}
@@ -418,7 +419,7 @@ export default function App() {
 
           <Section title="Chord pad">
             <Toggle label="Chord pad" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
-            <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the chords play on. Use the drone channel to play both with one sound" />
+            <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the chords play on. Use the bass drone channel to play both with one sound" />
             <Toggle
               label="Pad follows chords"
               value={state.pad.follow}
@@ -426,7 +427,7 @@ export default function App() {
               hint="On: plays each chord of the harmony in turn. Off: one steady chord on the key. With the Fifth only chord type, that is a fifths drone"
             />
             <Stepper label="Chord type" value={state.pad.style} onChange={(v) => patchPad({ style: v })} min={0} max={STYLE_NAMES.length - 1} format={(v) => STYLE_NAMES[v]} hint="Fifth only plays just the root and the fifth" />
-            <Stepper label="Lowest pad note" value={state.pad.register} onChange={(v) => patchPad({ register: v })} min={36} max={72} bigStep={12} format={noteName} hint="Where the pad sits. The drone stays low." />
+            <Stepper label="Lowest pad note" value={state.pad.register} onChange={(v) => patchPad({ register: v })} min={36} max={72} bigStep={12} format={noteName} hint="Where the pad sits. The bass drone stays low." />
             <Toggle label="Smooth voice leading" value={state.pad.voiceLead} onChange={(v) => patchPad({ voiceLead: v })} hint="Each chord moves as little as possible from the last one" />
             <Toggle label="Open spread voicing" value={state.pad.spread} onChange={(v) => patchPad({ spread: v })} hint="Lifts the second note an octave. With smooth voice leading it applies to the first chord only" />
             <Stepper label="Strum" value={state.pad.strumMs} onChange={(v) => patchPad({ strumMs: v })} min={0} max={300} step={10} format={(v) => (v === 0 ? 'none' : `${v} milliseconds`)} />
@@ -607,7 +608,7 @@ export default function App() {
 
           <Section title="Fades">
             <Text style={styles.note}>
-              Applied when you switch a layer on or off, and when you press Play. Drone and pad fade by sending a MIDI volume control to the other synth; drums fade by getting softer. Set a time to zero for no fade.
+              Applied when you switch a layer on or off, and when you press Play. Bass drone and pad fade by sending a MIDI volume control to the other synth; drums fade by getting softer. Set a time to zero for no fade.
             </Text>
             <Stepper
               label="Fade volume control number"
@@ -617,15 +618,15 @@ export default function App() {
               max={127}
               bigStep={10}
               format={(v) => (v === 0 ? 'off' : `CC ${v}`)}
-              hint="11 is expression, 7 is volume. Off means drone and pad just start and stop."
+              hint="11 is expression, 7 is volume. Off means bass drone and pad just start and stop."
             />
             <ActionButton
               label="Send fade control test sweep"
-              hint="Sweeps the fade control on the drone channel, for MIDI learn. Press Stop first."
+              hint="Sweeps the fade control on the bass drone channel, for MIDI learn. Press Stop first."
               onPress={() => state.fade.cc > 0 && testSweep(state.drone.channel, state.fade.cc)}
             />
-            <Stepper label="Drone fade in" value={state.fade.droneIn} onChange={(v) => patchFade({ droneIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
-            <Stepper label="Drone fade out" value={state.fade.droneOut} onChange={(v) => patchFade({ droneOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+            <Stepper label="Bass drone fade in" value={state.fade.droneIn} onChange={(v) => patchFade({ droneIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+            <Stepper label="Bass drone fade out" value={state.fade.droneOut} onChange={(v) => patchFade({ droneOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
             <Stepper label="Pad fade in" value={state.fade.padIn} onChange={(v) => patchFade({ padIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
             <Stepper label="Pad fade out" value={state.fade.padOut} onChange={(v) => patchFade({ padOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
             <Stepper label="Drums fade in" value={state.fade.drumIn} onChange={(v) => patchFade({ drumIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
@@ -706,7 +707,7 @@ export default function App() {
             {(
               [
                 ['drums', 'Drums app', drumProfile],
-                ['drone', 'Drone app', droneProfile],
+                ['drone', 'Bass drone app', droneProfile],
                 ['pad', 'Chord pad app', padProfile],
                 ['loops', 'Loops app', loopsProfile],
               ] as const
@@ -725,7 +726,7 @@ export default function App() {
             ))}
             {droneProfile.mono && (state.drone.octave || state.drone.fifth) && (
               <ActionButton
-                label="Drone app plays one note: use a single drone note"
+                label="Bass drone app plays one note: use a single bass note"
                 hint="Turns off the octave and the fifth"
                 onPress={() => patchDrone({ octave: false, fifth: false })}
               />

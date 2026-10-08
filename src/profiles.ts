@@ -98,7 +98,7 @@ export const PROFILES: Profile[] = [
     id: 'modeld',
     name: 'Minimoog Model D',
     about:
-      'Plays one note at a time, so the drone should be a single note. Control changes are assigned by you inside the app; no fixed list was found, so use MIDI learn with the test sweeps.',
+      'Plays one note at a time, so the bass drone should be a single note. Control changes are assigned by you inside the app; no fixed list was found, so use MIDI learn with the test sweeps.',
     mono: true,
     ccs: [],
   },

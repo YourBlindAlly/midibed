@@ -50,18 +50,19 @@ describe('whole screen smoke test', () => {
     expect(labels(tree)).toEqual(expect.arrayContaining(['Play', 'Scene 1', 'Scene 4']));
 
     // Live
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Drone layer', 'Percussion layer', 'Tempo', 'Swing']));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Bass drone layer', 'Percussion layer', 'Tempo', 'Swing']));
     expect(labels(tree)).not.toContain('Progression preset');
 
     await tabPress('Harmony');
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Progression preset', 'Mode', 'Drone follows chords', 'Pad follows chords']));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Key (root note)', 'Progression preset', 'Mode', 'Bass follows chords', 'Pad follows chords']));
     expect(labels(tree)).not.toContain('Tempo');
+    expect(labels(tree)).not.toContain('Root note');
 
     await tabPress('Rhythm');
     expect(labels(tree)).toEqual(expect.arrayContaining(['Kick hits', 'Loops', 'Loop program']));
 
     await tabPress('Sound');
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Cutoff wander', 'Drone fade in', 'Chord pad program']));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Cutoff wander', 'Bass drone fade in', 'Chord pad program']));
 
     await tabPress('Setup');
     expect(labels(tree)).toEqual(expect.arrayContaining(['Send MIDI', 'Built-in test sound', 'Drums app profile']));

@@ -27,5 +27,6 @@ describe('sound favorites', () => {
     expect(s.sounds[0].program).toBe(7);
     expect(s.sounds[0].favorites).toBe('');
     expect(s.sounds[2].name).toBe('Chord pad');
+    expect(s.sounds[0].name).toBe('Bass drone'); // the old saved name 'Drone synth' is replaced
   });
 });

@@ -297,7 +297,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
     barsPerChord: 2,
   },
   sounds: [
-    { name: 'Drone synth', channel: 0, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '' },
+    { name: 'Bass drone', channel: 0, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '' },
     { name: 'Percussion', channel: 9, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '' },
     // New slots go at the END so settings saved by earlier versions keep their positions.
     // Favorites are Rusty's good Synth One pad presets (Synth One's own numbers).
@@ -438,8 +438,12 @@ export function migrateState(rawInput: unknown): BedState {
   const merged = mergeDefaults(defaultState, raw);
   const active = Math.max(0, Math.min(merged.scenes.length - 1, Math.round(merged.activeScene)));
   // The live settings ARE the active scene; keep the stored copy in step with them.
+  // Names are labels, not user data: always take the current ones, so a rename
+  // (e.g. 'Drone synth' -> 'Bass drone') reaches settings saved by older versions.
+  const sounds = merged.sounds.map((sl, i) => ({ ...sl, name: defaultState.sounds[i]?.name ?? sl.name }));
   return {
     ...merged,
+    sounds,
     activeScene: active,
     scenes: merged.scenes.map((sc, i) => (i === active ? captureScene(merged) : sc)),
   };
