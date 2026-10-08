@@ -215,6 +215,21 @@ export default function App() {
             <Text style={styles.position}>{position}</Text>
           </View>
 
+          <Section title="Layers">
+            <Text style={styles.note}>
+              Quick on and off for each part. Switching one fades it in or out using your fade times. Saved in each scene.
+            </Text>
+            <Toggle label="Drone layer" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
+            <Toggle label="Chord pad layer" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
+            <Toggle
+              label="Percussion layer"
+              value={state.percussion}
+              onChange={(v) => patch({ percussion: v })}
+              hint="Turns all the drums on or off together. Each drum keeps its own setting"
+            />
+            <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
+          </Section>
+
           <Section title="Scenes">
             <View style={styles.sceneRow}>
               {Array.from({ length: SCENE_COUNT }, (_, i) => {

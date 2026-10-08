@@ -124,6 +124,8 @@ export type BedState = {
   synthOut: boolean;
   /** Send MIDI clock plus Start/Stop while playing, so other apps can follow the tempo. */
   clock: boolean;
+  /** Master switch for all drums at once; each drum keeps its own on/off. Saved per scene. */
+  percussion: boolean;
   drums: DrumState[];
   drone: DroneState;
   wanderers: WandererState[];
@@ -144,6 +146,7 @@ export type BedState = {
  */
 export type SceneData = {
   swing: number;
+  percussion: boolean;
   drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars'>;
   pad: Omit<PadState, 'channel'>;
   drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
@@ -153,12 +156,13 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'swing' | 'drone' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
   return {
     swing: s.swing,
+    percussion: s.percussion,
     drone: {
       enabled: s.drone.enabled,
       octave: s.drone.octave,
@@ -192,6 +196,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
   return {
     ...s,
     swing: sc.swing,
+    percussion: sc.percussion,
     drone: { ...s.drone, ...sc.drone },
     pad: { ...s.pad, ...sc.pad, degrees: [...sc.pad.degrees] },
     drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
@@ -221,6 +226,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
   midiOut: true,
   synthOut: true,
   clock: false,
+  percussion: true,
   loops: {
     enabled: false,
     channel: 2,
@@ -301,6 +307,7 @@ function startingScenes(): SceneData[] {
     }),
     captureScene({
       ...b,
+      percussion: false,
       drums: drumsWhere(() => false),
       pad: { ...b.pad, enabled: false },
     }),
@@ -394,7 +401,7 @@ export function toEngineJson(s: BedState): string {
       stopCC: s.loops.stopCC,
     },
     drums: s.drums.map((d) => ({
-      enabled: d.enabled,
+      enabled: s.percussion && d.enabled,
       note: d.note,
       channel: d.channel,
       steps: d.steps,
