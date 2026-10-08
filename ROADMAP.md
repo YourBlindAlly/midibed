@@ -183,3 +183,11 @@ VoiceOver magic tap (two-finger double tap anywhere): BUILT 2026-10-08, starts/s
 - How many scenes per song: stay at 4, or allow up to 8?
 - Ambience sounds: import-your-own only, or also bundle a few?
 - Should key and tempo be allowed to change per song? (Assumed yes. Within a song they stay fixed.)
+
+### 4e. Recurring noise sound (Rusty, 2026-10-08; design agreed in principle, awaiting 3 answers)
+- A fourth transition sound, global on the Sound tab, with a per-scene on/off switch (Breathe tab).
+- WHEN: every N bars from the scene start, OR at the end of each chord loop (barsPerChord x chords).
+- CHANCE rolled once per boundary before anything is scheduled. Lead-ins start exactly (pre length) before the boundary, so a long rise gets its full length (pendingNoise already takes arbitrary start times).
+- VARIETY: fixed shape / random from ticked shapes / in turn through the ticked shapes; optional random colour each time.
+- Engine plan: per-boundary state (recurBoundary, recurPlay, recurShape, recurScheduled) rolled when a boundary is reached; at each bar line schedule the sound whose start falls inside the coming bar. Overlaps allowed (4 noise voices).
+- Open questions: random/in-turn/both; one length or per shape; skip the first loop?
