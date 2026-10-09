@@ -179,15 +179,24 @@ big engine file into layer modules should happen as these are added. A true AUv3
 generator, and only if Rusty wants it on an AUM strip with effects.
 
 ### 6. MidiDancer (Rusty's name): improvises on the key and chords, single notes, MIDI to a channel
+- CHARACTER VOCABULARY (keep adding as Rusty finds new rules): busy/sparse, narrow/wide range, smooth/leapy,
+  repeats/varies, pull toward chord tones, note length (held/short). Later: personality presets (Whisper, Drift, Curious, Playful).
 - Knows key, mode and current chord: chord tones at strong moments, steps and small skips between, lots of rests.
 - Controls: how busy, note range, phrase length (bars), repeat/vary a phrase it just played (motif memory), chance of
   resting, velocity changes, MIDI channel, per-scene on/off, fades. Reuse the Euclid rhythm code for note timing.
 - It is the first rhythmic element besides percussion, so keep it sparse and gentle by default.
 
-### 7. Turnaround (name TBD: Turnaround / Pickup / Lead-back)
-- A short single-note phrase near the end of the chord loop that leads back to the top (rising run, arpeggio, a
-  note that sets up the first chord). Shares phrase-building with MidiDancer. Chance, length in beats, shape variety.
-- Could fire together with a noise transition at the loop boundary.
+### 7. MidiPick-Up (Rusty's name, 2026-10-08)
+- A short single-note phrase in the last stretch of a chord (the last beat, half bar, or a length he sets) that lands on
+  the DOWNBEAT of the next chord. Rusty: "a small portion of the scale which fits over the last chord and ends on the
+  downbeat with a note either the root, or a chord tone for the new chord".
+- Notes from the scale, chosen to fit over the chord that is ending; the final note is the target: the new chord's root
+  or another chord tone (setting: root / chord tone / random). Single notes to a MIDI channel he chooses.
+- Shapes (variety option like the noise sound): rising run, falling run, approach from a step above or below, arpeggio of
+  the old chord stepping to the target, one note on the last beat held into the downbeat.
+- Settings: number of notes (1-8), length in beats, target, direction, chance, level, per-scene switch.
+- Rhythm choices: steady eighths, steady sixteenths, or a mix (Rusty to confirm).
+- Shares phrase-building with MidiDancer. Can fire together with a noise transition at the loop boundary.
 
 ### 8. Intermission (a break for Rusty: water, or changing things on the phone)
 - One button (could be on the magic tap or pedal later): the bed carries on by itself for a set time, with scenes
