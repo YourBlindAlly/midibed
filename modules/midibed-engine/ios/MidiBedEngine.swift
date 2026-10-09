@@ -172,6 +172,7 @@ struct MidiBedConfig: Decodable {
   var synthOut: Bool
   var clock: Bool           // send MIDI clock while playing
   var clockTransport: Bool  // ...and also MIDI Start at the beginning and Stop at the end
+  var clockLeadInBeats: Int // beats of clock alone after Play, before anything else starts
   var sceneIndex: Int       // which scene this configuration is
   var frozen: Bool          // stop the bed changing by itself (breathing, recurring sound, auto-advance)
   var advance: MidiBedAdvance
@@ -233,6 +234,8 @@ final class MidiBedEngine {
   /// Tick where the pad's chord loop starts counting (0, or the bar a scene switched in).
   private var padStartTick = 0
   private var running = false
+  /// Ticks of clock-only lead-in still to run after Play (nothing else plays until it is 0).
+  private var preRollTicks = 0
   private var tickIndex = 0
   private var nextTickTime: Double = 0
   private var lastWandererTime: Double = 0
@@ -397,13 +400,14 @@ final class MidiBedEngine {
       self.lastLoopSelect = []
       self.nextTickTime = ProcessInfo.processInfo.systemUptime + 0.05
       self.lastWandererTime = self.nextTickTime
+      self.preRollTicks = (self.config?.clock ?? false) ? max(0, min(16, self.config?.clockLeadInBeats ?? 0)) * self.ticksPerBeat : 0
       self.sceneStartTime = self.nextTickTime
       self.lastFadeTime = self.nextTickTime
       self.channelLastCC.removeAll()
       self.initDrumLevels()
       self.syncWanderers()
       if let c = self.config { self.resetMotion(c) }
-      self.reconcileDrone()
+      if self.preRollTicks == 0 { self.reconcileDrone() }
       let t = DispatchSource.makeTimerSource(flags: .strict, queue: self.queue)
       t.schedule(deadline: .now(), repeating: .milliseconds(2), leeway: .microseconds(200))
       t.setEventHandler { [weak self] in self?.pump() }
@@ -420,6 +424,7 @@ final class MidiBedEngine {
       self.timer = nil
       self.pending.removeAll()
       self.pendingNoise.removeAll()
+      self.preRollTicks = 0
       self.pendingIsAuto = false
       self.advanceBarsLeft = 0
       self.advanceTarget = -1
@@ -498,6 +503,20 @@ final class MidiBedEngine {
     let tickDur = 60.0 / (max(20.0, min(300.0, cfg.bpm)) * Double(ticksPerBeat))
     let barTicks = ticksPerBeat * beatsPerBar
     while nextTickTime <= now {
+      // Clock-only lead-in: the follower gets steady pulses before anything else starts.
+      if preRollTicks > 0 {
+        if cfg.clock, preRollTicks % 4 == 0 {
+          pending.append(Pending(time: nextTickTime, status: 0xF8, d1: 0, d2: 0))
+        }
+        preRollTicks -= 1
+        nextTickTime += tickDur
+        if preRollTicks == 0 {
+          sceneStartTime = nextTickTime
+          lastFadeTime = nextTickTime
+          reconcileDrone()
+        }
+        continue
+      }
       // A queued scene switch lands exactly on a bar line, and the pad's chord
       // loop restarts from its first chord there.
       if tickIndex % barTicks == 0 { stepAdvance(atTick: tickIndex) }
@@ -523,7 +542,7 @@ final class MidiBedEngine {
 
     let live = config ?? cfg
     updateWanderers(now: now, cfg: live)
-    updateFades(now: now, cfg: live)
+    if preRollTicks > 0 { lastFadeTime = now } else { updateFades(now: now, cfg: live) }
     drainPending(now: now)
     drainNoise(now: now)
   }
