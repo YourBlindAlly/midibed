@@ -1302,14 +1302,11 @@ export default function App() {
             <Toggle label="Announce breathing changes" value={state.announce} onChange={(v) => patch({ announce: v })} hint="Speaks a short message when a bass, pad or drum change happens by itself" />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
             <Toggle label="Send MIDI clock" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo while playing" />
-            <Stepper
-              label="Clock lead-in"
-              value={state.clockLeadIn}
-              onChange={(v) => patch({ clockLeadIn: v })}
-              min={0}
-              max={16}
-              format={(v) => (v === 0 ? 'none' : `${v} beats`)}
-              hint="When Play starts with the clock on, only the clock runs for this long first, so an app like DrumJam can settle on the tempo before anything else starts. A bar is 4 beats"
+            <Toggle
+              label="Keep the clock running while stopped"
+              value={state.clockAlways}
+              onChange={(v) => patch({ clockAlways: v })}
+              hint="Keeps sending the clock when MidiBed is stopped, so an app like DrumJam stays locked to the tempo and starts cleanly when you press Play. Only while this app is open"
             />
             <Toggle
               label="Also send MIDI Start and Stop"

@@ -163,8 +163,8 @@ export type BedState = {
   clock: boolean;
   /** With the clock: also send MIDI Start at the beginning and Stop at the end. Off = clock pulses only. */
   clockTransport: boolean;
-  /** With the clock: beats of clock alone before anything else starts, so a follower can lock to the tempo. */
-  clockLeadIn: number;
+  /** With the clock: keep sending it while stopped too, so a follower stays locked to the tempo. */
+  clockAlways: boolean;
   /** Master switch for all drums at once; each drum keeps its own on/off. Saved per scene. */
   percussion: boolean;
   drums: DrumState[];
@@ -446,7 +446,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   synthOut: true,
   clock: false,
   clockTransport: false,
-  clockLeadIn: 4,
+  clockAlways: true,
   percussion: true,
   loops: {
     enabled: false,
@@ -784,7 +784,7 @@ export function toEngineJson(s: BedState): string {
     synthOut: s.synthOut,
     clock: s.clock,
     clockTransport: s.clockTransport,
-    clockLeadInBeats: s.clockLeadIn,
+    clockAlways: s.clockAlways,
     sceneIndex: s.activeScene,
     frozen: s.frozen,
     advance: {
