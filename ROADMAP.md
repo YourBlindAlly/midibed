@@ -271,3 +271,6 @@ generator, and only if Rusty wants it on an AUM strip with effects.
 - VARIETY: fixed shape / random from ticked shapes / in turn through the ticked shapes; optional random colour each time.
 - Engine plan: per-boundary state (recurBoundary, recurPlay, recurShape, recurScheduled) rolled when a boundary is reached; at each bar line schedule the sound whose start falls inside the coming bar. Overlaps allowed (4 noise voices).
 - Open questions: random/in-turn/both; one length or per shape; skip the first loop?
+
+### Sound scout (SHELVED by Rusty, 2026-10-09)
+- Idea: a Sounds-tab mode that plays a test note on every program step, with Keep/Next/Back, remembered rejects per app and bank, optional auto-step, and category tags (bass, pad, lead) on favorites to filter the favorites list. Rusty prefers to scroll sounds while MidiBed is playing. Not planned. (Only favorites with names exist; category tags could be added later if the lists grow unwieldy.)
