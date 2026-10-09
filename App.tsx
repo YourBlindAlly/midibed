@@ -40,6 +40,16 @@ import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { engine, hasNativeEngine, onBeat, onMotion, onScene, testSweep } from './src/engine';
+import {
+  CONTOUR_NAMES,
+  DancerState,
+  PICK_NAMES,
+  SCALES,
+  START_NAMES,
+  describePhrase,
+  makePhrases,
+  resolveScale,
+} from './src/dancer';
 import { ADVANCE_MODE_NAMES, ADVANCE_UNIT_NAMES, AdvanceRule, advanceBars, describeAdvance, pickTarget } from './src/advance';
 import {
   BASS_KIND_NAMES,
@@ -349,6 +359,7 @@ export default function App() {
       const pr = motionPreset(idx);
       return pr ? { ...s, motion: pr } : { ...s, motion: { ...s.motion, preset: 0 } };
     });
+  const patchDancer = (p: Partial<DancerState>) => setState((s) => ({ ...s, dancer: { ...s.dancer, ...p } }));
   const patchHarmony = (p: Partial<HarmonyState>) => setState((s) => ({ ...s, harmony: { ...s.harmony, ...p } }));
   // Editing the chords by hand turns the preset label into "Custom".
   const setDegree = (i: number, v: number) =>
@@ -526,6 +537,7 @@ export default function App() {
               hint="Turns all the drums on or off together. Each drum keeps its own setting"
             />
             <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
+            <Toggle label="MidiDancer layer" value={state.dancer.enabled} onChange={(v) => patchDancer({ enabled: v })} />
             <Toggle
               label="Freeze"
               value={state.frozen}
@@ -699,6 +711,46 @@ export default function App() {
               return (
                 <Text style={styles.note} accessibilityLabel={text}>
                   {text}
+                </Text>
+              );
+            })()}
+          </Section>
+
+          <Section title="MidiDancer, call and response">
+            <Text style={styles.note}>
+              Plays a short phrase of single notes on the key's scale (the call), then stays quiet for as many whole bars as the phrase took up, so you can repeat or answer it. Freeze does not pause it. Saved in each scene, except the channel.
+            </Text>
+            <Toggle label="MidiDancer" value={state.dancer.enabled} onChange={(v) => patchDancer({ enabled: v })} />
+            <Stepper label="MidiDancer MIDI channel" value={state.dancer.channel} onChange={(v) => patchDancer({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel MidiDancer plays on" />
+            <Stepper
+              label="Scale"
+              value={state.dancer.scale}
+              onChange={(v) => patchDancer({ scale: v })}
+              min={0}
+              max={SCALES.length - 1}
+              format={(v) =>
+                v === 0 ? `Automatic, ${SCALES[resolveScale(0, state.harmony.mode)].name}` : SCALES[v].name
+              }
+              hint="Automatic picks a pentatonic scale to suit the mode. Scales with odd intervals sound best over a steady bass drone."
+            />
+            <Stepper label="Density" value={state.dancer.density} onChange={(v) => patchDancer({ density: v })} min={0} max={100} step={10} format={(v) => `${v} percent`} hint="How many notes in a phrase, from 2 to 10" />
+            <Stepper label="Busyness" value={state.dancer.busyness} onChange={(v) => patchDancer({ busyness: v })} min={0} max={100} step={10} format={(v) => `${v} percent short notes`} hint="How many of the notes are short rather than long" />
+            <Stepper label="Rests" value={state.dancer.rests} onChange={(v) => patchDancer({ rests: v })} min={0} max={100} step={10} format={(v) => `${v} percent`} hint="Chance of a gap before each note" />
+            <Stepper label="Contour" value={state.dancer.contour} onChange={(v) => patchDancer({ contour: v })} min={0} max={CONTOUR_NAMES.length - 1} format={(v) => CONTOUR_NAMES[v]} />
+            <Stepper label="Range" value={state.dancer.octaves} onChange={(v) => patchDancer({ octaves: v })} min={1} max={3} format={(v) => `${v} ${v === 1 ? 'octave' : 'octaves'}`} />
+            <Stepper label="Register (centre note)" value={state.dancer.register} onChange={(v) => patchDancer({ register: v })} min={36} max={96} bigStep={12} format={noteName} />
+            <Stepper label="MidiDancer velocity" value={state.dancer.velocity} onChange={(v) => patchDancer({ velocity: v })} min={1} max={127} bigStep={10} />
+            <Stepper label="Longest phrase" value={state.dancer.maxBars} onChange={(v) => patchDancer({ maxBars: v })} min={1} max={4} format={(v) => `${v} ${v === 1 ? 'bar' : 'bars'}`} />
+            <Stepper label="Phrase starts" value={state.dancer.start} onChange={(v) => patchDancer({ start: v })} min={0} max={START_NAMES.length - 1} format={(v) => START_NAMES[v]} />
+            <Stepper label="Response space" value={state.dancer.spaceMult} onChange={(v) => patchDancer({ spaceMult: v })} min={1} max={4} format={(v) => (v === 1 ? 'as long as the phrase' : `${v} times the phrase`)} hint="Counted in whole bars, from the bar line before the phrase starts" />
+            <Stepper label="Next phrase" value={state.dancer.pick} onChange={(v) => patchDancer({ pick: v })} min={0} max={PICK_NAMES.length - 1} format={(v) => PICK_NAMES[v]} />
+            <ActionButton label="New phrases" onPress={() => patchDancer({ seed: state.dancer.seed + 1 })} hint="Makes a different set of phrases with the same settings" />
+            {(() => {
+              const first = makePhrases(state.dancer, state.harmony.mode, keyRoot(state))[0];
+              const text = describePhrase(first, state.dancer.spaceMult);
+              return (
+                <Text style={styles.note} accessibilityLabel={`First phrase: ${text}`}>
+                  {`First phrase: ${text}`}
                 </Text>
               );
             })()}

@@ -1,5 +1,6 @@
 import { buildBassChords, buildPadChords, clampMode } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
+import { DancerState, defaultDancer, makePhrases } from './dancer';
 import { cycleBarsFromOldSpeed, phaseOffset, smoothBeatsFromOldSmooth } from './wander';
 import { MotionState, defaultMotion, drumRole } from './motion';
 import {
@@ -152,6 +153,8 @@ export type LoopsState = {
 };
 
 export type BedState = {
+  /** MidiDancer: call-and-response phrases on the key's scale. Everything but the channel is saved per scene. */
+  dancer: DancerState;
   bpm: number;
   swing: number; // percent 0-100
   midiOut: boolean;
@@ -223,6 +226,7 @@ export const MAX_JOURNEYS = 12;
  * drum note numbers), so switching scenes never changes the key, speed or wiring.
  */
 export type SceneData = {
+  dancer: Omit<DancerState, 'channel'>;
   /** Semitones above the journey key; the scene's home note (see keyRoot). */
   keyOffset: number;
   swing: number;
@@ -240,11 +244,13 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
+  const { channel: _dancerChannel, ...dancer } = s.dancer;
   return {
+    dancer: { ...dancer },
     keyOffset: s.keyOffset,
     swing: s.swing,
     percussion: s.percussion,
@@ -295,6 +301,7 @@ export function captureScene(s: SceneSource): SceneData {
 export function applyScene(s: BedState, sc: SceneData): BedState {
   return {
     ...s,
+    dancer: { ...s.dancer, ...sc.dancer },
     keyOffset: sc.keyOffset,
     swing: sc.swing,
     percussion: sc.percussion,
@@ -426,6 +433,7 @@ function nextJourneyNumber(list: Journey[]): number {
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
   keyOffset: 0,
+  dancer: defaultDancer,
   journeyName: 'Journey 1',
   profiles: defaultProfileChoice,
   bpm: 88,
@@ -835,6 +843,13 @@ export function toEngineJson(s: BedState): string {
       },
     },
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
+    dancer: {
+      enabled: s.dancer.enabled,
+      channel: s.dancer.channel,
+      spaceMult: s.dancer.spaceMult,
+      pick: s.dancer.pick,
+      phrases: s.dancer.enabled ? makePhrases(s.dancer, s.harmony.mode, keyRoot(s)) : [],
+    },
     fade: {
       cc: s.fade.cc,
       droneIn: s.fade.droneIn / 10,

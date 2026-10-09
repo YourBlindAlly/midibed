@@ -200,7 +200,7 @@ the scene on/off and fades, and outputs either MIDI (to a channel) or audio (Mid
 big engine file into layer modules should happen as these are added. A true AUv3 only matters for the noise
 generator, and only if Rusty wants it on an AUM strip with effects.
 
-### 6. MidiDancer (Rusty's name): improvises on the key and chords, single notes, MIDI to a channel
+### 6. v1 (Call and Response) BUILT 2026-10-09, round 26; see CLAUDE.md. MidiDancer (Rusty's name): improvises on the key and chords, single notes, MIDI to a channel
 - DECIDED: Rusty agreed to all three scale questions (auto by mode with a manual override; include Hirajoshi and In-sen from the start; per scene). Locrian is not needed (see below), so no special case.
 - SCALES (Rusty, 2026-10-08): stick to PENTATONIC scales, with a few to choose from depending on the situation.
   Candidates (intervals from the root): major pentatonic 1 2 3 5 6; minor pentatonic 1 b3 4 5 b7; suspended/Egyptian

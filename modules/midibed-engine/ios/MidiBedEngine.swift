@@ -149,6 +149,22 @@ struct MidiBedAdvance: Decodable {
   var target: Int
 }
 
+/// MidiDancer: a pool of phrases built on the JS side (src/dancer.ts). A phrase is `span` complete
+/// bars and events [step in 16ths from the bar line it starts on, length in steps, note, velocity].
+/// The engine plays one (a call), then stays quiet for span x spaceMult bars (the response space).
+struct MidiBedDancerPhrase: Decodable {
+  var span: Int
+  var events: [[Int]]
+}
+
+struct MidiBedDancerConfig: Decodable {
+  var enabled: Bool
+  var channel: Int
+  var spaceMult: Int
+  var pick: Int             // 0 in turn, 1 at random, 2 the same one every time
+  var phrases: [MidiBedDancerPhrase]
+}
+
 struct MidiBedConfig: Decodable {
   var bpm: Double
   var swing: Double         // 0...1, delays every other 16th
@@ -161,6 +177,7 @@ struct MidiBedConfig: Decodable {
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
   var harmony: MidiBedHarmonyConfig
+  var dancer: MidiBedDancerConfig
   var motion: MidiBedMotionConfig
   var transitions: MidiBedTransitionConfig
   var pad: MidiBedPadConfig
@@ -248,6 +265,10 @@ final class MidiBedEngine {
   private var recurColor = 0
   private var recurScheduled = true
   private var recurTurn = 0
+
+  // MidiDancer: bars left until the next call, and which phrase is next when going in turn.
+  private var dancerWait = 0
+  private var dancerTurn = 0
 
   private struct HeldNote: Equatable {
     var channel: Int
@@ -532,6 +553,11 @@ final class MidiBedEngine {
     if sceneTick > 0, sceneTick % barTicks == 0, !cfg.frozen {
       stepMotion(at: time, cfg: cfg)
       stepRecurring(time: time, bar: sceneTick / barTicks, cfg: cfg)
+    }
+
+    // MidiDancer: a call on a bar line, then a response space. Freeze does not pause it.
+    if sceneTick >= 0, sceneTick % barTicks == 0 {
+      stepDancer(at: time, tickDur: tickDur, cfg: cfg)
     }
 
     // Harmony: the chord loop changes chord every `barsPerChord` bars (counted from
@@ -870,11 +896,45 @@ final class MidiBedEngine {
     recurPlay = false
     recurScheduled = true
     recurTurn = 0
+    dancerWait = 0
+    dancerTurn = 0
     advanceBarsLeft = cfg.advance.mode > 0 ? max(0, cfg.advance.bars) : 0
     advanceTarget = pickAdvanceTarget(cfg)
     advanceEntranceScheduled = false
     emitMotion("reset")
     emitScene(index: cfg.sceneIndex, reason: "tick")
+  }
+
+  /// At each bar line: count down the space, and when it is over play the next phrase.
+  private func stepDancer(at time: Double, tickDur: Double, cfg: MidiBedConfig) {
+    let d = cfg.dancer
+    guard d.enabled, !d.phrases.isEmpty else {
+      dancerWait = 0
+      return
+    }
+    if dancerWait > 0 { dancerWait -= 1 }
+    guard dancerWait == 0 else { return }
+    let n = d.phrases.count
+    var idx = 0
+    if d.pick == 0 {
+      idx = dancerTurn % n
+      dancerTurn += 1
+    } else if d.pick == 1 {
+      idx = Int.random(in: 0..<n, using: &rng)
+    }
+    let phrase = d.phrases[idx]
+    // The phrase's own bars, then the response space (the same again, times spaceMult).
+    dancerWait = max(1, phrase.span) * (1 + max(1, d.spaceMult))
+    let stepDur = tickDur * Double(ticksPerStep)
+    let ch = UInt8(max(0, min(15, d.channel)))
+    for e in phrase.events where e.count >= 4 {
+      let start = time + Double(max(0, e[0])) * stepDur
+      let len = Double(max(1, e[1]))
+      let note = UInt8(max(0, min(127, e[2])))
+      let vel = UInt8(max(1, min(127, e[3])))
+      pending.append(Pending(time: start, status: 0x90 | ch, d1: note, d2: vel))
+      pending.append(Pending(time: start + len * stepDur * 0.92, status: 0x80 | ch, d1: note, d2: 0))
+    }
   }
 
   private func emitMotion(_ reason: String) {
