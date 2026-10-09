@@ -31,7 +31,7 @@ staying on the key root.
   channel (an extra "fifth channel"), so the fifth could be a different timbre or a different app, and
   the root could be a clean bass. This is the "two voices, two sounds" idea.
 
-### 3. Multiple sets of scenes ("songs")
+### 3. BUILT 2026-10-08 (round 25): journeys + per-scene key + relative major/minor. Still to do: export/import, tuning offset. Original notes ("songs"):
 - UPDATE 2026-10-08 (Rusty): "Journeys" (his word) can be PER INSTRUMENT. Example: his Native American Flute is in G# minor / B
   (G#m pentatonic = B major pentatonic), a key he would never choose for guitar or ocarina. So the KEY (root note) belongs to the
   journey, not the whole app. A journey holds: name (e.g. "Native flute, G# minor"), key, tempo, its scenes, and the program
@@ -236,6 +236,12 @@ generator, and only if Rusty wants it on an AUM strip with effects.
 ### 4f. Ambient sound player as a layer
 - Same audio path and triggers as the noise generator (scene start, breakdown...). Import Rusty's own files,
   loop without a click, per-scene level and fades. Largest piece because of file handling.
+
+### E. Pedal actions (Rusty, 2026-10-08)
+- Now: Rusty has a 2 button pedal (it acts as keyboard keys). Use for Start/Stop and Freeze/Unfreeze (button 1 = start/stop, button 2 = freeze/unfreeze; make the mapping a setting). Reference: LyriCue `modules/cueme-pedal-input` (native first-responder view with pressesBegan/pressesEnded, GCKeyboard only for connect/disconnect, debounce disconnect ~1.5 s, reclaim focus after a text field).
+- Later: Rusty is strongly considering a new MIDI pedal for use with StageTraxx4. So MidiBed should also RECEIVE MIDI (a CoreMIDI virtual destination, plus connected sources) and map incoming Program Change / CC / notes to actions. Make the action list the same for both kinds of pedal.
+- Action list to support: start/stop, freeze/unfreeze, next/previous scene, go to scene N, next/previous journey, drums mute/return (breakdown), fill / transition now, panic (all notes off), intermission.
+- Learn mode: press the pedal, pick the action ("Learn" button), so no CC numbers have to be typed. Keep per-journey mappings out of it: pedal mappings are global.
 
 ## Suggested build order
 1. Harmony as its own layer + "Drone follows chords" + drone voicing choices (items 1 and 2). Small,

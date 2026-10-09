@@ -190,7 +190,32 @@ export type BedState = {
   profiles: ProfileChoice;
   activeScene: number;
   scenes: SceneData[];
+  /** Semitones the current scene's home note sits above the journey key (-6 to 5). Saved per scene. */
+  keyOffset: number;
+  /** Journeys: the live settings ARE the active one (like scenes). See Journey below. */
+  journeyName: string;
+  journeys: Journey[];
+  activeJourney: number;
 };
+
+/** The sound choices a journey remembers for each sound slot (not the routing). */
+export type JourneySound = Pick<SoundSlot, 'program' | 'sendBank' | 'bankMSB' | 'bankLSB'>;
+
+/**
+ * A journey: a named set of scenes with its own key and tempo (for example "Native flute,
+ * G# minor") and the sound choices for each slot. Everything else (routing, profiles,
+ * outputs, fades, transition sounds) is global.
+ */
+export type Journey = {
+  name: string;
+  root: number;
+  bpm: number;
+  activeScene: number;
+  scenes: SceneData[];
+  sounds: JourneySound[];
+};
+
+export const MAX_JOURNEYS = 12;
 
 /**
  * What a scene remembers. Deliberately NOT in a scene: tempo, the drone root,
@@ -198,6 +223,8 @@ export type BedState = {
  * drum note numbers), so switching scenes never changes the key, speed or wiring.
  */
 export type SceneData = {
+  /** Semitones above the journey key; the scene's home note (see keyRoot). */
+  keyOffset: number;
   swing: number;
   percussion: boolean;
   drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow'>;
@@ -213,11 +240,12 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
   return {
+    keyOffset: s.keyOffset,
     swing: s.swing,
     percussion: s.percussion,
     drone: {
@@ -267,6 +295,7 @@ export function captureScene(s: SceneSource): SceneData {
 export function applyScene(s: BedState, sc: SceneData): BedState {
   return {
     ...s,
+    keyOffset: sc.keyOffset,
     swing: sc.swing,
     percussion: sc.percussion,
     drone: { ...s.drone, ...sc.drone },
@@ -295,7 +324,109 @@ export function copyScene(s: BedState, to: number): BedState {
   return { ...s, scenes: s.scenes.map((sc, i) => (i === s.activeScene || i === to ? current : sc)) };
 }
 
-const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
+/** Keep a key offset in -6..5 (the nearest way round the octave). */
+export function wrapOffset(o: number): number {
+  return ((((Math.round(o) + 6) % 12) + 12) % 12) - 6;
+}
+
+/** The home note the harmony and bass are built on: the journey key moved by this scene's offset. */
+export function keyRoot(s: Pick<BedState, 'drone' | 'keyOffset'>): number {
+  return s.drone.root + s.keyOffset;
+}
+
+/**
+ * Move to the relative key and keep the same chords sounding: minor (Aeolian) to its relative major
+ * (Ionian, 3 semitones up) or back. The home note changes, the seven notes do not. Chord numbers
+ * are renumbered so the same chords keep playing. Any other mode is returned unchanged.
+ */
+export function relativeKey(s: BedState): BedState {
+  const mode = s.harmony.mode;
+  if (mode !== 5 && mode !== 0) return s;
+  const toMajor = mode === 5;
+  const renumber = (d: number) => (toMajor ? ((((d - 3) % 7) + 7) % 7) + 1 : ((d + 1) % 7) + 1);
+  return {
+    ...s,
+    keyOffset: wrapOffset(s.keyOffset + (toMajor ? 3 : -3)),
+    harmony: { ...s.harmony, mode: toMajor ? 0 : 5, preset: 0, degrees: s.harmony.degrees.map(renumber) },
+  };
+}
+
+/** The current live settings as a journey record. */
+export function captureJourney(s: BedState): Journey {
+  return {
+    name: s.journeyName,
+    root: s.drone.root,
+    bpm: s.bpm,
+    activeScene: s.activeScene,
+    scenes: s.scenes.map((sc, i) => (i === s.activeScene ? captureScene(s) : sc)),
+    sounds: s.sounds.map((sl) => ({ program: sl.program, sendBank: sl.sendBank, bankMSB: sl.bankMSB, bankLSB: sl.bankLSB })),
+  };
+}
+
+/** Load a journey record into the live settings (its active scene too). */
+export function applyJourney(s: BedState, j: Journey): BedState {
+  const withJourney: BedState = {
+    ...s,
+    journeyName: j.name,
+    bpm: j.bpm,
+    drone: { ...s.drone, root: j.root },
+    scenes: j.scenes,
+    activeScene: j.activeScene,
+    sounds: s.sounds.map((sl, i) => ({ ...sl, ...j.sounds[i] })),
+  };
+  return applyScene(withJourney, j.scenes[j.activeScene]);
+}
+
+/** Save the live settings into the current journey, then load journey `to`. */
+export function switchJourney(s: BedState, to: number): BedState {
+  if (to < 0 || to >= s.journeys.length || to === s.activeJourney) return s;
+  const saved = s.journeys.map((j, i) => (i === s.activeJourney ? captureJourney(s) : j));
+  return { ...applyJourney(s, saved[to]), journeys: saved, activeJourney: to };
+}
+
+/** A new journey with the starting scenes, in the same key and tempo as this one, which becomes the active journey. */
+export function newJourney(s: BedState): BedState {
+  if (s.journeys.length >= MAX_JOURNEYS) return s;
+  const saved = s.journeys.map((j, i) => (i === s.activeJourney ? captureJourney(s) : j));
+  const fresh: Journey = {
+    ...captureJourney({ ...defaultState, drone: { ...defaultState.drone, root: s.drone.root }, bpm: s.bpm, sounds: s.sounds }),
+    name: `Journey ${nextJourneyNumber(saved)}`,
+  };
+  return { ...applyJourney(s, fresh), journeys: [...saved, fresh], activeJourney: saved.length };
+}
+
+/** A copy of this journey (with unsaved edits), placed after it, which becomes the active journey. */
+export function duplicateJourney(s: BedState): BedState {
+  if (s.journeys.length >= MAX_JOURNEYS) return s;
+  const current = captureJourney(s);
+  const copy: Journey = { ...current, name: `${current.name} copy` };
+  const saved = s.journeys.map((j, i) => (i === s.activeJourney ? current : j));
+  const at = s.activeJourney + 1;
+  const list = [...saved.slice(0, at), copy, ...saved.slice(at)];
+  return { ...applyJourney(s, copy), journeys: list, activeJourney: at };
+}
+
+/** Remove the active journey and move to its neighbour. The last journey cannot be deleted. */
+export function deleteJourney(s: BedState): BedState {
+  if (s.journeys.length < 2) return s;
+  const list = s.journeys.filter((_, i) => i !== s.activeJourney);
+  const at = Math.min(s.activeJourney, list.length - 1);
+  return { ...applyJourney(s, list[at]), journeys: list, activeJourney: at };
+}
+
+export function renameJourney(s: BedState, name: string): BedState {
+  return { ...s, journeyName: name.slice(0, 40) };
+}
+
+function nextJourneyNumber(list: Journey[]): number {
+  let n = list.length + 1;
+  while (list.some((j) => j.name === `Journey ${n}`)) n++;
+  return n;
+}
+
+const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
+  keyOffset: 0,
+  journeyName: 'Journey 1',
   profiles: defaultProfileChoice,
   bpm: 88,
   swing: 15,
@@ -405,7 +536,8 @@ function startingScenes(): SceneData[] {
   ];
 }
 
-export const defaultState: BedState = { ...baseState, activeScene: 0, scenes: startingScenes() };
+const stateWithoutJourneys: BedState = { ...baseState, activeScene: 0, scenes: startingScenes(), journeys: [], activeJourney: 0 };
+export const defaultState: BedState = { ...stateWithoutJourneys, journeys: [captureJourney(stateWithoutJourneys)] };
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -427,7 +559,7 @@ export function drumNoteLabel(note: number): string {
  */
 export function padChords(s: BedState): number[][] {
   return buildPadChords({
-    root: s.drone.root,
+    root: keyRoot(s),
     mode: s.harmony.mode,
     degrees: s.pad.follow ? s.harmony.degrees : [1],
     count: s.pad.follow ? s.harmony.count : 1,
@@ -441,7 +573,7 @@ export function padChords(s: BedState): number[][] {
 /** Bass note lists, one per chord of the harmony loop when following, or one steady list. */
 export function droneChords(s: BedState): number[][] {
   return buildBassChords({
-    root: s.drone.root,
+    root: keyRoot(s),
     mode: s.harmony.mode,
     degrees: s.harmony.degrees,
     count: s.harmony.count,
@@ -591,17 +723,42 @@ export function migrateState(rawInput: unknown): BedState {
     scenes: merged0.scenes.map((sc) => ({ ...sc, harmony: { ...sc.harmony, mode: clampMode(sc.harmony.mode) } })),
   };
   const active = Math.max(0, Math.min(merged.scenes.length - 1, Math.round(merged.activeScene)));
+  const keyOffset = wrapOffset(Number.isFinite(merged.keyOffset) ? merged.keyOffset : 0);
   // The live settings ARE the active scene; keep the stored copy in step with them.
   // Names are labels, not user data: always take the current ones, so a rename
   // (e.g. 'Drone synth' -> 'Bass drone') reaches settings saved by older versions.
   const sounds = merged.sounds.map((sl, i) => ({ ...sl, name: defaultState.sounds[i]?.name ?? sl.name }));
-  return {
+  const live: BedState = {
     ...merged,
+    keyOffset,
     frozen: false, // never come back frozen
     sounds,
     activeScene: active,
-    scenes: merged.scenes.map((sc, i) => (i === active ? captureScene(merged) : sc)),
+    scenes: merged.scenes.map((sc, i) => (i === active ? captureScene({ ...merged, keyOffset }) : sc)),
   };
+  // Journeys: settings saved before they existed become "Journey 1". The live settings ARE the
+  // active journey; the others are merged against a default journey so new fields get defaults.
+  const rawList = raw !== null && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).journeys)
+    ? ((raw as Record<string, unknown>).journeys as unknown[])
+    : [];
+  const rawActive = Number((raw as Record<string, unknown> | null)?.activeJourney);
+  const count = Math.max(1, Math.min(MAX_JOURNEYS, rawList.length));
+  const activeJ = Number.isFinite(rawActive) ? Math.max(0, Math.min(count - 1, Math.round(rawActive))) : 0;
+  const template = captureJourney(defaultState);
+  const journeys: Journey[] = [];
+  for (let i = 0; i < count; i++) {
+    if (i === activeJ) {
+      journeys.push(captureJourney(live));
+    } else {
+      const j = mergeDefaults(template, rawList[i]);
+      journeys.push({
+        ...j,
+        activeScene: Math.max(0, Math.min(j.scenes.length - 1, j.activeScene)),
+        scenes: j.scenes.map((sc) => ({ ...sc, keyOffset: wrapOffset(sc.keyOffset), harmony: { ...sc.harmony, mode: clampMode(sc.harmony.mode) } })),
+      });
+    }
+  }
+  return { ...live, journeys, activeJourney: activeJ };
 }
 
 /** Shape the native engine expects (MidiBedConfig in MidiBedEngine.swift). */

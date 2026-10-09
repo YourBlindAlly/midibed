@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -10,6 +10,7 @@ import {
   FadeState,
   HarmonyState,
   LoopsState,
+  MAX_JOURNEYS,
   PadState,
   SCENE_COUNT,
   SoundSlot,
@@ -17,14 +18,21 @@ import {
   addFavorite,
   copyScene,
   defaultState,
+  deleteJourney,
   drumNoteLabel,
   droneChords,
   droneNotes,
+  duplicateJourney,
+  keyRoot,
+  newJourney,
   noteName,
   padIsSteadyFifths,
   parseFavorites,
+  relativeKey,
   removeFavorite,
+  renameJourney,
   sceneConfigsJson,
+  switchJourney,
   switchScene,
   toEngineJson,
 } from './src/config';
@@ -250,6 +258,63 @@ export default function App() {
     announceLater(`Copied scene ${state.activeScene + 1} to scene ${to + 1}`, 500);
   };
 
+  // Journeys. Switching is queued to the next bar line, like scenes; the new tempo and key
+  // arrive in the same configuration. The new journey's sound choices are sent to the synths.
+  const sendJourneySounds = (s: BedState) => s.sounds.forEach((slot) => sendSound(slot));
+  const goToJourney = (to: number) => {
+    if (to === state.activeJourney || to < 0 || to >= state.journeys.length) return;
+    const next = switchJourney(state, to);
+    const queued = playing && toEngineJson(next) !== json;
+    queueNextApply.current = queued;
+    setState(next);
+    setQueuedScene(queued ? next.activeScene : null);
+    sendJourneySounds(next);
+    announceLater(queued ? `${next.journeyName}, starts at the next bar` : next.journeyName, 500);
+  };
+  const addJourney = () => {
+    if (state.journeys.length >= MAX_JOURNEYS) {
+      announceLater(`You can have up to ${MAX_JOURNEYS} journeys`, 300);
+      return;
+    }
+    const next = newJourney(state);
+    setState(next);
+    announceLater(`New journey, ${next.journeyName}`, 500);
+  };
+  const copyJourney = () => {
+    if (state.journeys.length >= MAX_JOURNEYS) {
+      announceLater(`You can have up to ${MAX_JOURNEYS} journeys`, 300);
+      return;
+    }
+    const next = duplicateJourney(state);
+    setState(next);
+    announceLater(`Copied to ${next.journeyName}`, 500);
+  };
+  const removeJourney = () => {
+    if (state.journeys.length < 2) {
+      announceLater('You need at least one journey', 300);
+      return;
+    }
+    Alert.alert('Delete journey', `Delete ${state.journeyName} and all its scenes?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          const next = deleteJourney(state);
+          setState(next);
+          sendJourneySounds(next);
+          announceLater(`Deleted. Now ${next.journeyName}`, 500);
+        },
+      },
+    ]);
+  };
+  const goRelative = () => {
+    const next = relativeKey(state);
+    if (next === state) return;
+    setState(next);
+    announceLater(`${MODE_NAMES[next.harmony.mode]}, key ${noteName(keyRoot(next)).replace(/-?\d+$/, '')}. The same chords keep playing.`, 500);
+  };
+
   const patchFade =(p: Partial<FadeState>) => setState((s) => ({ ...s, fade: { ...s.fade, ...p } }));
   const loopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendLoopChoice = (l: LoopsState) =>
@@ -330,7 +395,7 @@ export default function App() {
       .join('. ') || 'Nothing in this scene is set to change by itself';
   const harmonySummary = state.harmony.degrees
     .slice(0, state.harmony.count)
-    .map((d) => chordLabel(state.drone.root, state.harmony.mode, d, 0))
+    .map((d) => chordLabel(keyRoot(state), state.harmony.mode, d, 0))
     .join(', then ');
   const patchWanderer = (i: number, p: Partial<WandererState>) =>
     setState((s) => ({ ...s, wanderers: s.wanderers.map((w, k) => (k === i ? { ...w, ...p } : w)) }));
@@ -417,6 +482,37 @@ export default function App() {
             <ScrollView key={tab} style={styles.fill} contentContainerStyle={styles.scroll}>
           {tab === 'live' && (
             <>
+          <Section title="Journey">
+            <Text style={styles.note}>
+              A journey is a set of scenes with its own key, tempo and sounds. Swipe to change journey; while playing it changes at the next bar.
+            </Text>
+            <Stepper
+              label="Journey"
+              value={state.activeJourney}
+              onChange={goToJourney}
+              min={0}
+              max={Math.max(0, state.journeys.length - 1)}
+              format={(v) => (v === state.activeJourney ? state.journeyName : state.journeys[v]?.name ?? '')}
+              hint="Swipe up or down to choose a journey"
+            />
+            <View accessible={false} style={styles.nameBox}>
+              <Text style={styles.note}>Journey name</Text>
+              <TextInput
+                style={styles.nameInput}
+                value={state.journeyName}
+                onChangeText={(v) => setState((s) => renameJourney(s, v))}
+                accessibilityLabel="Journey name"
+                accessibilityHint="Double tap to edit the name of this journey"
+                maxLength={40}
+                autoCorrect={false}
+                placeholderTextColor={colors.dim}
+              />
+            </View>
+            <ActionButton label="New journey" onPress={addJourney} hint="Adds a journey with the starting scenes, in the same key and tempo" />
+            <ActionButton label="Duplicate this journey" onPress={copyJourney} hint="Makes a copy of this journey with all its scenes" />
+            <ActionButton label="Delete this journey" onPress={removeJourney} hint="Asks first. You always keep at least one" />
+          </Section>
+
           <Section title="Layers">
             <Text style={styles.note}>
               Quick on and off for each part. Switching one fades it in or out using your fade times. Saved in each scene.
@@ -502,8 +598,26 @@ export default function App() {
               max={60}
               bigStep={12}
               format={noteName}
-              hint="The key of everything. The bass drone, the chords and the pad are all built on this note."
+              hint="The key of this journey. A scene can move its home note away from it with Scene key change below."
             />
+            <Stepper
+              label="Scene key change"
+              value={state.keyOffset}
+              onChange={(v) => patch({ keyOffset: Math.max(-6, Math.min(5, v)) })}
+              min={-6}
+              max={5}
+              format={(v) =>
+                v === 0 ? 'none, home note is the key' : `${v > 0 ? 'up' : 'down'} ${Math.abs(v)} semitones, home note ${noteName(state.drone.root + v).replace(/-?\d+$/, '')}`
+              }
+              hint="Moves the home note for this scene only. The chords are rebuilt on it. It changes on the bar line when you switch scenes."
+            />
+            {(state.harmony.mode === 5 || state.harmony.mode === 0) && (
+              <ActionButton
+                label={state.harmony.mode === 5 ? 'Switch to the relative major, keep the chords' : 'Switch to the relative minor, keep the chords'}
+                onPress={goRelative}
+                hint="Moves the home note three semitones and changes the mode, and renumbers the chords so the same chords keep sounding"
+              />
+            )}
             {(() => {
               const options = presetsForMode(state.harmony.mode, state.harmony.preset);
               return (
@@ -536,7 +650,7 @@ export default function App() {
                 onChange={(v) => setDegree(i, v)}
                 min={1}
                 max={7}
-                format={(v) => `${v}, ${chordLabel(state.drone.root, state.harmony.mode, v, 0)}`}
+                format={(v) => `${v}, ${chordLabel(keyRoot(state), state.harmony.mode, v, 0)}`}
               />
             ))}
             <View accessible accessibilityLabel="Chord loop" accessibilityValue={{ text: `${harmonySummary}, ${state.harmony.barsPerChord} bars each` }}>
@@ -555,7 +669,7 @@ export default function App() {
           <Section title="Bass drone">
             <Toggle label="Bass drone" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
             <Stepper label="Bass drone MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the bass drone plays on" />
-            <ActionButton label="Play bass drone test note" hint="Plays the key note for a moment on the bass drone channel, to check routing" onPress={() => engine.sendNote(state.drone.channel, state.drone.root, state.drone.velocity, 1500)} />
+            <ActionButton label="Play bass drone test note" hint="Plays the key note for a moment on the bass drone channel, to check routing" onPress={() => engine.sendNote(state.drone.channel, keyRoot(state), state.drone.velocity, 1500)} />
             <Toggle
               label="Bass follows chords"
               value={state.drone.follow}
@@ -581,7 +695,7 @@ export default function App() {
             {(() => {
               const text = state.drone.follow
                 ? `Follows the chords: ${droneChords(state).map((c) => c.map(noteName).join(' ')).join(', then ')}`
-                : `Plays ${droneNotes(state.drone).map(noteName).join(' ')}`;
+                : `Plays ${droneNotes({ ...state.drone, root: keyRoot(state) }).map(noteName).join(' ')}`;
               return (
                 <Text style={styles.note} accessibilityLabel={text}>
                   {text}
@@ -1200,6 +1314,17 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   strip: { paddingHorizontal: 16, paddingTop: 8 },
   scroll: { padding: 16, paddingBottom: 60 },
+  nameBox: { marginBottom: 8 },
+  nameInput: {
+    color: colors.text,
+    backgroundColor: colors.card,
+    borderColor: colors.line,
+    borderWidth: 1,
+    borderRadius: 10,
+    minHeight: 48,
+    paddingHorizontal: 12,
+    fontSize: 17,
+  },
   title: { color: colors.text, fontSize: 30, fontWeight: '700', marginBottom: 12 },
   warn: { color: '#ffb86b', marginBottom: 12, fontSize: 15 },
   play: {
