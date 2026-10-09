@@ -46,7 +46,12 @@ staying on the key root.
   only the centre of gravity moves. A steady bass drone moves G# -> B on the bar line of the scene change; a following bass
   and the pad keep their notes. Other helpers possible later: up a fourth, up a fifth, parallel major/minor (changes the
   notes, so not flute-friendly). MidiDancer's pentatonic on the new tonic holds the same notes with different landing notes.
-  Open: keep chords unchanged on the relative switch (recommended); bass moves on the bar line or eases across a beat or two.
+  DECIDED: the root changes right on the bar line.
+  CLARIFIED: a scene owns its own progression (mode, preset, degrees, bars). Chords are stored as DEGREES counted from the home
+  note, so moving the home note with the same degrees CHANGES the chords (G#m: 1,7,4,7 = G#m F# C#m F#; in B major the same
+  numbers give B, A#dim, E, A#dim). So offer two ways: (1) "Relative major/minor, keep the chords" renumbers the degrees so the
+  same chords keep sounding; (2) "Fresh progression": switch key/mode and pick a new progression. Also make the preset list
+  mode-aware (tag each preset with the modes it suits; add major-key ones such as 1-5-6-4, 1-4-5-1, 1-6-4-5).
 
 
 A control you flick up/down to move to the next one. Each has a name. Possibly other overall settings.
