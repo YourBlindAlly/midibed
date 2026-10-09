@@ -32,6 +32,13 @@ staying on the key root.
   the root could be a clean bass. This is the "two voices, two sounds" idea.
 
 ### 3. Multiple sets of scenes ("songs")
+- UPDATE 2026-10-08 (Rusty): "Journeys" (his word) can be PER INSTRUMENT. Example: his Native American Flute is in G# minor / B
+  (G#m pentatonic = B major pentatonic), a key he would never choose for guitar or ocarina. So the KEY (root note) belongs to the
+  journey, not the whole app. A journey holds: name (e.g. "Native flute, G# minor"), key, tempo, its scenes, and the program
+  choices per sound slot (loading it can switch the synths to suitable sounds). Global: routing, device profiles, outputs,
+  transition sound settings. Optional later: a tuning offset in cents per journey (pitch bend; flutes are not always A=440).
+  Do this before many scenes are built in one key, since it changes how settings are saved (needs a careful migration).
+
 A control you flick up/down to move to the next one. Each has a name. Possibly other overall settings.
 - Name ideas: Song, Set, Bed, Journey, Mood. "Bed" fits the app, "Journey" fits the non-traditional form.
 - Per song (suggested): name, tempo, key (drone root), its scenes (4 now, maybe up to 8), scene order and
@@ -179,6 +186,7 @@ big engine file into layer modules should happen as these are added. A true AUv3
 generator, and only if Rusty wants it on an AUM strip with effects.
 
 ### 6. MidiDancer (Rusty's name): improvises on the key and chords, single notes, MIDI to a channel
+- DECIDED: Rusty agreed to all three scale questions (auto by mode with a manual override; include Hirajoshi and In-sen from the start; per scene). Locrian is not needed (see below), so no special case.
 - SCALES (Rusty, 2026-10-08): stick to PENTATONIC scales, with a few to choose from depending on the situation.
   Candidates (intervals from the root): major pentatonic 1 2 3 5 6; minor pentatonic 1 b3 4 5 b7; suspended/Egyptian
   1 2 4 5 b7; blues minor/Man Gong 1 b3 4 b6 b7; Hirajoshi 1 2 b3 5 b6; In-sen 1 b2 4 5 b7. Keep the list as DATA so
