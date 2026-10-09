@@ -42,7 +42,7 @@ describe('config', () => {
     expect(j.drums).toHaveLength(4);
     expect(j.drone.chords).toEqual([[38, 50, 45]]);
     expect(j.wanderers[0].cc).toBe(74);
-    expect(j.wanderers[0].smooth).toBeCloseTo(3);
+    expect(j.wanderers[0].smoothBeats).toBe(4);
   });
 });
 

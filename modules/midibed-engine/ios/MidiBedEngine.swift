@@ -32,8 +32,12 @@ struct MidiBedWandererConfig: Decodable {
   var channel: Int
   var min: Int
   var max: Int
-  var speed: Double         // fraction of the min..max range travelled per second
-  var smooth: Double        // seconds of easing
+  var cycleBars: Double     // bars for one full cycle; also how fast free wandering crosses the range
+  var looseness: Double     // 0 = a clean cycle ... 1 = free wandering
+  var phase: Double         // 0...1, where in its cycle it starts
+  var smoothBeats: Double   // beats of easing
+  var opposes: Int          // -1 = none, else the index of the filter this one moves against
+  var opposeAmount: Double  // 0...1
 }
 
 struct MidiBedPadConfig: Decodable {
@@ -257,6 +261,8 @@ final class MidiBedEngine {
     var lastSent: Int
   }
   private var wanderers: [WandererState] = []
+  /// When the current scene began (a scene switch's bar line, or Play): the filters' cycles count from here.
+  private var sceneStartTime: Double = 0
 
   private var rng = SystemRandomNumberGenerator()
 
@@ -335,6 +341,7 @@ final class MidiBedEngine {
       self.lastLoopSelect = []
       self.nextTickTime = ProcessInfo.processInfo.systemUptime + 0.05
       self.lastWandererTime = self.nextTickTime
+      self.sceneStartTime = self.nextTickTime
       self.lastFadeTime = self.nextTickTime
       self.channelLastCC.removeAll()
       self.initDrumLevels()
@@ -440,6 +447,7 @@ final class MidiBedEngine {
         // drone on chord 1 straight away instead of on the old position.
         chordIndex = 0
         padStartTick = tickIndex
+        sceneStartTime = nextTickTime
         resetMotion(p)
         install(p, atBar: true)
       }
@@ -1090,30 +1098,53 @@ final class MidiBedEngine {
     }
   }
 
+  /// Must behave exactly like src/wander.ts (which is unit-tested). Each filter blends a clean
+  /// cycle (counted in bars from the scene start) with free wandering; the result is eased over
+  /// `smoothBeats`; then filters set to oppose another take the opposite of its movement.
   private func updateWanderers(now: Double, cfg: MidiBedConfig) {
     let dt = now - lastWandererTime
     guard dt >= 0.02 else { return }
     lastWandererTime = now
 
-    for (i, w) in cfg.wanderers.enumerated() where i < wanderers.count && w.enabled {
-      var s = wanderers[i]
-      if abs(s.target - s.pos) < 0.002 {
-        s.target = Double.random(in: 0..<1, using: &rng)
-      }
-      let maxStep = max(0.0005, w.speed) * dt
-      let delta = s.target - s.pos
-      s.pos += max(-maxStep, min(maxStep, delta))
-      let ease = 1 - exp(-dt / max(0.05, w.smooth))
-      s.shown += (s.pos - s.shown) * ease
+    let beatDur = 60.0 / max(20.0, min(300.0, cfg.bpm))
+    let barDur = beatDur * Double(beatsPerBar)
+    let elapsedBars = max(0, now - sceneStartTime) / barDur
 
+    // Pass 1: every filter moves on its own (disabled ones keep moving, so another can oppose them).
+    var norms = [Double](repeating: 0, count: cfg.wanderers.count)
+    for (i, w) in cfg.wanderers.enumerated() where i < wanderers.count {
+      var st = wanderers[i]
+      let cycle = max(0.25, w.cycleBars)
+      // Free wandering: towards a random target, able to cross the whole range in `cycle` bars.
+      if abs(st.target - st.pos) < 0.002 {
+        st.target = Double.random(in: 0..<1, using: &rng)
+      }
+      let maxStep = dt / (cycle * barDur)
+      st.pos += max(-maxStep, min(maxStep, st.target - st.pos))
+      // The clean cycle: 0 at its start, 1 half way, back to 0.
+      let p = (elapsedBars / cycle + w.phase).truncatingRemainder(dividingBy: 1)
+      let lfo = 0.5 - 0.5 * cos(2 * Double.pi * p)
+      let l = max(0, min(1, w.looseness))
+      let raw = (1 - l) * lfo + l * st.pos
+      st.shown += (raw - st.shown) * (1 - exp(-dt / max(0.05, w.smoothBeats * beatDur)))
+      wanderers[i] = st
+      norms[i] = st.shown
+    }
+
+    // Pass 2: opposition (from the ORIGINAL positions), then send what changed.
+    for (i, w) in cfg.wanderers.enumerated() where i < wanderers.count && w.enabled {
+      var value = norms[i]
+      if w.opposes >= 0, w.opposes < norms.count, w.opposes != i {
+        let a = max(0, min(1, w.opposeAmount))
+        value = (1 - a) * value + a * (1 - norms[w.opposes])
+      }
       let lo = Double(min(w.min, w.max))
       let hi = Double(max(w.min, w.max))
-      let value = Int((lo + (hi - lo) * s.shown).rounded())
-      if value != s.lastSent {
-        s.lastSent = value
-        emit(0xB0 | UInt8(max(0, min(15, w.channel))), UInt8(max(0, min(127, w.cc))), UInt8(max(0, min(127, value))))
+      let sent = Int((lo + (hi - lo) * max(0, min(1, value))).rounded())
+      if sent != wanderers[i].lastSent {
+        wanderers[i].lastSent = sent
+        emit(0xB0 | UInt8(max(0, min(15, w.channel))), UInt8(max(0, min(127, w.cc))), UInt8(max(0, min(127, sent))))
       }
-      wanderers[i] = s
     }
   }
 

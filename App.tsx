@@ -44,6 +44,7 @@ import {
 } from './src/motion';
 import { PROFILES, ProfileRole, ccName, getProfile, profileForChannel, profileIndex, profileNoteName, stepDrumNote } from './src/profiles';
 import { loadState, saveState } from './src/storage';
+import { PHASE_NAMES } from './src/wander';
 import {
   NOISE_COLOR_NAMES,
   NOISE_SHAPE_HINTS,
@@ -792,8 +793,65 @@ export default function App() {
                 />
                 <Stepper label={`${w.name} lowest`} value={w.min} onChange={(v) => patchWanderer(i, { min: Math.min(v, w.max) })} min={0} max={127} bigStep={10} />
                 <Stepper label={`${w.name} highest`} value={w.max} onChange={(v) => patchWanderer(i, { max: Math.max(v, w.min) })} min={0} max={127} bigStep={10} />
-                <Stepper label={`${w.name} speed`} value={w.speed} onChange={(v) => patchWanderer(i, { speed: v })} min={1} max={40} format={(v) => `${v} percent per second`} />
-                <Stepper label={`${w.name} smoothing`} value={w.smooth} onChange={(v) => patchWanderer(i, { smooth: v })} min={1} max={100} step={5} format={(v) => `${(v / 10).toFixed(1)} seconds`} />
+                <Stepper
+                  label={`${w.name} cycle`}
+                  value={w.cycleBars}
+                  onChange={(v) => patchWanderer(i, { cycleBars: v })}
+                  min={1}
+                  max={64}
+                  bigStep={4}
+                  format={(v) => (v === 1 ? '1 bar' : `${v} bars`)}
+                  hint="How many bars one full sweep takes. Different lengths on different filters drift against each other and line up now and then."
+                />
+                <ActionButton
+                  label={`Match ${w.name} to the chord loop`}
+                  hint="Sets the cycle to exactly one run through the chords"
+                  onPress={() => patchWanderer(i, { cycleBars: Math.max(1, Math.min(64, state.harmony.barsPerChord * state.harmony.count)) })}
+                />
+                <Stepper
+                  label={`${w.name} looseness`}
+                  value={w.looseness}
+                  onChange={(v) => patchWanderer(i, { looseness: v })}
+                  min={0}
+                  max={100}
+                  step={10}
+                  format={(v) => (v === 0 ? '0 percent, a clean regular cycle' : v === 100 ? '100 percent, free wandering' : `${v} percent`)}
+                  hint="Zero is a regular rise and fall. One hundred wanders freely. In between is a regular breath with a random wobble."
+                />
+                <Stepper
+                  label={`${w.name} starts`}
+                  value={w.phase}
+                  onChange={(v) => patchWanderer(i, { phase: v })}
+                  min={0}
+                  max={3}
+                  format={(v) => PHASE_NAMES[v]}
+                  hint="Where in its cycle it starts at the beginning of a scene. Stagger two filters so they do not move together."
+                />
+                <Stepper
+                  label={`${w.name} smoothing`}
+                  value={w.smoothBeats}
+                  onChange={(v) => patchWanderer(i, { smoothBeats: v })}
+                  min={1}
+                  max={16}
+                  format={(v) => (v === 1 ? '1 beat' : `${v} beats`)}
+                />
+                <Stepper
+                  label={`${w.name} moves against`}
+                  value={w.opposes}
+                  onChange={(v) => {
+                    // skip over itself, and stay inside the list
+                    let next = v === i ? (v > w.opposes ? v + 1 : v - 1) : v;
+                    next = Math.max(-1, Math.min(state.wanderers.length - 1, next));
+                    patchWanderer(i, { opposes: next === i ? -1 : next });
+                  }}
+                  min={-1}
+                  max={state.wanderers.length - 1}
+                  format={(v) => (v < 0 ? 'nothing' : state.wanderers[v]?.name ?? 'nothing')}
+                  hint="Moves the opposite way to another filter, so the whole mix does not get brighter and darker at the same time."
+                />
+                {w.opposes >= 0 && (
+                  <Stepper label={`${w.name} opposition`} value={w.opposeAmount} onChange={(v) => patchWanderer(i, { opposeAmount: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} />
+                )}
               </View>
             ))}
           </Section>

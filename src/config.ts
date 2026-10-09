@@ -1,4 +1,5 @@
 import { buildBassChords, buildPadChords } from './chords';
+import { cycleBarsFromOldSpeed, phaseOffset, smoothBeatsFromOldSmooth } from './wander';
 import { MotionState, defaultMotion, drumRole } from './motion';
 import {
   NOISE_VERSION,
@@ -45,8 +46,18 @@ export type WandererState = {
   channel: number;
   min: number;
   max: number;
-  speed: number; // percent of range per second
-  smooth: number; // tenths of a second
+  /** Bars for one full cycle; also how fast free wandering can cross the whole range. */
+  cycleBars: number;
+  /** Percent: 0 is a clean musical cycle, 100 is free wandering, in between is a blend. */
+  looseness: number;
+  /** 0-3: starts at the bottom, a quarter, half or three quarters of a cycle later. */
+  phase: number;
+  /** Beats of easing. */
+  smoothBeats: number;
+  /** -1 for none, or the index of another filter this one moves AGAINST. */
+  opposes: number;
+  /** Percent of the opposite movement mixed in. */
+  opposeAmount: number;
 };
 
 /** One MIDI channel's sound choice, switched with Bank Select + Program Change. */
@@ -190,7 +201,7 @@ export type SceneData = {
   transitionUse: TransitionUse;
   pad: Omit<PadState, 'channel'>;
   drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
-  wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'speed' | 'smooth'>[];
+  wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'cycleBars' | 'looseness' | 'phase' | 'smoothBeats' | 'opposes' | 'opposeAmount'>[];
   loops: Pick<LoopsState, 'enabled' | 'program' | 'sendBank' | 'bankMSB' | 'bankLSB'>;
 };
 
@@ -224,7 +235,17 @@ export function captureScene(s: SceneSource): SceneData {
       probability: d.probability,
       humanize: d.humanize,
     })),
-    wanderers: s.wanderers.map((w) => ({ enabled: w.enabled, min: w.min, max: w.max, speed: w.speed, smooth: w.smooth })),
+    wanderers: s.wanderers.map((w) => ({
+      enabled: w.enabled,
+      min: w.min,
+      max: w.max,
+      cycleBars: w.cycleBars,
+      looseness: w.looseness,
+      phase: w.phase,
+      smoothBeats: w.smoothBeats,
+      opposes: w.opposes,
+      opposeAmount: w.opposeAmount,
+    })),
     loops: {
       enabled: s.loops.enabled,
       program: s.loops.program,
@@ -302,10 +323,11 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
     follow: false,
   },
   wanderers: [
-    { name: 'Cutoff', enabled: true, cc: 74, channel: 0, min: 15, max: 105, speed: 4, smooth: 30 },
-    { name: 'Resonance', enabled: true, cc: 71, channel: 0, min: 25, max: 85, speed: 3, smooth: 40 },
+    { name: 'Cutoff', enabled: true, cc: 74, channel: 0, min: 15, max: 105, cycleBars: 8, looseness: 50, phase: 0, smoothBeats: 4, opposes: -1, opposeAmount: 70 },
+    { name: 'Resonance', enabled: true, cc: 71, channel: 0, min: 25, max: 85, cycleBars: 12, looseness: 50, phase: 0, smoothBeats: 6, opposes: -1, opposeAmount: 70 },
     // Off by default. Moves the drum filter on channel 10 (index 9).
-    { name: 'Drum cutoff', enabled: false, cc: 74, channel: 9, min: 40, max: 127, speed: 4, smooth: 30 },
+    // Moves AGAINST the bass and chord cutoff, so the whole mix does not brighten and darken together.
+    { name: 'Drum cutoff', enabled: false, cc: 74, channel: 9, min: 40, max: 127, cycleBars: 10, looseness: 50, phase: 0, smoothBeats: 4, opposes: 0, opposeAmount: 70 },
   ],
   fade: { cc: 11, droneIn: 40, droneOut: 20, padIn: 40, padOut: 20, drumIn: 20, drumOut: 20 },
   pad: {
@@ -498,6 +520,30 @@ function markCustomMotion(raw: unknown): unknown {
   return r;
 }
 
+// Filter movement used to be set in seconds (speed in percent per second, smoothing in tenths of a
+// second). Convert saved settings, live and in every scene, to bars and beats at 88 BPM so each
+// keeps its pace, and keep it fully free (looseness 100) with no opposition, exactly as it was.
+function convertOneWanderer(w: unknown): unknown {
+  if (w === null || typeof w !== 'object') return w;
+  const o = w as Record<string, unknown>;
+  if (o.cycleBars !== undefined || (o.speed === undefined && o.smooth === undefined)) return w;
+  const { speed, smooth, ...rest } = o;
+  return {
+    ...rest,
+    cycleBars: typeof speed === 'number' ? cycleBarsFromOldSpeed(speed) : undefined,
+    smoothBeats: typeof smooth === 'number' ? smoothBeatsFromOldSmooth(smooth) : undefined,
+    looseness: 100,
+    opposes: -1,
+  };
+}
+
+function convertWanderers(raw: unknown): unknown {
+  if (raw === null || typeof raw !== 'object') return raw;
+  const r = { ...(raw as Record<string, unknown>) };
+  if (Array.isArray(r.wanderers)) r.wanderers = r.wanderers.map(convertOneWanderer);
+  return r;
+}
+
 // Transition levels saved before noise version 2 were on a louder scale for every shape but
 // the Boom. Convert them once, so the mix sounds the same after the upgrade.
 function upgradeNoiseLevels(raw: unknown): unknown {
@@ -519,12 +565,12 @@ function upgradeNoiseLevels(raw: unknown): unknown {
 }
 
 export function migrateState(rawInput: unknown): BedState {
-  const lifted = markCustomMotion(liftHarmony(upgradeNoiseLevels(rawInput)));
+  const lifted = markCustomMotion(liftHarmony(upgradeNoiseLevels(convertWanderers(rawInput))));
   const raw =
     lifted !== null && typeof lifted === 'object' && Array.isArray((lifted as Record<string, unknown>).scenes)
       ? {
           ...(lifted as Record<string, unknown>),
-          scenes: ((lifted as Record<string, unknown>).scenes as unknown[]).map((sc) => markCustomMotion(liftHarmony(sc))),
+          scenes: ((lifted as Record<string, unknown>).scenes as unknown[]).map((sc) => convertWanderers(markCustomMotion(liftHarmony(sc)))),
         }
       : lifted;
   const merged = mergeDefaults(defaultState, raw);
@@ -623,8 +669,12 @@ export function toEngineJson(s: BedState): string {
       channel: w.channel,
       min: w.min,
       max: w.max,
-      speed: w.speed / 100,
-      smooth: w.smooth / 10,
+      cycleBars: w.cycleBars,
+      looseness: w.looseness / 100,
+      phase: phaseOffset(w.phase),
+      smoothBeats: w.smoothBeats,
+      opposes: w.opposes,
+      opposeAmount: w.opposeAmount / 100,
     })),
   });
 }
