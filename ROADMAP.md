@@ -216,6 +216,8 @@ generator, and only if Rusty wants it on an AUM strip with effects.
   resting, velocity changes, MIDI channel, per-scene on/off, fades. Reuse the Euclid rhythm code for note timing.
 - It is the first rhythmic element besides percussion, so keep it sparse and gentle by default.
 
+- HANDPAN / MEDITATIVE SCALES (Rusty, 2026-10-09): the handpan, tongue drum and meditative-music communities use many scales beyond the pentatonics above (names like Kurd, Celtic minor, Hijaz, Pygmy, Integral, Equinox, Amara, Annapurna, Saladin, Aegean, Oxalis are common; the exact notes differ by maker, so VERIFY each scale's notes from a maker's chart before encoding it, do not trust memory). Plan: scales are DATA (name, intervals from the home note, a note on the mood). Best fit is when a STEADY DRONE is playing (bass drone not following chords, pad off or steady fifths): then the scale colours a fixed home note and nothing clashes. Scales with a flat second or odd intervals (Hijaz-type) clash with changing chords, so offer them only for "steady drone" scenes, or warn. Some are just our modes under another name (Kurd = Aeolian); list those as aliases. MidiDancer picks from the scale list per scene; the chord layers keep using the six modes. Possible later: a drone-only "scale" for the whole scene (home note + scale, no chord loop).
+
 ### 7. MidiPick-Up (Rusty's name, 2026-10-08)
 - A short single-note phrase in the last stretch of a chord (the last beat, half bar, or a length he sets) that lands on
   the DOWNBEAT of the next chord. Rusty: "a small portion of the scale which fits over the last chord and ends on the
