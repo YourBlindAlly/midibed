@@ -170,6 +170,34 @@ Problem: one very long screen. Proposal: tabs, with the live controls always one
 VoiceOver magic tap (two-finger double tap anywhere): BUILT 2026-10-08, starts/stops playback and announces
 "Playing" / "Stopped". Other possible magic-tap uses are not planned.
 
+## Layers as internal modules (Rusty's idea, 2026-10-08)
+Rusty asked whether smaller "plugins" like the noise generator should be a pattern, and whether the ambient sound
+player should be one too. Decision to propose: INTERNAL LAYERS (modules inside MidiBed with a common contract), not
+real AUv3 plug-ins. A layer receives the clock (bar lines, tempo), the harmony (key, mode, current chord, chord loop),
+the scene on/off and fades, and outputs either MIDI (to a channel) or audio (MidiBed's own output). Splitting the
+big engine file into layer modules should happen as these are added. A true AUv3 only matters for the noise
+generator, and only if Rusty wants it on an AUM strip with effects.
+
+### 6. MidiDancer (Rusty's name): improvises on the key and chords, single notes, MIDI to a channel
+- Knows key, mode and current chord: chord tones at strong moments, steps and small skips between, lots of rests.
+- Controls: how busy, note range, phrase length (bars), repeat/vary a phrase it just played (motif memory), chance of
+  resting, velocity changes, MIDI channel, per-scene on/off, fades. Reuse the Euclid rhythm code for note timing.
+- It is the first rhythmic element besides percussion, so keep it sparse and gentle by default.
+
+### 7. Turnaround (name TBD: Turnaround / Pickup / Lead-back)
+- A short single-note phrase near the end of the chord loop that leads back to the top (rising run, arpeggio, a
+  note that sets up the first chord). Shares phrase-building with MidiDancer. Chance, length in beats, shape variety.
+- Could fire together with a noise transition at the loop boundary.
+
+### 8. Intermission (a break for Rusty: water, or changing things on the phone)
+- One button (could be on the magic tap or pedal later): the bed carries on by itself for a set time, with scenes
+  auto-advancing (item 5), breathing, MidiDancer and the turnaround coming forward, then it fades out gently.
+- Needs auto-advance with Freeze first.
+
+### 4f. Ambient sound player as a layer
+- Same audio path and triggers as the noise generator (scene start, breakdown...). Import Rusty's own files,
+  loop without a click, per-scene level and fades. Largest piece because of file handling.
+
 ## Suggested build order
 1. Harmony as its own layer + "Drone follows chords" + drone voicing choices (items 1 and 2). Small,
    audible payoff, and the rest builds on it.
