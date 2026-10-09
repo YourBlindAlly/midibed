@@ -38,6 +38,16 @@ staying on the key root.
   choices per sound slot (loading it can switch the synths to suitable sounds). Global: routing, device profiles, outputs,
   transition sound settings. Optional later: a tuning offset in cents per journey (pitch bend; flutes are not always A=440).
   Do this before many scenes are built in one key, since it changes how settings are saved (needs a careful migration).
+- TONIC CHANGE PER SCENE (Rusty, 2026-10-08): a scene in a journey may change tonic, e.g. G# minor -> B major on the flute
+  (relative major: the SAME seven notes, only the home note moves). Plan: a scene stores its key as a semitone OFFSET from
+  the journey key (so changing the journey key transposes every scene) plus its mode (scenes already own the mode).
+  Helper button "relative major/minor" sets offset +3 and Aeolian<->Ionian (or the reverse) in one step, and renumbers the
+  chord degrees so the CHORDS KEEP SOUNDING THE SAME (degree d of the minor becomes ((d-3) mod 7)+1 in the relative major);
+  only the centre of gravity moves. A steady bass drone moves G# -> B on the bar line of the scene change; a following bass
+  and the pad keep their notes. Other helpers possible later: up a fourth, up a fifth, parallel major/minor (changes the
+  notes, so not flute-friendly). MidiDancer's pentatonic on the new tonic holds the same notes with different landing notes.
+  Open: keep chords unchanged on the relative switch (recommended); bass moves on the bar line or eases across a beat or two.
+
 
 A control you flick up/down to move to the next one. Each has a name. Possibly other overall settings.
 - Name ideas: Song, Set, Bed, Journey, Mood. "Bed" fits the app, "Journey" fits the non-traditional form.
