@@ -81,6 +81,7 @@ struct MidiBedLoopsConfig: Decodable {
   var bankLSB: Int
   var startCC: Int          // 0 = none
   var stopCC: Int           // 0 = use startCC
+  var ownPort: Bool         // send the loop choice, start/stop and the clock out a second source, "MidiBed Loops"
 }
 
 /// "Breathing": a layer stays in its normal state for baseBars, then (with
@@ -207,6 +208,8 @@ final class MidiBedEngine {
 
   private var client = MIDIClientRef()
   private var source = MIDIEndpointRef()
+  /// A second virtual source for the loops app, so its program changes and clock stay separate.
+  private var loopsSource = MIDIEndpointRef()
   let synth = MidiBedTestSynth()
 
   /// Called on the main queue once per beat with (bar, beat), both 1-based.
@@ -247,6 +250,7 @@ final class MidiBedEngine {
     var status: UInt8
     var d1: UInt8
     var d2: UInt8
+    var port: Int = 0 // 1 = the loops app's own MIDI source (when the loops use their own port)
   }
   private var pending: [Pending] = []
 
@@ -319,6 +323,7 @@ final class MidiBedEngine {
     // MIDISourceCreate is deprecated on iOS 14+ in favour of the protocol-based
     // variant but still works and is what every receiving app understands.
     MIDISourceCreate(client, "MidiBed" as CFString, &source)
+    MIDISourceCreate(client, "MidiBed Loops" as CFString, &loopsSource)
     synth.startEngine()
 
     NotificationCenter.default.addObserver(
@@ -465,20 +470,21 @@ final class MidiBedEngine {
 
   /// One-off control change, usable whether or not the transport is running
   /// (MIDI-learn sweeps, manual nudges).
-  func sendControlChange(channel: Int, cc: Int, value: Int) {
+  func sendControlChange(channel: Int, cc: Int, value: Int, loops: Bool) {
     queue.async {
-      self.emit(0xB0 | UInt8(max(0, min(15, channel))), UInt8(max(0, min(127, cc))), UInt8(max(0, min(127, value))))
+      self.emit(0xB0 | UInt8(max(0, min(15, channel))), UInt8(max(0, min(127, cc))), UInt8(max(0, min(127, value))), port: loops ? 1 : 0)
     }
   }
 
   /// Optional Bank Select (CC 0 / CC 32; pass a negative number to skip) then
   /// Program Change, so the receiving app switches sound.
-  func sendProgramChange(channel: Int, program: Int, bankMSB: Int, bankLSB: Int) {
+  func sendProgramChange(channel: Int, program: Int, bankMSB: Int, bankLSB: Int, loops: Bool) {
     queue.async {
       let ch = UInt8(max(0, min(15, channel)))
-      if bankMSB >= 0 { self.emit(0xB0 | ch, 0, UInt8(min(127, bankMSB))) }
-      if bankLSB >= 0 { self.emit(0xB0 | ch, 32, UInt8(min(127, bankLSB))) }
-      self.emit(0xC0 | ch, UInt8(max(0, min(127, program))), 0)
+      let port = loops ? 1 : 0
+      if bankMSB >= 0 { self.emit(0xB0 | ch, 0, UInt8(min(127, bankMSB)), port: port) }
+      if bankLSB >= 0 { self.emit(0xB0 | ch, 32, UInt8(min(127, bankLSB)), port: port) }
+      self.emit(0xC0 | ch, UInt8(max(0, min(127, program))), 0, port: port)
     }
   }
 
@@ -1217,14 +1223,14 @@ final class MidiBedEngine {
     let ch = UInt8(max(0, min(15, l.channel)))
     var t = time
     if l.bankMSB >= 0 {
-      pending.append(Pending(time: t, status: 0xB0 | ch, d1: 0, d2: UInt8(min(127, l.bankMSB))))
+      pending.append(Pending(time: t, status: 0xB0 | ch, d1: 0, d2: UInt8(min(127, l.bankMSB)), port: 1))
       t += 0.002
     }
     if l.bankLSB >= 0 {
-      pending.append(Pending(time: t, status: 0xB0 | ch, d1: 32, d2: UInt8(min(127, l.bankLSB))))
+      pending.append(Pending(time: t, status: 0xB0 | ch, d1: 32, d2: UInt8(min(127, l.bankLSB)), port: 1))
       t += 0.002
     }
-    pending.append(Pending(time: t, status: 0xC0 | ch, d1: UInt8(max(0, min(127, l.program))), d2: 0))
+    pending.append(Pending(time: t, status: 0xC0 | ch, d1: UInt8(max(0, min(127, l.program))), d2: 0, port: 1))
     lastLoopSelect = loopSelectKey(l)
   }
 
@@ -1234,7 +1240,7 @@ final class MidiBedEngine {
     sendLoopSelect(l, at: time)
     if l.startCC > 0 {
       // Give the loop selection time to land before telling it to play.
-      pending.append(Pending(time: time + 0.05, status: 0xB0 | UInt8(max(0, min(15, l.channel))), d1: UInt8(min(127, l.startCC)), d2: 127))
+      pending.append(Pending(time: time + 0.05, status: 0xB0 | UInt8(max(0, min(15, l.channel))), d1: UInt8(min(127, l.startCC)), d2: 127, port: 1))
     }
     loopsPlaying = true
   }
@@ -1242,7 +1248,7 @@ final class MidiBedEngine {
   private func stopLoops(_ cfg: MidiBedConfig) {
     let l = cfg.loops
     let cc = l.stopCC > 0 ? l.stopCC : l.startCC
-    if cc > 0 { emit(0xB0 | UInt8(max(0, min(15, l.channel))), UInt8(min(127, cc)), 127) }
+    if cc > 0 { emit(0xB0 | UInt8(max(0, min(15, l.channel))), UInt8(min(127, cc)), 127, port: 1) }
     loopsPlaying = false
   }
 
@@ -1391,7 +1397,7 @@ final class MidiBedEngine {
     }
     pending = later
     due.sort { $0.time < $1.time }
-    for p in due { emit(p.status, p.d1, p.d2) }
+    for p in due { emit(p.status, p.d1, p.d2, port: p.port) }
   }
 
   private func allNotesOff() {
@@ -1400,13 +1406,17 @@ final class MidiBedEngine {
     }
   }
 
-  private func emit(_ status: UInt8, _ d1: UInt8, _ d2: UInt8) {
+  private func emit(_ status: UInt8, _ d1: UInt8, _ d2: UInt8, port: Int = 0) {
+    // With the loops on their own port, the clock and the loop messages go out that source only.
+    let toLoops = (config?.loops.ownPort ?? false) && (port == 1 || status >= 0xF8)
     // System messages (clock, start, stop) are for other apps only.
     if status >= 0xF0 {
-      if config?.midiOut ?? true { sendMIDI(status, d1, d2) }
+      if config?.midiOut ?? true { sendMIDI(status, d1, d2, toLoops: toLoops) }
       return
     }
-    if config?.midiOut ?? true { sendMIDI(status, d1, d2) }
+    if config?.midiOut ?? true { sendMIDI(status, d1, d2, toLoops: toLoops) }
+    // Loop messages are for the loops app, not the built-in sound.
+    if port == 1 { return }
     if config?.synthOut ?? true { synth.post(status: status, d1: d1, d2: d2) }
     // Note-offs and all-notes-off must always reach the synth even if the
     // switch was just turned off, or a pad could hang. It ignores them harmlessly.
@@ -1415,8 +1425,9 @@ final class MidiBedEngine {
     }
   }
 
-  private func sendMIDI(_ status: UInt8, _ d1: UInt8, _ d2: UInt8) {
-    guard source != 0 else { return }
+  private func sendMIDI(_ status: UInt8, _ d1: UInt8, _ d2: UInt8, toLoops: Bool = false) {
+    let endpoint = toLoops ? loopsSource : source
+    guard endpoint != 0 else { return }
     var packetList = MIDIPacketList()
     let packet = MIDIPacketListInit(&packetList)
     let bytes: [UInt8]
@@ -1428,6 +1439,6 @@ final class MidiBedEngine {
       bytes = [status, d1, d2]
     }
     _ = MIDIPacketListAdd(&packetList, MemoryLayout<MIDIPacketList>.size, packet, 0, bytes.count, bytes)
-    MIDIReceived(source, &packetList)
+    MIDIReceived(endpoint, &packetList)
   }
 }

@@ -148,7 +148,9 @@ export type LoopsState = {
   bankMSB: number;
   bankLSB: number;
   startCC: number; // 0 = none
-  stopCC: number; // 0 = same as start (a play toggle)
+  stopCC: number; // 0 = same as start (a toggle)
+  /** Send the loop choice, start/stop and the clock out a second MIDI source, "MidiBed Loops", so the loops app hears only those. */
+  ownPort: boolean;
   favorites: string; // comma-separated program numbers
 };
 
@@ -457,6 +459,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     bankLSB: 0,
     startCC: 0,
     stopCC: 0,
+    ownPort: false,
     favorites: '',
   },
   drums: [
@@ -800,6 +803,7 @@ export function toEngineJson(s: BedState): string {
       bankLSB: s.loops.sendBank ? s.loops.bankLSB : -1,
       startCC: s.loops.startCC,
       stopCC: s.loops.stopCC,
+      ownPort: s.loops.ownPort,
     },
     drums: s.drums.map((d) => ({
       enabled: s.percussion && d.enabled,

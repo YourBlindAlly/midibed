@@ -44,8 +44,8 @@ public class MidiBedEngineModule: Module {
       self.engine.applyConfig(json: json, queued: queued)
     }
 
-    Function("sendControlChange") { (channel: Int, cc: Int, value: Int) in
-      self.engine.sendControlChange(channel: channel, cc: cc, value: value)
+    Function("sendControlChange") { (channel: Int, cc: Int, value: Int, loops: Bool) in
+      self.engine.sendControlChange(channel: channel, cc: cc, value: value, loops: loops)
     }
 
     Function("sendNote") { (channel: Int, note: Int, velocity: Int, durationMs: Int) in
@@ -56,8 +56,8 @@ public class MidiBedEngineModule: Module {
       self.engine.playTransitionNow(shape: shape, color: color, beats: beats, level: level)
     }
 
-    Function("sendProgramChange") { (channel: Int, program: Int, bankMSB: Int, bankLSB: Int) in
-      self.engine.sendProgramChange(channel: channel, program: program, bankMSB: bankMSB, bankLSB: bankLSB)
+    Function("sendProgramChange") { (channel: Int, program: Int, bankMSB: Int, bankLSB: Int, loops: Bool) in
+      self.engine.sendProgramChange(channel: channel, program: program, bankMSB: bankMSB, bankLSB: bankLSB, loops: loops)
     }
 
     Function("getStatus") { () -> [String: Any] in

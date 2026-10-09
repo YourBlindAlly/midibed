@@ -13,10 +13,10 @@ type Native = {
   stop(): void;
   applyConfig(json: string, queued: boolean): void;
   setScenes(json: string): void;
-  sendControlChange(channel: number, cc: number, value: number): void;
+  sendControlChange(channel: number, cc: number, value: number, loops: boolean): void;
   sendNote(channel: number, note: number, velocity: number, durationMs: number): void;
   playTransitionNow(shape: number, color: number, beats: number, level: number): void;
-  sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number): void;
+  sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number, loops: boolean): void;
   addListener(name: 'onBeat', cb: (e: BeatPayload) => void): unknown;
   addListener(name: 'onMotion', cb: (e: MotionPayload) => void): unknown;
   addListener(name: 'onScene', cb: (e: SceneEventPayload) => void): unknown;
@@ -88,7 +88,9 @@ export const engine = {
   stop: () => native?.stop(),
   /** queued = wait for the next bar line while playing (scene switches). */
   applyConfig: (json: string, queued = false) => native?.applyConfig(json, queued),
-  sendControlChange: (channel: number, cc: number, value: number) => native?.sendControlChange(channel, cc, value),
+  /** loops = out the loops app's own port (when it has one). */
+  sendControlChange: (channel: number, cc: number, value: number, loops = false) =>
+    native?.sendControlChange(channel, cc, value, loops),
   /** One note, for auditioning which channel and note a receiving app answers to. */
   sendNote: (channel: number, note: number, velocity = 100, durationMs = 250) =>
     native?.sendNote(channel, note, velocity, durationMs),
@@ -96,8 +98,8 @@ export const engine = {
   playTransitionNow: (shape: number, color: number, beats: number, level: number) =>
     native?.playTransitionNow(shape, color, beats, level),
   /** bank values < 0 are skipped (no Bank Select sent). */
-  sendProgramChange: (channel: number, program: number, bankMSB = -1, bankLSB = -1) =>
-    native?.sendProgramChange(channel, program, bankMSB, bankLSB),
+  sendProgramChange: (channel: number, program: number, bankMSB = -1, bankLSB = -1, loops = false) =>
+    native?.sendProgramChange(channel, program, bankMSB, bankLSB, loops),
 };
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null;

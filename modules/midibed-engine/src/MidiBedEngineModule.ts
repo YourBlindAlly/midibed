@@ -8,11 +8,11 @@ declare class MidiBedEngineModule extends NativeModule<MidiBedEngineEvents> {
   applyConfig(json: string, queued: boolean): void;
   /** Every scene as a full configuration (JSON array), for auto-advance. */
   setScenes(json: string): void;
-  sendControlChange(channel: number, cc: number, value: number): void;
+  sendControlChange(channel: number, cc: number, value: number, loops: boolean): void;
   sendNote(channel: number, note: number, velocity: number, durationMs: number): void;
   playTransitionNow(shape: number, color: number, beats: number, level: number): void;
   /** bank values < 0 are skipped. */
-  sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number): void;
+  sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number, loops: boolean): void;
   getStatus(): { running: boolean; tick: number };
 }
 

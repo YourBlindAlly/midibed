@@ -328,7 +328,7 @@ export default function App() {
   const patchFade =(p: Partial<FadeState>) => setState((s) => ({ ...s, fade: { ...s.fade, ...p } }));
   const loopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendLoopChoice = (l: LoopsState) =>
-    engine.sendProgramChange(l.channel, l.program, l.sendBank ? l.bankMSB : -1, l.sendBank ? l.bankLSB : -1);
+    engine.sendProgramChange(l.channel, l.program, l.sendBank ? l.bankMSB : -1, l.sendBank ? l.bankLSB : -1, true);
   // Changing the loop choice sends it right away to audition, unless the loops are
   // already playing: then the engine sends it itself (once), so it is not doubled.
   const patchLoops = (p: Partial<LoopsState>, audition = false) => {
@@ -881,17 +881,37 @@ export default function App() {
             <ActionButton
               label="Send loops start now"
               hint="Sends the start control once, to check that the other app reacts"
-              onPress={() => state.loops.startCC > 0 && engine.sendControlChange(state.loops.channel, state.loops.startCC, 127)}
+              onPress={() => state.loops.startCC > 0 && engine.sendControlChange(state.loops.channel, state.loops.startCC, 127, true)}
             />
             <ActionButton
               label="Send loops stop now"
               hint="Sends the stop control once"
               onPress={() => {
                 const cc = state.loops.stopCC > 0 ? state.loops.stopCC : state.loops.startCC;
-                if (cc > 0) engine.sendControlChange(state.loops.channel, cc, 127);
+                if (cc > 0) engine.sendControlChange(state.loops.channel, cc, 127, true);
               }}
             />
             <ActionButton label="Send loop choice now" onPress={() => sendLoopChoice(state.loops)} />
+            {state.profiles.loops === 'drumjam' && (
+              <>
+                <ActionButton
+                  label="Shuffle loop instruments"
+                  hint="DrumJam picks different instruments for the loop that is playing (control 69)"
+                  onPress={() => engine.sendControlChange(state.loops.channel, 69, 127, true)}
+                />
+                <ActionButton
+                  label="Shuffle loop variations"
+                  hint="DrumJam picks different variations of the loop parts (control 70)"
+                  onPress={() => engine.sendControlChange(state.loops.channel, 70, 127, true)}
+                />
+              </>
+            )}
+            <Toggle
+              label="Loops use their own MIDI port"
+              value={state.loops.ownPort}
+              onChange={(v) => patchLoops({ ownPort: v })}
+              hint="Makes a second MIDI source called MidiBed Loops. The loop choice, loop start and stop, and the MIDI clock go only there, so program changes meant for your other sounds cannot change the loops. Then in the loops app, choose MidiBed Loops as its input and switch MidiBed off"
+            />
           </Section>
             </>
           )}
