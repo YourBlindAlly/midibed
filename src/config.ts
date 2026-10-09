@@ -14,7 +14,8 @@ import {
   shapeMask,
 } from './transitions';
 import { GM_DRUMS } from './gm';
-import { ProfileChoice, defaultProfileChoice } from './profiles';
+import { ProfileChoice, defaultProfileChoice, getProfile } from './profiles';
+import { Favorite, addFav, favsFromPrograms, parseFavMap, stringifyFavMap } from './soundFavs';
 
 export type DrumState = {
   name: string;
@@ -70,7 +71,8 @@ export type SoundSlot = {
   sendBank: boolean;
   bankMSB: number; // CC 0
   bankLSB: number; // CC 32
-  favorites: string; // comma-separated program numbers, e.g. "12,16,20"
+  /** Older style (program numbers only). Now lifted into BedState.soundFavs at load and left empty. */
+  favorites: string;
 };
 
 /** Valid, de-duplicated, sorted program numbers from a favorites string. */
@@ -155,6 +157,8 @@ export type LoopsState = {
 };
 
 export type BedState = {
+  /** Sound favorites per app (profile id), as JSON; see soundFavs.ts. Global, not saved in a scene or journey. */
+  soundFavs: string;
   /** MidiDancer: call-and-response phrases on the key's scale. Everything but the channel is saved per scene. */
   dancer: DancerState;
   bpm: number;
@@ -337,6 +341,21 @@ export function copyScene(s: BedState, to: number): BedState {
   return { ...s, scenes: s.scenes.map((sc, i) => (i === s.activeScene || i === to ? current : sc)) };
 }
 
+/** Which app (profile id) a sound slot talks to: the slot's role decides. */
+export function slotProfileId(s: Pick<BedState, 'profiles'>, slotName: string): string {
+  return slotName === 'Bass drone' ? s.profiles.drone : slotName === 'Percussion' ? s.profiles.drums : s.profiles.pad;
+}
+
+/** Make `fav` the sound of slot `i` (program and bank). */
+export function applyFavorite(s: BedState, i: number, fav: Favorite): BedState {
+  return {
+    ...s,
+    sounds: s.sounds.map((sl, k) =>
+      k === i ? { ...sl, program: fav.program, sendBank: fav.sendBank, bankMSB: fav.bankMSB, bankLSB: fav.bankLSB } : sl,
+    ),
+  };
+}
+
 /** Keep a key offset in -6..5 (the nearest way round the octave). */
 export function wrapOffset(o: number): number {
   return ((((Math.round(o) + 6) % 12) + 12) % 12) - 6;
@@ -439,6 +458,8 @@ function nextJourneyNumber(list: Journey[]): number {
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
   keyOffset: 0,
+  // Rusty's good Synth One pad presets, kept under the Synth One app.
+  soundFavs: stringifyFavMap({ synthone: favsFromPrograms(parseFavorites(getProfile('synthone').favorites ?? '')) }),
   dancer: defaultDancer,
   journeyName: 'Journey 1',
   profiles: defaultProfileChoice,
@@ -519,7 +540,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     { name: 'Percussion', channel: 9, program: 0, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '' },
     // New slots go at the END so settings saved by earlier versions keep their positions.
     // Favorites are Rusty's good Synth One pad presets (Synth One's own numbers).
-    { name: 'Chord pad', channel: 1, program: 12, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '12,16,20,26,39,55,63,75,80,82,99,113' },
+    { name: 'Chord pad', channel: 1, program: 12, sendBank: false, bankMSB: 0, bankLSB: 0, favorites: '' },
   ],
 };
 
@@ -753,6 +774,15 @@ export function migrateState(rawInput: unknown): BedState {
     activeScene: active,
     scenes: merged.scenes.map((sc, i) => (i === active ? captureScene({ ...merged, keyOffset }) : sc)),
   };
+  // Favorites: lists saved on a sound slot (program numbers only) move to the app that slot talks to.
+  let soundFavs = live.soundFavs;
+  for (const sl of live.sounds) {
+    for (const program of parseFavorites(sl.favorites)) {
+      soundFavs = addFav(soundFavs, slotProfileId(live, sl.name), { name: '', program, sendBank: false, bankMSB: 0, bankLSB: 0 });
+    }
+  }
+  live.soundFavs = stringifyFavMap(parseFavMap(soundFavs));
+  live.sounds = live.sounds.map((sl) => ({ ...sl, favorites: '' }));
   // Journeys: settings saved before they existed become "Journey 1". The live settings ARE the
   // active journey; the others are merged against a default journey so new fields get defaults.
   const rawList = raw !== null && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).journeys)

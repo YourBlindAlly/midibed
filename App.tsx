@@ -16,6 +16,7 @@ import {
   SoundSlot,
   WandererState,
   addFavorite,
+  applyFavorite,
   copyScene,
   defaultState,
   deleteJourney,
@@ -32,10 +33,12 @@ import {
   removeFavorite,
   renameJourney,
   sceneConfigsJson,
+  slotProfileId,
   switchJourney,
   switchScene,
   toEngineJson,
 } from './src/config';
+import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
@@ -107,6 +110,8 @@ export default function App() {
   const queueNextApply = useRef(false);
   const [queuedScene, setQueuedScene] = useState<number | null>(null);
   const [copyTarget, setCopyTarget] = useState(2);
+  // Names being typed for a new sound favorite, per sound slot.
+  const [favNames, setFavNames] = useState<Record<number, string>>({});
   // Which layers are currently in their alternate state (reported by the engine).
   const [motionNow, setMotionNow] = useState<MotionNow>({ bass: false, pad: false, drums: false });
   const motionRef = useRef<MotionNow>({ bass: false, pad: false, drums: false });
@@ -1173,40 +1178,75 @@ export default function App() {
                   hint="Swipe up or down to change sound. Sends immediately. Numbers match what the other app shows when it counts from zero."
                 />
                 {(() => {
-                  const favs = parseFavorites(sl.favorites);
-                  const idx = favs.indexOf(sl.program);
+                  const appId = slotProfileId(state, sl.name);
+                  const appName = getProfile(appId).name;
+                  const usesLSB = getProfile(appId).bankUsesLSB !== false;
+                  const favs = favsFor(state.soundFavs, appId);
+                  const current: Favorite = { name: '', program: sl.program, sendBank: sl.sendBank, bankMSB: sl.bankMSB, bankLSB: usesLSB ? sl.bankLSB : 0 };
+                  const idx = favs.findIndex((f) => sameFavorite(f, current));
                   return (
                     <>
                       {favs.length > 0 && (
                         <Stepper
                           label={`${sl.name} favorite`}
                           value={idx}
-                          onChange={(v) => patchSound(i, { program: favs[Math.max(0, v)] })}
+                          onChange={(v) => {
+                            const f = favs[Math.max(0, Math.min(favs.length - 1, v))];
+                            if (!f) return;
+                            const next = applyFavorite(state, i, f);
+                            setState(next);
+                            sendSound(next.sounds[i]);
+                          }}
                           min={-1}
                           max={favs.length - 1}
-                          format={(v) => (v < 0 ? 'current program is not a favorite' : `program ${favs[v]}, ${v + 1} of ${favs.length}`)}
-                          hint="Swipe up or down to step through only your favorite sounds. Sends immediately."
+                          format={(v) => (v < 0 ? 'current sound is not a favorite' : `${favLabel(favs[v], usesLSB)}, ${v + 1} of ${favs.length}`)}
+                          hint={`Swipe up or down to step through your ${appName} favorites, with their banks. Sends immediately.`}
                         />
                       )}
                       {idx < 0 ? (
-                        <ActionButton label={`Add program ${sl.program} to ${sl.name} favorites`} onPress={() => patchSoundFavorites(i, addFavorite(sl.favorites, sl.program))} />
+                        <>
+                          <View style={styles.nameBox}>
+                            <Text style={styles.note}>Favorite name (optional)</Text>
+                            <TextInput
+                              style={styles.nameInput}
+                              value={favNames[i] ?? ''}
+                              onChangeText={(v) => setFavNames((n) => ({ ...n, [i]: v }))}
+                              accessibilityLabel={`${sl.name} favorite name`}
+                              accessibilityHint="Optional. Type a name, then use the add button"
+                              maxLength={40}
+                              autoCorrect={false}
+                              placeholderTextColor={colors.dim}
+                            />
+                          </View>
+                          <ActionButton
+                            label={`Add this sound to ${appName} favorites`}
+                            hint={`Saves ${favLabel(current, usesLSB)}, with its bank, under ${appName}`}
+                            onPress={() => {
+                              setState((s) => ({ ...s, soundFavs: addFav(s.soundFavs, appId, { ...current, name: (favNames[i] ?? '').trim() }) }));
+                              setFavNames((n) => ({ ...n, [i]: '' }));
+                              announceLater(`Saved to ${appName} favorites`, 300);
+                            }}
+                          />
+                        </>
                       ) : (
-                        <ActionButton label={`Remove program ${sl.program} from ${sl.name} favorites`} onPress={() => patchSoundFavorites(i, removeFavorite(sl.favorites, sl.program))} />
+                        <ActionButton
+                          label={`Remove this sound from ${appName} favorites`}
+                          onPress={() => {
+                            setState((s) => ({ ...s, soundFavs: removeFav(s.soundFavs, appId, current) }));
+                            announceLater(`Removed from ${appName} favorites`, 300);
+                          }}
+                        />
                       )}
                     </>
                   );
-                })()}
-                {(() => {
-                  const prof = slotProfile(sl.name);
-                  return prof.favorites && sl.favorites !== prof.favorites ? (
-                    <ActionButton label={`Load ${prof.name} favorites into ${sl.name}`} onPress={() => patchSoundFavorites(i, prof.favorites as string)} />
-                  ) : null;
                 })()}
                 <Toggle label={`${sl.name} send bank select`} value={sl.sendBank} onChange={(v) => patchSound(i, { sendBank: v })} />
                 {sl.sendBank && (
                   <>
                     <Stepper label={`${sl.name} bank MSB`} value={sl.bankMSB} onChange={(v) => patchSound(i, { bankMSB: v })} min={0} max={127} />
-                    <Stepper label={`${sl.name} bank LSB`} value={sl.bankLSB} onChange={(v) => patchSound(i, { bankLSB: v })} min={0} max={127} />
+                    {getProfile(slotProfileId(state, sl.name)).bankUsesLSB !== false && (
+                      <Stepper label={`${sl.name} bank LSB`} value={sl.bankLSB} onChange={(v) => patchSound(i, { bankLSB: v })} min={0} max={127} />
+                    )}
                   </>
                 )}
                 <ActionButton label={`Send ${sl.name} sound now`} onPress={() => sendSound(sl)} />

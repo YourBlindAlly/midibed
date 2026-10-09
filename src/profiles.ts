@@ -26,6 +26,8 @@ export type Profile = {
   fadeCC?: number;
   /** Good program numbers, loaded into a sound slot on request. */
   favorites?: string;
+  /** False if the app switches banks with Bank Select MSB only (its LSB does nothing). */
+  bankUsesLSB?: boolean;
   /** CCs that start and stop a loop player (use the same number twice for a play toggle). */
   loopControls?: { startCC: number; stopCC: number };
 };
@@ -93,6 +95,14 @@ export const PROFILES: Profile[] = [
       'Has MIDI learn on all knobs, bank and program change, and sustain pedal. No published list of CC numbers was found, so use MIDI learn with the test sweeps. Program numbers match what its screen shows. Favorites are your pad presets.',
     ccs: [],
     favorites: '12,16,20,26,39,55,63,75,80,82,99,113',
+  },
+  {
+    id: 'j6',
+    name: 'Synth One J6',
+    about:
+      'The newer version of Synth One. Tested by you: it has several banks and switches them with Bank Select MSB (CC 0); the LSB (CC 32) did nothing. Its presets are different from the original Synth One, so it keeps its own favorites list. Program numbering and CC numbers have not been checked.',
+    ccs: [],
+    bankUsesLSB: false,
   },
   {
     id: 'modeld',
