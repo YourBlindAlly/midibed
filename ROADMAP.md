@@ -179,6 +179,13 @@ big engine file into layer modules should happen as these are added. A true AUv3
 generator, and only if Rusty wants it on an AUM strip with effects.
 
 ### 6. MidiDancer (Rusty's name): improvises on the key and chords, single notes, MIDI to a channel
+- SCALES (Rusty, 2026-10-08): stick to PENTATONIC scales, with a few to choose from depending on the situation.
+  Candidates (intervals from the root): major pentatonic 1 2 3 5 6; minor pentatonic 1 b3 4 5 b7; suspended/Egyptian
+  1 2 4 5 b7; blues minor/Man Gong 1 b3 4 b6 b7; Hirajoshi 1 2 b3 5 b6; In-sen 1 b2 4 5 b7. Keep the list as DATA so
+  scales can be added later. Choice: Auto by the harmony's mode (Ionian/Lydian/Mixolydian -> major; Dorian ->
+  minor or suspended; Aeolian/Phrygian -> minor; Locrian special-cased) with a manual override, saved per scene.
+  Plan: scale rooted on the KEY, landing on tones of the current chord on strong beats; avoid or thin out a scale note a
+  half step from a chord tone. MidiPick-Up may use the same notes but its last note may be a chord tone outside the scale.
 - CHARACTER VOCABULARY (keep adding as Rusty finds new rules): busy/sparse, narrow/wide range, smooth/leapy,
   repeats/varies, pull toward chord tones, note length (held/short). Later: personality presets (Whisper, Drift, Curious, Playful).
 - Knows key, mode and current chord: chord tones at strong moments, steps and small skips between, lots of rests.
