@@ -814,7 +814,7 @@ export default function App() {
           ))}
           <Section title="Loops">
             <Text style={styles.note}>
-              For an app that plays its own loops, like DrumJam. MidiBed does not send notes here. It picks a loop, then starts and stops it. Which loop, and whether it plays, is saved in each scene. Turn on "Send MIDI clock and start" so the loops follow this tempo.
+              For an app that plays its own loops, like DrumJam. MidiBed does not send notes here. It picks a loop, then starts and stops it. Which loop, and whether it plays, is saved in each scene. Turn on "Send MIDI clock" on the Setup tab so the loops follow this tempo.
             </Text>
             <Toggle label="Loops" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} hint="Starts the loops, or stops them. While playing, a scene change does this on the next bar" />
             <Stepper label="Loops MIDI channel" value={state.loops.channel} onChange={(v) => patchLoops({ channel: v })} min={0} max={15} format={channelText} />
@@ -1301,7 +1301,13 @@ export default function App() {
           <Section title="Output">
             <Toggle label="Announce breathing changes" value={state.announce} onChange={(v) => patch({ announce: v })} hint="Speaks a short message when a bass, pad or drum change happens by itself" />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
-            <Toggle label="Send MIDI clock and start" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo and start with Play" />
+            <Toggle label="Send MIDI clock" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo while playing" />
+            <Toggle
+              label="Also send MIDI Start and Stop"
+              value={state.clockTransport}
+              onChange={(v) => patch({ clockTransport: v })}
+              hint="Off: only the clock is sent, so an app that follows it is started and stopped by the loop controls instead. On: Play and Stop also send MIDI Start and Stop messages"
+            />
             <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />
           </Section>
 

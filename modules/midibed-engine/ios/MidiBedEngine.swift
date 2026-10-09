@@ -170,7 +170,8 @@ struct MidiBedConfig: Decodable {
   var swing: Double         // 0...1, delays every other 16th
   var midiOut: Bool
   var synthOut: Bool
-  var clock: Bool           // send MIDI clock plus Start/Stop while playing
+  var clock: Bool           // send MIDI clock while playing
+  var clockTransport: Bool  // ...and also MIDI Start at the beginning and Stop at the end
   var sceneIndex: Int       // which scene this configuration is
   var frozen: Bool          // stop the bed changing by itself (breathing, recurring sound, auto-advance)
   var advance: MidiBedAdvance
@@ -434,7 +435,7 @@ final class MidiBedEngine {
       self.allNotesOff()
       if let cfg = self.config {
         if self.loopsPlaying { self.stopLoops(cfg) }
-        if cfg.clock { self.emit(0xFC, 0, 0) } // MIDI Stop
+        if cfg.clock && cfg.clockTransport { self.emit(0xFC, 0, 0) } // MIDI Stop
       }
       if let c = droneCh { self.scheduleCCRestore(c) }
       if let c = padCh { self.scheduleCCRestore(c) }
@@ -543,8 +544,9 @@ final class MidiBedEngine {
     // MIDI clock: 24 pulses per quarter note = every 4th of our 96 ticks, with
     // Start on the very first tick, so a follower locks to our tempo.
     if cfg.clock, tick % 4 == 0 {
-      if tick == 0 { pending.append(Pending(time: time, status: 0xFA, d1: 0, d2: 0)) }
-      pending.append(Pending(time: time + (tick == 0 ? 0.001 : 0), status: 0xF8, d1: 0, d2: 0))
+      let withStart = tick == 0 && cfg.clockTransport
+      if withStart { pending.append(Pending(time: time, status: 0xFA, d1: 0, d2: 0)) }
+      pending.append(Pending(time: time + (withStart ? 0.001 : 0), status: 0xF8, d1: 0, d2: 0))
     }
     if tick == 0 { startLoops(cfg, at: time) }
 
