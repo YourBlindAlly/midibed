@@ -1,4 +1,5 @@
-import { buildBassChords, buildPadChords } from './chords';
+import { buildBassChords, buildPadChords, clampMode } from './chords';
+import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { cycleBarsFromOldSpeed, phaseOffset, smoothBeatsFromOldSmooth } from './wander';
 import { MotionState, defaultMotion, drumRole } from './motion';
 import {
@@ -172,6 +173,10 @@ export type BedState = {
   transitions: TransitionsState;
   /** The recurring sound (every N bars or at the end of each chord loop). Global. */
   recurring: RecurringState;
+  /** What this scene does after a while: stay, or move on to another scene by itself (see advance.ts). */
+  advance: AdvanceRule;
+  /** Freeze: stop the bed changing by itself (breathing, recurring sounds, auto-advance). Never saved as on. */
+  frozen: boolean;
   /** Per scene: which of those sounds this scene plays. */
   transitionUse: TransitionUse;
   /** Level-scale version of the saved transition levels (see NOISE_VERSION). */
@@ -198,6 +203,7 @@ export type SceneData = {
   drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow'>;
   harmony: HarmonyState;
   motion: MotionState;
+  advance: AdvanceRule;
   transitionUse: TransitionUse;
   pad: Omit<PadState, 'channel'>;
   drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
@@ -207,7 +213,7 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -224,6 +230,7 @@ export function captureScene(s: SceneSource): SceneData {
     },
     harmony: { ...s.harmony, degrees: [...s.harmony.degrees] },
     motion: { preset: s.motion.preset, bass: { ...s.motion.bass }, pad: { ...s.motion.pad }, drums: { ...s.motion.drums } },
+    advance: { ...s.advance },
     transitionUse: { ...s.transitionUse },
     pad: { ...pad },
     drums: s.drums.map((d) => ({
@@ -265,6 +272,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     drone: { ...s.drone, ...sc.drone },
     harmony: { ...sc.harmony, degrees: [...sc.harmony.degrees] },
     motion: { preset: sc.motion.preset, bass: { ...sc.motion.bass }, pad: { ...sc.motion.pad }, drums: { ...sc.motion.drums } },
+    advance: { ...sc.advance },
     transitionUse: { ...sc.transitionUse },
     pad: { ...s.pad, ...sc.pad },
     drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
@@ -346,6 +354,8 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene'> = {
   announce: false,
   transitions: defaultTransitions,
   recurring: defaultRecurring,
+  advance: defaultAdvance,
+  frozen: false,
   transitionUse: defaultTransitionUse,
   noiseVersion: NOISE_VERSION,
   transitionMinEighths: 1,
@@ -573,7 +583,13 @@ export function migrateState(rawInput: unknown): BedState {
           scenes: ((lifted as Record<string, unknown>).scenes as unknown[]).map((sc) => convertWanderers(markCustomMotion(liftHarmony(sc)))),
         }
       : lifted;
-  const merged = mergeDefaults(defaultState, raw);
+  const merged0 = mergeDefaults(defaultState, raw);
+  // A saved mode that no longer exists (Locrian) becomes the last one; keep scenes in step.
+  const merged: BedState = {
+    ...merged0,
+    harmony: { ...merged0.harmony, mode: clampMode(merged0.harmony.mode) },
+    scenes: merged0.scenes.map((sc) => ({ ...sc, harmony: { ...sc.harmony, mode: clampMode(sc.harmony.mode) } })),
+  };
   const active = Math.max(0, Math.min(merged.scenes.length - 1, Math.round(merged.activeScene)));
   // The live settings ARE the active scene; keep the stored copy in step with them.
   // Names are labels, not user data: always take the current ones, so a rename
@@ -581,6 +597,7 @@ export function migrateState(rawInput: unknown): BedState {
   const sounds = merged.sounds.map((sl, i) => ({ ...sl, name: defaultState.sounds[i]?.name ?? sl.name }));
   return {
     ...merged,
+    frozen: false, // never come back frozen
     sounds,
     activeScene: active,
     scenes: merged.scenes.map((sc, i) => (i === active ? captureScene(merged) : sc)),
@@ -595,6 +612,13 @@ export function toEngineJson(s: BedState): string {
     midiOut: s.midiOut,
     synthOut: s.synthOut,
     clock: s.clock,
+    sceneIndex: s.activeScene,
+    frozen: s.frozen,
+    advance: {
+      mode: s.advance.mode,
+      bars: advanceBars(s.advance, s.harmony),
+      target: pickTarget(s.advance, s.activeScene, s.scenes.length, 0),
+    },
     loops: {
       enabled: s.loops.enabled,
       channel: s.loops.channel,
@@ -677,4 +701,19 @@ export function toEngineJson(s: BedState): string {
       opposeAmount: w.opposeAmount / 100,
     })),
   });
+}
+
+/**
+ * Every scene as a full engine configuration, as a JSON array, so the engine can move to the next
+ * scene BY ITSELF on a bar line (auto-advance). The scene being played is the live settings; the
+ * others are their saved copies laid over the global settings.
+ */
+export function sceneConfigsJson(s: BedState): string {
+  return (
+    '[' +
+    s.scenes
+      .map((sc, i) => toEngineJson({ ...(i === s.activeScene ? s : applyScene(s, sc)), activeScene: i }))
+      .join(',') +
+    ']'
+  );
 }

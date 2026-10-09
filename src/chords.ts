@@ -4,7 +4,13 @@
  * Self-contained (no imports from config.ts, which imports this).
  */
 
-export const MODE_NAMES = ['Ionian (major)', 'Dorian', 'Phrygian', 'Lydian', 'Mixolydian', 'Aeolian (minor)', 'Locrian'];
+// Locrian was dropped (2026-10-08): its tonic chord is diminished and a drone has no stable fifth there. A saved
+// mode index above the last is clamped to the last (see clampMode).
+export const MODE_NAMES = ['Ionian (major)', 'Dorian', 'Phrygian', 'Lydian', 'Mixolydian', 'Aeolian (minor)'];
+
+export function clampMode(mode: number): number {
+  return Math.max(0, Math.min(MODE_NAMES.length - 1, Math.round(Number.isFinite(mode) ? mode : 0)));
+}
 
 export const MODE_INTERVALS: number[][] = [
   [0, 2, 4, 5, 7, 9, 11],
@@ -13,7 +19,6 @@ export const MODE_INTERVALS: number[][] = [
   [0, 2, 4, 6, 7, 9, 11],
   [0, 2, 4, 5, 7, 9, 10],
   [0, 2, 3, 5, 7, 8, 10],
-  [0, 1, 3, 5, 6, 8, 10],
 ];
 
 // New chord types go at the END so a saved style number keeps its meaning.
@@ -30,19 +35,39 @@ const STYLE_STEPS: number[][] = [
   [0, 4],
 ];
 
-export type ChordPreset = { name: string; degrees: number[] };
+/** `modes`: the modes (indexes into MODE_NAMES) this progression suits; left out = suits every mode. */
+export type ChordPreset = { name: string; degrees: number[]; modes?: number[] };
 
 /** Index 0 is "Custom": selecting it changes nothing. Degrees are 1-7. */
+// Mode indexes: 0 Ionian (major), 1 Dorian, 2 Phrygian, 3 Lydian, 4 Mixolydian, 5 Aeolian (minor).
+// New presets go at the END so a saved preset number keeps its meaning.
 export const PRESETS: ChordPreset[] = [
   { name: 'Custom', degrees: [] },
   { name: 'Pedal, one chord', degrees: [1] },
-  { name: 'Rock between two', degrees: [1, 7] },
-  { name: 'Lift', degrees: [1, 4] },
-  { name: 'Fall', degrees: [1, 7, 6] },
-  { name: 'Folk turn', degrees: [1, 7, 4, 7] },
-  { name: 'Descent', degrees: [1, 7, 6, 5] },
-  { name: 'Wide arc', degrees: [1, 3, 4, 5] },
+  { name: 'Rock between two', degrees: [1, 7], modes: [1, 2, 4, 5] },
+  { name: 'Lift', degrees: [1, 4], modes: [0, 1, 2, 4, 5] },
+  { name: 'Fall', degrees: [1, 7, 6], modes: [2, 5] },
+  { name: 'Folk turn', degrees: [1, 7, 4, 7], modes: [1, 4, 5] },
+  { name: 'Descent', degrees: [1, 7, 6, 5], modes: [2, 5] },
+  { name: 'Wide arc', degrees: [1, 3, 4, 5], modes: [1, 5] },
+  { name: 'Four chords', degrees: [1, 5, 6, 4], modes: [0, 4] },
+  { name: 'Plain', degrees: [1, 4, 5, 1], modes: [0] },
+  { name: 'Gentle turn', degrees: [1, 6, 4, 5], modes: [0] },
+  { name: 'Floating', degrees: [1, 2, 1, 5], modes: [3] },
+  { name: 'Phrygian turn', degrees: [1, 2, 1, 7], modes: [2] },
 ];
+
+/**
+ * The preset numbers to offer for a mode: Custom, then every preset that suits the mode. The
+ * preset already chosen is kept in the list even if it does not suit, so the screen never
+ * shows a blank.
+ */
+export function presetsForMode(mode: number, current: number): number[] {
+  const m = clampMode(mode);
+  return PRESETS.map((p, i) => ({ p, i }))
+    .filter(({ p, i }) => i === 0 || i === current || !p.modes || p.modes.includes(m))
+    .map(({ i }) => i);
+}
 
 const PC_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -52,7 +77,7 @@ export function pitchClassName(note: number): string {
 
 /** MIDI note of scale step `index` (0-based, may exceed 6 to climb octaves). */
 export function scaleNote(root: number, mode: number, index: number): number {
-  const intervals = MODE_INTERVALS[Math.max(0, Math.min(6, mode))];
+  const intervals = MODE_INTERVALS[clampMode(mode)];
   const oct = Math.floor(index / 7);
   const step = ((index % 7) + 7) % 7;
   return root + 12 * oct + intervals[step];

@@ -145,7 +145,7 @@ before, during or after the 4th, 8th (or any) bar. Ties together with scene brea
 - Samples: imported by Rusty (the same import mechanism as the ambience player).
 - Natural first uses: a fill as the drums return from a breakdown, a swell before a scene change.
 
-### 5. Repeat a scene, or auto-advance after N repeats
+### 5. BUILT 2026-10-09 (round 24): auto-advance + Freeze. Original notes:
 - Per scene: "repeat N times, then go to": next scene / a chosen scene / random of a few / stay (hold).
   Length counted in bars or in chord-loops.
 - This must happen NATIVELY on the bar line (like scene switches do), not from the UI, so it stays in

@@ -1,4 +1,4 @@
-import type { BeatPayload, MotionPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
+import type { BeatPayload, MotionPayload, SceneEventPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
 
 /**
  * Thin wrapper over the native module with a silent fallback so the UI still
@@ -12,12 +12,14 @@ type Native = {
   start(): void;
   stop(): void;
   applyConfig(json: string, queued: boolean): void;
+  setScenes(json: string): void;
   sendControlChange(channel: number, cc: number, value: number): void;
   sendNote(channel: number, note: number, velocity: number, durationMs: number): void;
   playTransitionNow(shape: number, color: number, beats: number, level: number): void;
   sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number): void;
   addListener(name: 'onBeat', cb: (e: BeatPayload) => void): unknown;
   addListener(name: 'onMotion', cb: (e: MotionPayload) => void): unknown;
+  addListener(name: 'onScene', cb: (e: SceneEventPayload) => void): unknown;
 };
 
 let native: Native | null = null;
@@ -62,7 +64,26 @@ export function onMotion(cb: (e: MotionPayload) => void): () => void {
   };
 }
 
+const sceneSubscribers = new Set<(e: SceneEventPayload) => void>();
+let sceneHooked = false;
+
+/** Auto-advance news from the engine. One native listener, fanned out. */
+export function onScene(cb: (e: SceneEventPayload) => void): () => void {
+  if (native && !sceneHooked) {
+    sceneHooked = true;
+    native.addListener('onScene', (e) => {
+      sceneSubscribers.forEach((fn) => fn(e));
+    });
+  }
+  sceneSubscribers.add(cb);
+  return () => {
+    sceneSubscribers.delete(cb);
+  };
+}
+
 export const engine = {
+  /** All scenes as full configurations, so the engine can advance by itself. */
+  setScenes: (json: string) => native?.setScenes(json),
   start: () => native?.start(),
   stop: () => native?.stop(),
   /** queued = wait for the next bar line while playing (scene switches). */

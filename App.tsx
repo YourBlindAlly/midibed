@@ -24,13 +24,15 @@ import {
   padIsSteadyFifths,
   parseFavorites,
   removeFavorite,
+  sceneConfigsJson,
   switchScene,
   toEngineJson,
 } from './src/config';
-import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel } from './src/chords';
+import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
-import { engine, hasNativeEngine, onBeat, onMotion, testSweep } from './src/engine';
+import { engine, hasNativeEngine, onBeat, onMotion, onScene, testSweep } from './src/engine';
+import { ADVANCE_MODE_NAMES, ADVANCE_UNIT_NAMES, AdvanceRule, advanceBars, describeAdvance, pickTarget } from './src/advance';
 import {
   BASS_KIND_NAMES,
   BREAKDOWN_NAMES,
@@ -90,6 +92,8 @@ export default function App() {
   // Which layers are currently in their alternate state (reported by the engine).
   const [motionNow, setMotionNow] = useState<MotionNow>({ bass: false, pad: false, drums: false });
   const motionRef = useRef<MotionNow>({ bass: false, pad: false, drums: false });
+  // Auto-advance news from the engine: bars left in this scene and the scene it will go to.
+  const [advanceInfo, setAdvanceInfo] = useState({ barsLeft: 0, target: -1 });
 
   // Load saved settings once. Saving is held back until this finishes so the
   // defaults can never overwrite what is stored.
@@ -117,6 +121,25 @@ export default function App() {
   // Always-current copy of the settings for event handlers that outlive a render.
   const latest = useRef(state);
   latest.current = state;
+
+  // The engine needs every scene to be able to move on by itself. A short pause avoids
+  // rebuilding them on every swipe of a stepper.
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setScenes(sceneConfigsJson(state)), 300);
+    return () => clearTimeout(t);
+  }, [state, ready]);
+
+  useEffect(() => {
+    return onScene((e) => {
+      setAdvanceInfo({ barsLeft: e.barsLeft, target: e.target });
+      if (e.reason === 'auto' && latest.current.activeScene !== e.index) {
+        // The engine has already moved to this scene: follow it, without asking it to switch again.
+        setState((s) => switchScene(s, e.index));
+        if (latest.current.announce) announceLater(`Scene ${e.index + 1}`, 100);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     return onMotion((e) => {
@@ -165,6 +188,7 @@ export default function App() {
       setPosition('1.1');
       motionRef.current = { bass: false, pad: false, drums: false };
       setMotionNow(motionRef.current);
+      setAdvanceInfo({ barsLeft: 0, target: -1 });
     } else {
       engine.applyConfig(json);
       engine.start();
@@ -252,6 +276,7 @@ export default function App() {
     setState((s) => ({ ...s, recurring: { ...s.recurring, shapes: s.recurring.shapes.map((v, k) => (k === i ? on : v)) } }));
   const patchTransitionUse = (which: 'entrance' | 'drumBreak' | 'drumReturn' | 'recurring', on: boolean) =>
     setState((s) => ({ ...s, transitionUse: { ...s.transitionUse, [which]: on } }));
+  const patchAdvance = (p: Partial<AdvanceRule>) => setState((s) => ({ ...s, advance: { ...s.advance, ...p } }));
   const patchBreakdown = (p: Partial<DrumBreakdown>) =>
     setState((s) => ({ ...s, motion: { ...s.motion, preset: 0, drums: { ...s.motion.drums, ...p } } }));
   const chooseMotionPreset = (idx: number) =>
@@ -273,6 +298,22 @@ export default function App() {
       const degrees = [0, 1, 2, 3].map((k) => pr.degrees[k] ?? s.harmony.degrees[k]);
       return { ...s, harmony: { ...s.harmony, preset: idx, degrees, count: pr.degrees.length } };
     });
+  // What happens next in this scene. While stopped, or before the engine has said, work out the
+  // target here (a random one cannot be known yet).
+  const advanceTargetShown =
+    advanceInfo.target >= 0
+      ? advanceInfo.target
+      : state.advance.mode === 3
+        ? -1
+        : pickTarget(state.advance, state.activeScene, state.scenes.length, 0);
+  const advanceSentence = describeAdvance(
+    state.advance,
+    advanceBars(state.advance, state.harmony),
+    advanceInfo.barsLeft,
+    advanceTargetShown,
+    state.frozen,
+    playing,
+  );
   const motionWords = describeMotion(
     motionNow,
     { bassFollows: state.drone.follow, padSteadyFifths: padIsSteadyFifths(state.pad) },
@@ -363,6 +404,15 @@ export default function App() {
                 ? `Scene ${state.activeScene + 1} starts at the next bar`
                 : `Scene ${state.activeScene + 1} is playing`}
             </Text>
+            <View
+              accessible
+              accessibilityLabel="What happens next"
+              accessibilityValue={{
+                text: advanceSentence,
+              }}
+            >
+              <Text style={styles.note}>{advanceSentence}</Text>
+            </View>
             </View>
             <ScrollView key={tab} style={styles.fill} contentContainerStyle={styles.scroll}>
           {tab === 'live' && (
@@ -380,6 +430,12 @@ export default function App() {
               hint="Turns all the drums on or off together. Each drum keeps its own setting"
             />
             <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
+            <Toggle
+              label="Freeze"
+              value={state.frozen}
+              onChange={(v) => patch({ frozen: v })}
+              hint="Holds the bed as it is: the scene stops moving on by itself, and the breathing and the recurring sound pause. The chords and the filters keep going. Switch it off to carry on."
+            />
           </Section>
 
           <Section title="Tempo and swing">
@@ -403,6 +459,32 @@ export default function App() {
               label={`Copy scene ${state.activeScene + 1} to scene ${copyTarget}`}
               onPress={() => copySceneTo(copyTarget - 1)}
             />
+            <Stepper
+              label="After this scene"
+              value={state.advance.mode}
+              onChange={(v) => patchAdvance({ mode: v })}
+              min={0}
+              max={ADVANCE_MODE_NAMES.length - 1}
+              format={(v) => ADVANCE_MODE_NAMES[v]}
+              hint="Whether this scene moves on by itself after a while. Each scene has its own setting. Freeze holds it."
+            />
+            {state.advance.mode > 0 && (
+              <>
+                <Stepper label="Move on after" value={state.advance.count} onChange={(v) => patchAdvance({ count: v })} min={1} max={64} bigStep={4} format={(v) => `${v}`} />
+                <Stepper
+                  label="Counted in"
+                  value={state.advance.unit}
+                  onChange={(v) => patchAdvance({ unit: v })}
+                  min={0}
+                  max={ADVANCE_UNIT_NAMES.length - 1}
+                  format={(v) => ADVANCE_UNIT_NAMES[v]}
+                  hint="Bars, or runs through the chord loop"
+                />
+                {state.advance.mode === 2 && (
+                  <Stepper label="Go to scene" value={state.advance.target + 1} onChange={(v) => patchAdvance({ target: v - 1 })} min={1} max={SCENE_COUNT} />
+                )}
+              </>
+            )}
           </Section>
             </>
           )}
@@ -422,15 +504,20 @@ export default function App() {
               format={noteName}
               hint="The key of everything. The bass drone, the chords and the pad are all built on this note."
             />
-            <Stepper
-              label="Progression preset"
-              value={state.harmony.preset}
-              onChange={choosePreset}
-              min={0}
-              max={PRESETS.length - 1}
-              format={(v) => PRESETS[v]?.name ?? 'Custom'}
-              hint="Swipe to choose a chord pattern. It follows the mode and the key."
-            />
+            {(() => {
+              const options = presetsForMode(state.harmony.mode, state.harmony.preset);
+              return (
+                <Stepper
+                  label="Progression preset"
+                  value={Math.max(0, options.indexOf(state.harmony.preset))}
+                  onChange={(v) => choosePreset(options[Math.max(0, Math.min(options.length - 1, v))])}
+                  min={0}
+                  max={options.length - 1}
+                  format={(v) => PRESETS[options[v]]?.name ?? 'Custom'}
+                  hint="Swipe to choose a chord pattern. Only progressions that suit the mode are listed. It follows the mode and the key."
+                />
+              );
+            })()}
             <Stepper
               label="Mode"
               value={state.harmony.mode}

@@ -30,11 +30,11 @@ describe('bass follows chords', () => {
   });
 
   it('gives a diminished chord its diminished fifth when following, but a steady drone always a perfect fifth', () => {
-    // Locrian on D: the tonic chord is diminished (D F Ab).
-    const following = buildBassChords({ ...base, mode: 6, fifth: true, degrees: [1], count: 1 });
-    expect(following[0]).toEqual([38, 44]);
-    const steady = buildBassChords({ ...base, mode: 6, fifth: true, follow: false });
-    expect(steady[0]).toEqual([38, 45]);
+    // D major (Ionian): degree 7 is C# diminished (C# E G). The bass root C# folds to 37.
+    const following = buildBassChords({ ...base, mode: 0, fifth: true, degrees: [7], count: 1 });
+    expect(following[0]).toEqual([37, 43]); // C# and G: a diminished fifth
+    const steady = buildBassChords({ ...base, mode: 0, fifth: true, follow: false });
+    expect(steady[0]).toEqual([38, 45]); // a steady drone keeps its perfect fifth
   });
 
   it('is sent to the engine one list per chord when following, one list when not', () => {

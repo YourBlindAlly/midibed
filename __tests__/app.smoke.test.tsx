@@ -50,7 +50,7 @@ describe('whole screen smoke test', () => {
     expect(labels(tree)).toEqual(expect.arrayContaining(['Play', 'Scene 1', 'Scene 4']));
 
     // Live
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Bass drone layer', 'Percussion layer', 'Tempo', 'Swing']));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Bass drone layer', 'Percussion layer', 'Tempo', 'Swing', 'Freeze', 'After this scene', 'What happens next']));
     expect(labels(tree)).not.toContain('Progression preset');
     expect(labels(tree)).not.toContain('Bass: stay normal for');
 

@@ -141,12 +141,23 @@ struct MidiBedTransitionConfig: Decodable {
   var recurring: MidiBedRecurring
 }
 
+/// Auto-advance: after `bars` bars (0 = never) the scene moves on by itself. mode 1 next scene,
+/// 2 a chosen scene (`target`), 3 a random other scene.
+struct MidiBedAdvance: Decodable {
+  var mode: Int
+  var bars: Int
+  var target: Int
+}
+
 struct MidiBedConfig: Decodable {
   var bpm: Double
   var swing: Double         // 0...1, delays every other 16th
   var midiOut: Bool
   var synthOut: Bool
   var clock: Bool           // send MIDI clock plus Start/Stop while playing
+  var sceneIndex: Int       // which scene this configuration is
+  var frozen: Bool          // stop the bed changing by itself (breathing, recurring sound, auto-advance)
+  var advance: MidiBedAdvance
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
   var harmony: MidiBedHarmonyConfig
@@ -185,11 +196,22 @@ final class MidiBedEngine {
   /// Called on the main queue when a breathing rule changes (or restarts with a scene).
   var onMotion: (([String: Any?]) -> Void)?
 
+  /// Called on the main queue every bar line (how long is left in this scene) and when the engine
+  /// moved to another scene by itself.
+  var onScene: (([String: Any?]) -> Void)?
+
   // Control state (queue-only).
   private var config: MidiBedConfig?
   /// A scene switch waiting for the next bar line. While set, further settings
   /// edits update this instead, so the whole new scene lands together.
   private var pendingConfig: MidiBedConfig?
+  /// The pending switch was started by auto-advance (not by the player).
+  private var pendingIsAuto = false
+  /// Every scene as a full configuration, so the engine can move between them by itself.
+  private var sceneConfigs: [MidiBedConfig] = []
+  private var advanceBarsLeft = 0
+  private var advanceTarget = -1
+  private var advanceEntranceScheduled = false
   /// Tick where the pad's chord loop starts counting (0, or the bar a scene switched in).
   private var padStartTick = 0
   private var running = false
@@ -299,6 +321,7 @@ final class MidiBedEngine {
     queue.async {
       if self.running && (queued || self.pendingConfig != nil) {
         self.pendingConfig = decoded
+        if queued { self.pendingIsAuto = false }
         if queued {
           // A scene switch was just requested: its entrance sound is timed to the next
           // bar line. A newer request replaces an older one that has not started yet.
@@ -325,6 +348,17 @@ final class MidiBedEngine {
       if !atBar || !padOn(decoded) { reconcilePadEnabled() }
       reconcileLoops(decoded)
     }
+  }
+
+  /// All scenes as full configurations (a JSON array), for auto-advance.
+  func setScenes(json: String) {
+    guard let data = json.data(using: .utf8),
+      let decoded = try? JSONDecoder().decode([MidiBedConfig].self, from: data)
+    else {
+      NSLog("MidiBedEngine: could not decode scenes")
+      return
+    }
+    queue.async { self.sceneConfigs = decoded }
   }
 
   func start() {
@@ -364,6 +398,9 @@ final class MidiBedEngine {
       self.timer = nil
       self.pending.removeAll()
       self.pendingNoise.removeAll()
+      self.pendingIsAuto = false
+      self.advanceBarsLeft = 0
+      self.advanceTarget = -1
       // A scene switch that was still waiting for its bar line takes effect now.
       if let p = self.pendingConfig {
         self.pendingConfig = nil
@@ -441,6 +478,7 @@ final class MidiBedEngine {
     while nextTickTime <= now {
       // A queued scene switch lands exactly on a bar line, and the pad's chord
       // loop restarts from its first chord there.
+      if tickIndex % barTicks == 0 { stepAdvance(atTick: tickIndex) }
       if tickIndex % barTicks == 0, let p = pendingConfig {
         pendingConfig = nil
         // Restart the chord loop first, so installing the new settings starts the
@@ -450,6 +488,10 @@ final class MidiBedEngine {
         sceneStartTime = nextTickTime
         resetMotion(p)
         install(p, atBar: true)
+        if pendingIsAuto {
+          pendingIsAuto = false
+          emitScene(index: p.sceneIndex, reason: "auto")
+        }
       }
       guard let current = config else { break }
       processTick(tickIndex, at: nextTickTime, tickDur: tickDur, cfg: current)
@@ -487,7 +529,7 @@ final class MidiBedEngine {
 
     // Breathing: at every bar line after the scene's first, step each rule.
     let sceneTick = tick - padStartTick
-    if sceneTick > 0, sceneTick % barTicks == 0 {
+    if sceneTick > 0, sceneTick % barTicks == 0, !cfg.frozen {
       stepMotion(at: time, cfg: cfg)
       stepRecurring(time: time, bar: sceneTick / barTicks, cfg: cfg)
     }
@@ -624,6 +666,80 @@ final class MidiBedEngine {
     pendingNoise = later
   }
 
+  // MARK: Auto-advance
+
+  /// Which scene comes next, or -1. Must behave like `pickTarget` in src/advance.ts (unit-tested).
+  private func pickAdvanceTarget(_ cfg: MidiBedConfig) -> Int {
+    let n = sceneConfigs.count
+    guard cfg.advance.mode > 0, n >= 2 else { return -1 }
+    switch cfg.advance.mode {
+    case 1:
+      return (cfg.sceneIndex + 1) % n
+    case 2:
+      let t = cfg.advance.target
+      return (t == cfg.sceneIndex || t < 0 || t >= n) ? (cfg.sceneIndex + 1) % n : t
+    default:
+      let others = (0..<n).filter { $0 != cfg.sceneIndex }
+      return others.randomElement(using: &rng) ?? -1
+    }
+  }
+
+  private func emitScene(index: Int, reason: String) {
+    let body: [String: Any?] = ["index": index, "barsLeft": advanceBarsLeft, "target": advanceTarget, "reason": reason]
+    let cb = onScene
+    DispatchQueue.main.async { cb?(body) }
+  }
+
+  /// Called at every bar line, before any pending scene switch is installed. Must behave like
+  /// `stepAdvance` in src/advance.ts (unit-tested): the scene plays exactly `bars` bars, then the
+  /// next scene begins on that bar line. Frozen: the count holds. A switch the player has already
+  /// asked for wins. The new scene's entrance sound is scheduled in advance, so a lead-in gets its
+  /// full rise.
+  private func stepAdvance(atTick tick: Int) {
+    guard let cfg = config else { return }
+    let bars = cfg.advance.mode > 0 ? cfg.advance.bars : 0
+    if bars <= 0 {
+      advanceBarsLeft = 0
+      return
+    }
+    guard tick - padStartTick > 0, pendingConfig == nil else { return }
+    var left = advanceBarsLeft <= 0 ? bars : min(advanceBarsLeft, bars)
+    if cfg.frozen {
+      advanceBarsLeft = left
+      emitScene(index: cfg.sceneIndex, reason: "tick")
+      return
+    }
+    left -= 1
+    if advanceTarget < 0 || advanceTarget >= sceneConfigs.count { advanceTarget = pickAdvanceTarget(cfg) }
+    let target = advanceTarget
+    if left <= 0 {
+      advanceBarsLeft = 0
+      if target >= 0, target < sceneConfigs.count {
+        pendingConfig = sceneConfigs[target]
+        pendingIsAuto = true
+      }
+    } else {
+      advanceBarsLeft = left
+    }
+
+    // The entrance sound of the scene we are going to.
+    if target >= 0, target < sceneConfigs.count, !advanceEntranceScheduled {
+      let next = sceneConfigs[target]
+      let slot = next.transitions.entrance
+      if slot.on {
+        let bpm = max(20.0, min(300.0, cfg.bpm))
+        let barDur = 60.0 / bpm * Double(beatsPerBar)
+        let pre = noiseSeconds(shape: slot.shape, beats: slot.beats, bpm: bpm).pre
+        let boundaryTime = nextTickTime + Double(left) * barDur
+        if boundaryTime - pre < nextTickTime + barDur {
+          scheduleTransition(slot, tag: 0, barTime: boundaryTime, cfg: next)
+          advanceEntranceScheduled = true
+        }
+      }
+    }
+    if left > 0 { emitScene(index: cfg.sceneIndex, reason: "tick") }
+  }
+
   // MARK: Recurring sound
 
   /// Bars between recurring sounds.
@@ -754,7 +870,11 @@ final class MidiBedEngine {
     recurPlay = false
     recurScheduled = true
     recurTurn = 0
+    advanceBarsLeft = cfg.advance.mode > 0 ? max(0, cfg.advance.bars) : 0
+    advanceTarget = pickAdvanceTarget(cfg)
+    advanceEntranceScheduled = false
     emitMotion("reset")
+    emitScene(index: cfg.sceneIndex, reason: "tick")
   }
 
   private func emitMotion(_ reason: String) {
