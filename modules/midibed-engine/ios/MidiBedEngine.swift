@@ -166,6 +166,15 @@ struct MidiBedDancerConfig: Decodable {
   var phrases: [MidiBedDancerPhrase]
 }
 
+/// Which parts have their own MIDI source ("MidiBed Bass", "MidiBed Pad", "MidiBed Dancer", "MidiBed Drums").
+/// A part without one goes out the main "MidiBed" source. Messages are routed by MIDI channel.
+struct MidiBedPortsConfig: Decodable {
+  var bass: Bool
+  var pad: Bool
+  var dancer: Bool
+  var drums: Bool
+}
+
 struct MidiBedConfig: Decodable {
   var bpm: Double
   var swing: Double         // 0...1, delays every other 16th
@@ -181,6 +190,7 @@ struct MidiBedConfig: Decodable {
   var drone: MidiBedDroneConfig
   var harmony: MidiBedHarmonyConfig
   var dancer: MidiBedDancerConfig
+  var ports: MidiBedPortsConfig
   var motion: MidiBedMotionConfig
   var transitions: MidiBedTransitionConfig
   var pad: MidiBedPadConfig
@@ -208,8 +218,10 @@ final class MidiBedEngine {
 
   private var client = MIDIClientRef()
   private var source = MIDIEndpointRef()
-  /// A second virtual source for the loops app, so its program changes and clock stay separate.
-  private var loopsSource = MIDIEndpointRef()
+  /// Extra virtual sources, indexed by port number: 1 loops, 2 bass, 3 pad, 4 dancer, 5 drums (0 is `source`).
+  private var portSources = [MIDIEndpointRef](repeating: MIDIEndpointRef(), count: 6)
+  /// For each MIDI channel, which ports its messages go out (rebuilt whenever the settings change).
+  private var channelPorts: [[Int]] = Array(repeating: [0], count: 16)
   let synth = MidiBedTestSynth()
 
   /// Called on the main queue once per beat with (bar, beat), both 1-based.
@@ -323,7 +335,12 @@ final class MidiBedEngine {
     // MIDISourceCreate is deprecated on iOS 14+ in favour of the protocol-based
     // variant but still works and is what every receiving app understands.
     MIDISourceCreate(client, "MidiBed" as CFString, &source)
-    MIDISourceCreate(client, "MidiBed Loops" as CFString, &loopsSource)
+    portSources[0] = source
+    for (i, name) in [(1, "MidiBed Loops"), (2, "MidiBed Bass"), (3, "MidiBed Pad"), (4, "MidiBed Dancer"), (5, "MidiBed Drums")] {
+      var endpoint = MIDIEndpointRef()
+      MIDISourceCreate(client, name as CFString, &endpoint)
+      portSources[i] = endpoint
+    }
     synth.startEngine()
 
     NotificationCenter.default.addObserver(
@@ -368,10 +385,27 @@ final class MidiBedEngine {
     }
   }
 
+  /// Work out, per MIDI channel, which sources carry it: a part with its own port uses that source,
+  /// everything else the main one. (If two parts share a channel they may both apply.)
+  private func rebuildChannelPorts(_ c: MidiBedConfig) {
+    var map = [[Int]](repeating: [], count: 16)
+    func add(_ channel: Int, _ own: Bool, _ port: Int) {
+      let ch = max(0, min(15, channel))
+      let p = own ? port : 0
+      if !map[ch].contains(p) { map[ch].append(p) }
+    }
+    add(c.drone.channel, c.ports.bass, 2)
+    add(c.pad.channel, c.ports.pad, 3)
+    add(c.dancer.channel, c.ports.dancer, 4)
+    for d in c.drums { add(d.channel, c.ports.drums, 5) }
+    channelPorts = map.map { $0.isEmpty ? [0] : $0 }
+  }
+
   private func install(_ decoded: MidiBedConfig, atBar: Bool) {
     config = decoded
     synth.enabled = decoded.synthOut
     syncWanderers()
+    rebuildChannelPorts(decoded)
     updateIdleClock()
     if running {
       reconcileDrone()
@@ -1403,18 +1437,22 @@ final class MidiBedEngine {
   private func allNotesOff() {
     for ch in 0..<16 {
       emit(0xB0 | UInt8(ch), 123, 0)
+      // ...and out every source, in case a part's port or channel changed while notes were sounding.
+      if config?.midiOut ?? true { sendMIDI(0xB0 | UInt8(ch), 123, 0, to: [0, 1, 2, 3, 4, 5]) }
     }
   }
 
   private func emit(_ status: UInt8, _ d1: UInt8, _ d2: UInt8, port: Int = 0) {
-    // With the loops on their own port, the clock and the loop messages go out that source only.
-    let toLoops = (config?.loops.ownPort ?? false) && (port == 1 || status >= 0xF8)
-    // System messages (clock, start, stop) are for other apps only.
+    let loopsOwn = config?.loops.ownPort ?? false
+    // System messages (clock, start, stop) are for other apps only. With the loops on their own port
+    // they go out that source only.
     if status >= 0xF0 {
-      if config?.midiOut ?? true { sendMIDI(status, d1, d2, toLoops: toLoops) }
+      if config?.midiOut ?? true { sendMIDI(status, d1, d2, to: loopsOwn ? [1] : [0]) }
       return
     }
-    if config?.midiOut ?? true { sendMIDI(status, d1, d2, toLoops: toLoops) }
+    // Loop messages go out the loops source when it has one; everything else by its MIDI channel.
+    let targets = port == 1 ? (loopsOwn ? [1] : [0]) : channelPorts[Int(status & 0x0F)]
+    if config?.midiOut ?? true { sendMIDI(status, d1, d2, to: targets) }
     // Loop messages are for the loops app, not the built-in sound.
     if port == 1 { return }
     if config?.synthOut ?? true { synth.post(status: status, d1: d1, d2: d2) }
@@ -1425,9 +1463,7 @@ final class MidiBedEngine {
     }
   }
 
-  private func sendMIDI(_ status: UInt8, _ d1: UInt8, _ d2: UInt8, toLoops: Bool = false) {
-    let endpoint = toLoops ? loopsSource : source
-    guard endpoint != 0 else { return }
+  private func sendMIDI(_ status: UInt8, _ d1: UInt8, _ d2: UInt8, to ports: [Int] = [0]) {
     var packetList = MIDIPacketList()
     let packet = MIDIPacketListInit(&packetList)
     let bytes: [UInt8]
@@ -1439,6 +1475,8 @@ final class MidiBedEngine {
       bytes = [status, d1, d2]
     }
     _ = MIDIPacketListAdd(&packetList, MemoryLayout<MIDIPacketList>.size, packet, 0, bytes.count, bytes)
-    MIDIReceived(endpoint, &packetList)
+    for p in ports where p >= 0 && p < portSources.count && portSources[p] != 0 {
+      MIDIReceived(portSources[p], &packetList)
+    }
   }
 }

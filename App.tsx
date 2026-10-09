@@ -65,7 +65,20 @@ import {
   describeMotion,
   motionPreset,
 } from './src/motion';
-import { PROFILES, ProfileRole, ccName, getProfile, profileForChannel, profileIndex, profileNoteName, stepDrumNote } from './src/profiles';
+import {
+  ProfileRole,
+  addCustomApp,
+  allProfiles,
+  ccName,
+  getProfile,
+  parseCustomApps,
+  profileForChannel,
+  profileIndex,
+  profileNoteName,
+  removeCustomApp,
+  setCustomApps,
+  stepDrumNote,
+} from './src/profiles';
 import { loadState, saveState } from './src/storage';
 import { PHASE_NAMES } from './src/wander';
 import {
@@ -110,6 +123,7 @@ export default function App() {
   const queueNextApply = useRef(false);
   const [queuedScene, setQueuedScene] = useState<number | null>(null);
   const [copyTarget, setCopyTarget] = useState(2);
+  const [newAppName, setNewAppName] = useState('');
   // Names being typed for a new sound favorite, per sound slot.
   const [favNames, setFavNames] = useState<Record<number, string>>({});
   // Which layers are currently in their alternate state (reported by the engine).
@@ -244,6 +258,7 @@ export default function App() {
   const padProfile = getProfile(state.profiles.pad);
   const loopsProfile = getProfile(state.profiles.loops);
   const fadeProfile = [droneProfile, padProfile].find((p) => p.fadeCC !== undefined);
+  setCustomApps(parseCustomApps(state.customApps));
   const patchProfile = (role: ProfileRole, id: string) =>
     setState((s) => ({ ...s, profiles: { ...s.profiles, [role]: id } }));
   const noteLabel = (n: number) => {
@@ -1361,6 +1376,13 @@ export default function App() {
           <Section title="Output">
             <Toggle label="Announce breathing changes" value={state.announce} onChange={(v) => patch({ announce: v })} hint="Speaks a short message when a bass, pad or drum change happens by itself" />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
+            <Text style={styles.note}>
+              MIDI ports. Every part normally goes out one MIDI source called MidiBed, separated by channel. Give a part its own source and the app you point at it hears only that part, so it can stay on Omni. Then, in that app, choose the matching source and switch MidiBed off. Channels still apply: they decide which port carries a message.
+            </Text>
+            <Toggle label="Bass drone has its own MIDI port" value={state.ports.bass} onChange={(v) => patch({ ports: { ...state.ports, bass: v } })} hint="Makes a source called MidiBed Bass" />
+            <Toggle label="Chord pad has its own MIDI port" value={state.ports.pad} onChange={(v) => patch({ ports: { ...state.ports, pad: v } })} hint="Makes a source called MidiBed Pad" />
+            <Toggle label="MidiDancer has its own MIDI port" value={state.ports.dancer} onChange={(v) => patch({ ports: { ...state.ports, dancer: v } })} hint="Makes a source called MidiBed Dancer" />
+            <Toggle label="Drums have their own MIDI port" value={state.ports.drums} onChange={(v) => patch({ ports: { ...state.ports, drums: v } })} hint="Makes a source called MidiBed Drums" />
             <Toggle label="Send MIDI clock" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo while playing" />
             <Toggle
               label="Keep the clock running while stopped"
@@ -1393,13 +1415,55 @@ export default function App() {
                 <Stepper
                   label={`${label} profile`}
                   value={profileIndex(state.profiles[role])}
-                  onChange={(v) => patchProfile(role, PROFILES[v].id)}
+                  onChange={(v) => patchProfile(role, allProfiles()[v].id)}
                   min={0}
-                  max={PROFILES.length - 1}
-                  format={(v) => PROFILES[v].name}
+                  max={allProfiles().length - 1}
+                  format={(v) => allProfiles()[v].name}
                 />
                 <Text style={styles.note}>{prof.about}</Text>
               </View>
+            ))}
+            <View style={styles.nameBox}>
+              <Text style={styles.note}>Your own apps. Add a synth or drum app that is not in the list and it gets its own sound favorites.</Text>
+              <TextInput
+                style={styles.nameInput}
+                value={newAppName}
+                onChangeText={setNewAppName}
+                accessibilityLabel="New app name"
+                accessibilityHint="Type the name of an app, then use the add button"
+                maxLength={40}
+                autoCorrect={false}
+                placeholderTextColor={colors.dim}
+              />
+            </View>
+            <ActionButton
+              label="Add this app to my apps"
+              hint="Then choose it for a part with the app steppers above"
+              onPress={() => {
+                const r = addCustomApp(state.customApps, newAppName);
+                if (!r.id) {
+                  announceLater('You can add up to 20 apps', 300);
+                  return;
+                }
+                setState((s) => ({ ...s, customApps: r.json }));
+                setNewAppName('');
+                announceLater(`Added ${newAppName.trim() || 'My app'}`, 300);
+              }}
+            />
+            {parseCustomApps(state.customApps).map((a) => (
+              <ActionButton
+                key={a.id}
+                label={`Remove ${a.name} from my apps`}
+                hint="Parts using it go back to No profile. Its saved favorites are kept"
+                onPress={() => {
+                  setState((s) => ({
+                    ...s,
+                    customApps: removeCustomApp(s.customApps, a.id),
+                    profiles: Object.fromEntries(Object.entries(s.profiles).map(([k, v]) => [k, v === a.id ? 'none' : v])) as typeof s.profiles,
+                  }));
+                  announceLater(`Removed ${a.name}`, 300);
+                }}
+              />
             ))}
             {droneProfile.mono && (state.drone.octave || state.drone.fifth) && (
               <ActionButton

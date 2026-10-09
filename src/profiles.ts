@@ -121,17 +121,66 @@ export const PROFILES: Profile[] = [
   },
 ];
 
+// Apps the user adds themselves (name only), so a new synth gets its own favorites without a code change.
+let customProfiles: Profile[] = [];
+
+export type CustomApp = { id: string; name: string };
+export const MAX_CUSTOM_APPS = 20;
+
+export function parseCustomApps(json: string): CustomApp[] {
+  try {
+    const raw = JSON.parse(json);
+    if (!Array.isArray(raw)) return [];
+    const out: CustomApp[] = [];
+    for (const r of raw) {
+      if (r && typeof r.id === 'string' && r.id.startsWith('custom-') && typeof r.name === 'string' && !out.some((o) => o.id === r.id)) {
+        out.push({ id: r.id, name: r.name.slice(0, 40) || 'My app' });
+      }
+    }
+    return out.slice(0, MAX_CUSTOM_APPS);
+  } catch {
+    return [];
+  }
+}
+
+/** Add an app by name; returns the new list (as JSON) and its id. */
+export function addCustomApp(json: string, name: string, now = Date.now()): { json: string; id: string } {
+  const list = parseCustomApps(json);
+  const clean = name.trim().slice(0, 40) || 'My app';
+  if (list.length >= MAX_CUSTOM_APPS) return { json, id: '' };
+  const id = `custom-${now.toString(36)}-${list.length}`;
+  return { json: JSON.stringify([...list, { id, name: clean }]), id };
+}
+
+export function removeCustomApp(json: string, id: string): string {
+  return JSON.stringify(parseCustomApps(json).filter((a) => a.id !== id));
+}
+
+/** Tell the profile lookups about the user's own apps (call whenever the saved list changes). */
+export function setCustomApps(list: CustomApp[]): void {
+  customProfiles = list.map((a) => ({
+    id: a.id,
+    name: a.name,
+    about: 'An app you added yourself. It has no built-in names or control numbers, but it keeps its own sound favorites.',
+    ccs: [],
+  }));
+}
+
+export function allProfiles(): Profile[] {
+  return [...PROFILES, ...customProfiles];
+}
+
 export type ProfileRole = 'drums' | 'drone' | 'pad' | 'loops';
 export type ProfileChoice = Record<ProfileRole, string>;
 
 export const defaultProfileChoice: ProfileChoice = { drums: 'gm', drone: 'none', pad: 'synthone', loops: 'drumjam' };
 
 export function getProfile(id: string): Profile {
-  return PROFILES.find((p) => p.id === id) ?? PROFILES[0];
+  return allProfiles().find((p) => p.id === id) ?? PROFILES[0];
 }
 
 export function profileIndex(id: string): number {
-  const i = PROFILES.findIndex((p) => p.id === id);
+  const i = allProfiles().findIndex((p) => p.id === id);
   return i < 0 ? 0 : i;
 }
 

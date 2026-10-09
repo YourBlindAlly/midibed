@@ -1,4 +1,4 @@
-import { addFavorite, applyFavorite, defaultState, migrateState, parseFavorites, removeFavorite, slotProfileId } from '../src/config';
+import { addFavorite, applyFavorite, defaultState, migrateState, parseFavorites, removeFavorite, slotProfileId, switchScene, toEngineJson } from '../src/config';
 import { addFav, favLabel, favsFor, removeFav, sameFavorite } from '../src/soundFavs';
 
 describe('sound favorites', () => {
@@ -108,5 +108,44 @@ describe('sound favorites per app, with banks and names', () => {
     const { getProfile } = require('../src/profiles');
     expect(getProfile('j6').bankUsesLSB).toBe(false);
     expect(getProfile('synthone').bankUsesLSB).toBeUndefined();
+  });
+});
+
+describe('your own apps and MIDI ports', () => {
+  it('a user-added app becomes a profile with its own favorites', () => {
+    const { addCustomApp, allProfiles, getProfile, parseCustomApps, removeCustomApp, setCustomApps } = require('../src/profiles');
+    const r = addCustomApp('[]', '  Cool Synth  ', 1234);
+    expect(r.id).toMatch(/^custom-/);
+    setCustomApps(parseCustomApps(r.json));
+    expect(getProfile(r.id).name).toBe('Cool Synth');
+    expect(allProfiles().some((p: { id: string }) => p.id === r.id)).toBe(true);
+    const json = addFav('{}', r.id, { name: '', program: 3, sendBank: false, bankMSB: 0, bankLSB: 0 });
+    expect(favsFor(json, r.id)).toHaveLength(1);
+    expect(favsFor(json, 'synthone')).toHaveLength(0);
+    const removed = removeCustomApp(r.json, r.id);
+    setCustomApps(parseCustomApps(removed));
+    expect(getProfile(r.id).id).toBe('none'); // unknown ids fall back to No profile
+  });
+
+  it('ignores bad saved app lists and caps the number', () => {
+    const { parseCustomApps, addCustomApp } = require('../src/profiles');
+    expect(parseCustomApps('nope')).toEqual([]);
+    expect(parseCustomApps('[{"id":"x","name":"bad"},{"id":"custom-a","name":"ok"}]')).toEqual([{ id: 'custom-a', name: 'ok' }]);
+    let json = '[]';
+    for (let i = 0; i < 25; i++) json = addCustomApp(json, `A${i}`, i).json;
+    expect(parseCustomApps(json)).toHaveLength(20);
+  });
+
+  it('MIDI ports are off by default, global, and sent to the engine', () => {
+    expect(defaultState.ports).toEqual({ bass: false, pad: false, dancer: false, drums: false });
+    const on = { ...defaultState, ports: { bass: true, pad: false, dancer: true, drums: false } };
+    expect(JSON.parse(toEngineJson(on)).ports).toEqual({ bass: true, pad: false, dancer: true, drums: false });
+    expect(switchScene(on, 1).ports.bass).toBe(true);
+  });
+
+  it('old saved settings get the new fields', () => {
+    const s = migrateState({ bpm: 80 });
+    expect(s.ports.pad).toBe(false);
+    expect(s.customApps).toBe('[]');
   });
 });

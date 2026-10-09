@@ -156,7 +156,13 @@ export type LoopsState = {
   favorites: string; // comma-separated program numbers
 };
 
+export type PortsState = { bass: boolean; pad: boolean; dancer: boolean; drums: boolean };
+
 export type BedState = {
+  /** Which parts get their own MIDI source (MidiBed Bass, Pad, Dancer, Drums). Global routing. */
+  ports: PortsState;
+  /** Apps added by the user (JSON list of {id, name}); they get their own favorites. See profiles.ts. */
+  customApps: string;
   /** Sound favorites per app (profile id), as JSON; see soundFavs.ts. Global, not saved in a scene or journey. */
   soundFavs: string;
   /** MidiDancer: call-and-response phrases on the key's scale. Everything but the channel is saved per scene. */
@@ -458,6 +464,8 @@ function nextJourneyNumber(list: Journey[]): number {
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
   keyOffset: 0,
+  ports: { bass: false, pad: false, dancer: false, drums: false },
+  customApps: '[]',
   // Rusty's good Synth One pad presets, kept under the Synth One app.
   soundFavs: stringifyFavMap({ synthone: favsFromPrograms(parseFavorites(getProfile('synthone').favorites ?? '')) }),
   dancer: defaultDancer,
@@ -885,6 +893,7 @@ export function toEngineJson(s: BedState): string {
       },
     },
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
+    ports: s.ports,
     dancer: {
       enabled: s.dancer.enabled,
       channel: s.dancer.channel,
