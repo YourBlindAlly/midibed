@@ -431,8 +431,11 @@ export default function App() {
   const patchWanderer = (i: number, p: Partial<WandererState>) =>
     setState((s) => ({ ...s, wanderers: s.wanderers.map((w, k) => (k === i ? { ...w, ...p } : w)) }));
 
-  const sendSound = (slot: SoundSlot) =>
-    engine.sendProgramChange(slot.channel, slot.program, slot.sendBank ? slot.bankMSB : -1, slot.sendBank ? slot.bankLSB : -1);
+  // An app that switches banks with MSB only (the J6) is not sent a bank LSB at all.
+  const sendSound = (slot: SoundSlot) => {
+    const usesLSB = getProfile(slotProfileId(latest.current, slot.name)).bankUsesLSB !== false;
+    engine.sendProgramChange(slot.channel, slot.program, slot.sendBank ? slot.bankMSB : -1, slot.sendBank && usesLSB ? slot.bankLSB : -1);
+  };
 
   // Changing a sound sends Program Change right away (after a short pause so
   // swiping quickly through programs doesn't flood the receiving app).

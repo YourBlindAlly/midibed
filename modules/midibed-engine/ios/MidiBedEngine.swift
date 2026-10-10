@@ -516,9 +516,20 @@ final class MidiBedEngine {
     queue.async {
       let ch = UInt8(max(0, min(15, channel)))
       let port = loops ? 1 : 0
-      if bankMSB >= 0 { self.emit(0xB0 | ch, 0, UInt8(min(127, bankMSB)), port: port) }
-      if bankLSB >= 0 { self.emit(0xB0 | ch, 32, UInt8(min(127, bankLSB)), port: port) }
-      self.emit(0xC0 | ch, UInt8(max(0, min(127, program))), 0, port: port)
+      // Spaced out a little: some apps load a preset on another thread, and a Program Change that
+      // arrives in the same instant as its Bank Select can be lost or applied to the old bank.
+      var delay = 0.0
+      func send(_ status: UInt8, _ d1: UInt8, _ d2: UInt8) {
+        if delay == 0 {
+          self.emit(status, d1, d2, port: port)
+        } else {
+          self.queue.asyncAfter(deadline: .now() + delay) { [weak self] in self?.emit(status, d1, d2, port: port) }
+        }
+        delay += 0.015
+      }
+      if bankMSB >= 0 { send(0xB0 | ch, 0, UInt8(min(127, bankMSB))) }
+      if bankLSB >= 0 { send(0xB0 | ch, 32, UInt8(min(127, bankLSB))) }
+      send(0xC0 | ch, UInt8(max(0, min(127, program))), 0)
     }
   }
 
