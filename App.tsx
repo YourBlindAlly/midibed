@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -39,6 +39,8 @@ import {
   toEngineJson,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
+import { LAYER_NAMES, SHORTCUT_HELP, actionForKey } from './src/shortcuts';
+import { levelText, mixerMessages } from './src/mixer';
 import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
@@ -207,6 +209,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') engine.reclaimKeys();
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
     if (playing) {
       activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
     } else {
@@ -230,6 +239,7 @@ export default function App() {
       engine.applyConfig(json);
       engine.start();
       setPlaying(true);
+      sendMixerLevels();
     }
   };
 
@@ -237,6 +247,7 @@ export default function App() {
   const [tab, setTab] = useState<TabId>('live');
   const selectTab = (id: TabId, announce = false) => {
     setTab(id);
+    engine.reclaimKeys();
     if (announce) announceLater(tabAnnouncement(id), 400);
   };
   const handlePage = (direction: 'next' | 'previous') => selectTab(neighborTab(tab, direction), true);
@@ -251,6 +262,7 @@ export default function App() {
   };
 
   const patch = (p: Partial<BedState>) => setState((s) => ({ ...s, ...p }));
+
 
   // Device profiles: names and shortcuts for the apps being driven (src/profiles.ts).
   const drumProfile = getProfile(state.profiles.drums);
@@ -449,11 +461,96 @@ export default function App() {
     programTimers.current[i] = setTimeout(() => sendSound(next), 200);
   };
 
+  // Mixer: send every part's level as a volume control (only when 'Send levels' is on).
+  const sendMixerLevels = () => {
+    const s = latest.current;
+    mixerMessages(s, getProfile(s.profiles.loops).loopVolumeCC).forEach((m) =>
+      engine.sendControlChange(m.channel, m.cc, m.value, m.loops),
+    );
+  };
+  const mixerKey = JSON.stringify([
+    state.mixer,
+    state.drone.channel,
+    state.pad.channel,
+    state.dancer.channel,
+    state.drums.map((d) => d.channel),
+    state.loops.channel,
+    state.profiles.loops,
+  ]);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(sendMixerLevels, 150);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mixerKey, ready]);
+
+  // Keyboard shortcuts (see src/shortcuts.ts). The same key twice within a moment counts once.
+  const lastKey = useRef({ key: '', at: 0 });
+  const onShortcutKey = (key: string) => {
+    if (!state.shortcuts) return;
+    const now = Date.now();
+    if (key === lastKey.current.key && now - lastKey.current.at < 150) return;
+    lastKey.current = { key, at: now };
+    const action = actionForKey(key);
+    if (!action) return;
+    const sceneCount = state.scenes.length;
+    switch (action.type) {
+      case 'scene':
+        if (action.index < sceneCount) goToScene(action.index);
+        break;
+      case 'nextScene':
+        goToScene((state.activeScene + 1) % sceneCount);
+        break;
+      case 'prevScene':
+        goToScene((state.activeScene + sceneCount - 1) % sceneCount);
+        break;
+      case 'nextJourney':
+        goToJourney((state.activeJourney + 1) % state.journeys.length);
+        break;
+      case 'prevJourney':
+        goToJourney((state.activeJourney + state.journeys.length - 1) % state.journeys.length);
+        break;
+      case 'playStop':
+        onMagicTap();
+        break;
+      case 'freeze':
+        patch({ frozen: !state.frozen });
+        announceLater(state.frozen ? 'Unfrozen' : 'Frozen', 150);
+        break;
+      case 'panic':
+        engine.panic();
+        announceLater('All notes off', 150);
+        break;
+      case 'layer': {
+        const name = LAYER_NAMES[action.layer];
+        let on: boolean;
+        if (action.layer === 'bass') {
+          on = !state.drone.enabled;
+          patchDrone({ enabled: on });
+        } else if (action.layer === 'pad') {
+          on = !state.pad.enabled;
+          patchPad({ enabled: on });
+        } else if (action.layer === 'dancer') {
+          on = !state.dancer.enabled;
+          patchDancer({ enabled: on });
+        } else if (action.layer === 'drums') {
+          on = !state.percussion;
+          patch({ percussion: on });
+        } else {
+          on = !state.loops.enabled;
+          patchLoops({ enabled: on });
+        }
+        announceLater(`${name} ${on ? 'on' : 'off'}`, 150);
+        break;
+      }
+    }
+  };
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <StatusBar style="light" />
-        <Pager style={styles.fill} onPage={handlePage} onMagicTap={onMagicTap}>
+        <Pager style={styles.fill} onPage={handlePage} onMagicTap={onMagicTap} onKey={onShortcutKey}>
           <View style={styles.fill}>
             <View style={styles.strip}>
           <Text style={styles.title} accessibilityRole="header">
@@ -540,6 +637,7 @@ export default function App() {
                 maxLength={40}
                 autoCorrect={false}
                 placeholderTextColor={colors.dim}
+                onBlur={() => engine.reclaimKeys()}
               />
             </View>
             <ActionButton label="New journey" onPress={addJourney} hint="Adds a journey with the starting scenes, in the same key and tempo" />
@@ -1160,6 +1258,35 @@ export default function App() {
             ))}
           </Section>
 
+          <Section title="Mixer">
+            <Text style={styles.note}>
+              A level for each part, sent to the other app as a volume control (CC 7; the loops app's own loop volume if it has one). Nothing is sent until you switch it on, so a synth's own volume is not changed by surprise. If two parts share a channel, the first one's level is used. There is no EQ here: EQ is not a standard MIDI control.
+            </Text>
+            <Toggle label="Send levels to the apps" value={state.mixer.send} onChange={(v) => patch({ mixer: { ...state.mixer, send: v } })} />
+            {(
+              [
+                ['bass', 'Bass drone level'],
+                ['pad', 'Chord pad level'],
+                ['dancer', 'MidiDancer level'],
+                ['drums', 'Drums level'],
+                ['loops', 'Loops level'],
+              ] as const
+            ).map(([part, label]) => (
+              <Stepper
+                key={part}
+                label={label}
+                value={state.mixer[part]}
+                onChange={(v) => patch({ mixer: { ...state.mixer, [part]: v } })}
+                min={0}
+                max={127}
+                step={5}
+                bigStep={10}
+                format={levelText}
+                hint="Swipe up or down to change the level. Sent as you change it, when levels are switched on."
+              />
+            ))}
+          </Section>
+
           <Section title="Fades">
             <Text style={styles.note}>
               Applied when you switch a layer on or off, and when you press Play. Bass drone and pad fade by sending a MIDI volume control to the other synth; drums fade by getting softer. Set a time to zero for no fade.
@@ -1242,6 +1369,7 @@ export default function App() {
                               maxLength={40}
                               autoCorrect={false}
                               placeholderTextColor={colors.dim}
+                              onBlur={() => engine.reclaimKeys()}
                             />
                           </View>
                           <ActionButton
@@ -1384,6 +1512,18 @@ export default function App() {
           )}
           {tab === 'setup' && (
             <>
+          <Section title="Keyboard shortcuts">
+            <Text style={styles.note}>
+              Keys from a keyboard, or a braille display that types like one (such as the Hable One). They work while MidiBed is on screen: iOS does not deliver keys to an app in the background. The magic tap and the three-finger swipes still work as before. While you type in a text field the keys go there instead.
+            </Text>
+            <Toggle label="Keyboard shortcuts" value={state.shortcuts} onChange={(v) => patch({ shortcuts: v })} />
+            {SHORTCUT_HELP.map((line) => (
+              <Text key={line} style={styles.note}>
+                {line}
+              </Text>
+            ))}
+          </Section>
+
           <Section title="Output">
             <Toggle label="Announce breathing changes" value={state.announce} onChange={(v) => patch({ announce: v })} hint="Speaks a short message when a bass, pad or drum change happens by itself" />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
@@ -1445,6 +1585,7 @@ export default function App() {
                 maxLength={40}
                 autoCorrect={false}
                 placeholderTextColor={colors.dim}
+                onBlur={() => engine.reclaimKeys()}
               />
             </View>
             <ActionButton

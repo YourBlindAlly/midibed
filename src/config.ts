@@ -15,6 +15,7 @@ import {
 } from './transitions';
 import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice, getProfile } from './profiles';
+import { MixerState, defaultMixer } from './mixer';
 import { Favorite, addFav, favsFromPrograms, parseFavMap, stringifyFavMap } from './soundFavs';
 
 export type DrumState = {
@@ -159,6 +160,10 @@ export type LoopsState = {
 export type PortsState = { bass: boolean; pad: boolean; dancer: boolean; drums: boolean };
 
 export type BedState = {
+  /** Per-part levels sent as volume control changes (see mixer.ts). Global. */
+  mixer: MixerState;
+  /** Hardware keyboard shortcuts while MidiBed is in front (see shortcuts.ts). */
+  shortcuts: boolean;
   /** Which parts get their own MIDI source (MidiBed Bass, Pad, Dancer, Drums). Global routing. */
   ports: PortsState;
   /** Apps added by the user (JSON list of {id, name}); they get their own favorites. See profiles.ts. */
@@ -464,6 +469,8 @@ function nextJourneyNumber(list: Journey[]): number {
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
   keyOffset: 0,
+  mixer: defaultMixer,
+  shortcuts: true,
   ports: { bass: false, pad: false, dancer: false, drums: false },
   customApps: '[]',
   // Rusty's good Synth One pad presets, kept under the Synth One app.

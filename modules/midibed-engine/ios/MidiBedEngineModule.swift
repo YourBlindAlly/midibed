@@ -12,7 +12,7 @@ public class MidiBedEngineModule: Module {
 
     // The screen-wide container that receives VoiceOver's three-finger page swipe.
     View(MidiBedPagerView.self) {
-      Events("onPage", "onMagicTap")
+      Events("onPage", "onMagicTap", "onKey")
     }
 
     OnCreate {
@@ -42,6 +42,11 @@ public class MidiBedEngineModule: Module {
 
     Function("panic") { () in
       self.engine.panic()
+    }
+
+    // Give keyboard focus back to the key-catching view after a text field has had it.
+    Function("reclaimKeyFocus") { () in
+      DispatchQueue.main.async { MidiBedPagerView.current?.reclaimFirstResponder() }
     }
 
     Function("applyConfig") { (json: String, queued: Bool) in

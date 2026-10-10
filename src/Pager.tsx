@@ -11,6 +11,7 @@ let NativePager: React.ComponentType<{
   style?: StyleProp<ViewStyle>;
   onPage?: (e: { nativeEvent: { direction: 'next' | 'previous' } }) => void;
   onMagicTap?: () => void;
+  onKey?: (e: { nativeEvent: { key: string; keyCode: number } }) => void;
   children?: React.ReactNode;
 }> | null = null;
 
@@ -25,17 +26,24 @@ try {
 export function Pager({
   onPage,
   onMagicTap,
+  onKey,
   style,
   children,
 }: {
   onPage: (direction: 'next' | 'previous') => void;
   onMagicTap?: () => void;
+  onKey?: (key: string) => void;
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
 }) {
   if (!NativePager) return <View style={style}>{children}</View>;
   return (
-    <NativePager style={style} onPage={(e) => onPage(e.nativeEvent.direction)} onMagicTap={() => onMagicTap?.()}>
+    <NativePager
+      style={style}
+      onPage={(e) => onPage(e.nativeEvent.direction)}
+      onMagicTap={() => onMagicTap?.()}
+      onKey={(e) => onKey?.(e.nativeEvent.key)}
+    >
       {children}
     </NativePager>
   );

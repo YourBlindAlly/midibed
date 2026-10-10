@@ -6,6 +6,7 @@ declare class MidiBedEngineModule extends NativeModule<MidiBedEngineEvents> {
   stop(): void;
   /** End every sounding note on every port. */
   panic(): void;
+  reclaimKeyFocus(): void;
   /** Whole settings object as a JSON string; see MidiBedConfig in MidiBedEngine.swift. */
   applyConfig(json: string, queued: boolean): void;
   /** Every scene as a full configuration (JSON array), for auto-advance. */

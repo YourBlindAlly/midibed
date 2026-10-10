@@ -20,6 +20,43 @@ import UIKit
 class MidiBedPagerView: ExpoView {
   let onPage = EventDispatcher()
   let onMagicTap = EventDispatcher()
+  let onKey = EventDispatcher()
+
+  /// The one pager on screen, so JS can ask it to take back keyboard focus (see reclaimFirstResponder).
+  static weak var current: MidiBedPagerView?
+
+  required init(appContext: AppContext? = nil) {
+    super.init(appContext: appContext)
+    MidiBedPagerView.current = self
+  }
+
+  // Hardware keyboard keys (and a braille display that types like one) reach the app through the
+  // responder chain, so this view takes first-responder status. It is not an accessibility element, so
+  // VoiceOver navigation is unchanged. Any text field that takes focus steals it; JS calls
+  // reclaimKeyFocus when one is finished with. Keys are only delivered while MidiBed is in front.
+  override var canBecomeFirstResponder: Bool { true }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window != nil { becomeFirstResponder() }
+  }
+
+  func reclaimFirstResponder() {
+    if !isFirstResponder { becomeFirstResponder() }
+  }
+
+  override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+    for press in presses {
+      guard let key = press.key else { continue }
+      // Leave anything with Command, Control or Option to the system and VoiceOver.
+      if key.modifierFlags.contains(.command) || key.modifierFlags.contains(.control) || key.modifierFlags.contains(.alternate) {
+        continue
+      }
+      let text = key.charactersIgnoringModifiers.lowercased()
+      if !text.isEmpty { onKey(["key": text, "keyCode": Int(key.keyCode.rawValue)]) }
+    }
+    super.pressesBegan(presses, with: event)
+  }
 
   override func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
     switch direction {

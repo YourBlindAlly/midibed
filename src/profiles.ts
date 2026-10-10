@@ -30,6 +30,8 @@ export type Profile = {
   bankUsesLSB?: boolean;
   /** CCs that start and stop a loop player (use the same number twice for a play toggle). */
   loopControls?: { startCC: number; stopCC: number };
+  /** The control that sets this loop player's master loop volume (the mixer uses it for the loops part). */
+  loopVolumeCC?: number;
 };
 
 const gmNotes: ProfileNote[] = Object.keys(GM_DRUMS)
@@ -58,6 +60,7 @@ export const PROFILES: Profile[] = [
     about:
       "From the developer's version 1.3 notes: pad filter cutoff is CC 74 and resonance is CC 71, the same defaults MidiBed uses. CC 7 is master pad volume, 91 pad reverb send, 18 and 19 delay, 20 crush, 21 lo-fi. Program Change switches kits and presets, and Bank Select MSB chooses between pad instruments and presets. In DrumJam, CC 11 is touch-pad velocity, not volume. CC 118 toggles play and CC 117 stops. Which channel each instrument answers on is not documented, so use the test hits.",
     loopControls: { startCC: 118, stopCC: 117 },
+    loopVolumeCC: 85,
     ccs: [
       { name: 'Pad filter cutoff', cc: 74 },
       { name: 'Pad filter resonance', cc: 71 },
