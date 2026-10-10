@@ -223,6 +223,12 @@ generator, and only if Rusty wants it on an AUM strip with effects.
 
 - CALL AND RESPONSE ANSWERS (Rusty, 2026-10-09): (1) FREEZE DOES NOT PAUSE MidiDancer / Call and Response: it is meant to be a tool for frozen scenes. (2) SPACE LENGTH = the number of COMPLETE BARS the phrase occupies, counted from the bar line before it starts. Example: a phrase from beat 3 of bar 1 to beat 1 of bar 2 occupies bars 1-2, so the response space is bars 3-4 (starts on the downbeat of bar 3, ends at the end of bar 4); then the next call can begin. (3) NO self-answer rule for now (shelved; only makes sense if MidiBed gets MIDI input and the player has a MIDI instrument). (4) The phrase may start ANYWHERE in the bar; phrase shape is governed by rules instead: density, busyness (and more to come: note length, rests, range, direction/contour, repeat vs vary, chance of a rest-led start).
 
+
+### 6b. MidiDancer SOLO mode: plays by itself (Rusty, 2026-10-10)
+- Separate from Call and Response: a mode where MidiDancer just keeps playing on its own, so Rusty can take a break or do setup on the phone while the bed carries on with a living melodic line. Same scales, register, density, busyness, rests and contour rules; no response gaps for the player.
+- Ideas (not yet agreed): phrases follow each other with a short rest between (a 'breath' of one beat to one bar, settable); an optional slow drift in density/register so it does not loop audibly; picks a new phrase in turn or at random; follows the scene's key and scale; one-key shortcut and a layer toggle to switch between Call and Response and Solo (maybe a 'Mode' stepper: Call and response / Solo). Relationship with Intermission (item 8): a break could start Solo mode and quieten the rest.
+- Open questions for Rusty: how continuous (a phrase right after a phrase, or a rest between), whether it should thin out on its own over time, and whether Solo should stop when he switches scene or carry on.
+
 ### 7. MidiPick-Up (Rusty's name, 2026-10-08)
 - A short single-note phrase in the last stretch of a chord (the last beat, half bar, or a length he sets) that lands on
   the DOWNBEAT of the next chord. Rusty: "a small portion of the scale which fits over the last chord and ends on the
