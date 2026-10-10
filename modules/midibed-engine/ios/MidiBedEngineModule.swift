@@ -40,6 +40,10 @@ public class MidiBedEngineModule: Module {
       self.engine.stop()
     }
 
+    Function("panic") { () in
+      self.engine.panic()
+    }
+
     Function("applyConfig") { (json: String, queued: Bool) in
       self.engine.applyConfig(json: json, queued: queued)
     }

@@ -11,6 +11,7 @@ import type { BeatPayload, MotionPayload, SceneEventPayload } from '../modules/m
 type Native = {
   start(): void;
   stop(): void;
+  panic(): void;
   applyConfig(json: string, queued: boolean): void;
   setScenes(json: string): void;
   sendControlChange(channel: number, cc: number, value: number, loops: boolean): void;
@@ -86,6 +87,8 @@ export const engine = {
   setScenes: (json: string) => native?.setScenes(json),
   start: () => native?.start(),
   stop: () => native?.stop(),
+  /** End every sounding note on every port (a stuck note). */
+  panic: () => native?.panic(),
   /** queued = wait for the next bar line while playing (scene switches). */
   applyConfig: (json: string, queued = false) => native?.applyConfig(json, queued),
   /** loops = out the loops app's own port (when it has one). */

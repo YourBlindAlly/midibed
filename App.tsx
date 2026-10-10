@@ -548,6 +548,14 @@ export default function App() {
           </Section>
 
           <Section title="Layers">
+            <ActionButton
+              label="All notes off"
+              hint="Ends every sounding note on every MIDI port, for a stuck note. If it is playing, the bass and pad start again straight away"
+              onPress={() => {
+                engine.panic();
+                announceLater('All notes off', 300);
+              }}
+            />
             <Text style={styles.note}>
               Quick on and off for each part. Switching one fades it in or out using your fade times. Saved in each scene.
             </Text>

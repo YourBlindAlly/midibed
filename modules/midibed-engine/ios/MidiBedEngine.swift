@@ -296,6 +296,9 @@ final class MidiBedEngine {
     var note: Int
   }
   private var heldDrone: [HeldNote] = []
+  /// Every note that has been started and not yet ended (channel << 8 | note), so Stop and Panic can end
+  /// exactly those, even if their note-offs were still waiting to be sent.
+  private var sounding = Set<Int>()
   private var heldPad: [HeldNote] = []
   /// Which chord of the harmony loop we are on.
   private var chordIndex = 0
@@ -491,7 +494,7 @@ final class MidiBedEngine {
       let padCh = self.config?.pad.channel
       self.releaseDrone()
       self.releasePad()
-      self.allNotesOff()
+      self.silence()
       if let cfg = self.config {
         if self.loopsPlaying { self.stopLoops(cfg) }
         if cfg.clock && cfg.clockTransport { self.emit(0xFC, 0, 0) } // MIDI Stop
@@ -574,6 +577,24 @@ final class MidiBedEngine {
     while idleNextPulse <= now {
       emit(0xF8, 0, 0)
       idleNextPulse += interval
+    }
+  }
+
+  /// Panic: end every sounding note and cancel any waiting to start, on every port. If the transport is
+  /// running the bass drone and the pad start again right after, so the bed carries on.
+  func panic() {
+    queue.async {
+      self.pending.removeAll { ($0.status & 0xF0) == 0x90 && $0.d2 > 0 }
+      self.heldDrone.removeAll()
+      self.heldPad.removeAll()
+      self.silence()
+      if self.running {
+        self.queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+          guard let self = self, self.running else { return }
+          self.reconcileDrone(keepLevel: true, immediate: true)
+          self.reconcilePadEnabled()
+        }
+      }
     }
   }
 
@@ -1445,6 +1466,23 @@ final class MidiBedEngine {
     for p in due { emit(p.status, p.d1, p.d2, port: p.port) }
   }
 
+  /// End every note we know is sounding (a note-off to every port), then all-notes-off and all-sound-off
+  /// on every channel as a backstop for anything we lost track of.
+  private func silence() {
+    let midi = config?.midiOut ?? true
+    for key in sounding {
+      let ch = UInt8((key >> 8) & 0x0F)
+      let note = UInt8(key & 0x7F)
+      if midi { sendMIDI(0x80 | ch, note, 0, to: [0, 1, 2, 3, 4, 5]) }
+      synth.post(status: 0x80 | ch, d1: note, d2: 0)
+    }
+    sounding.removeAll()
+    allNotesOff()
+    if midi {
+      for ch in 0..<16 { sendMIDI(0xB0 | UInt8(ch), 120, 0, to: [0, 1, 2, 3, 4, 5]) }
+    }
+  }
+
   private func allNotesOff() {
     for ch in 0..<16 {
       emit(0xB0 | UInt8(ch), 123, 0)
@@ -1454,6 +1492,16 @@ final class MidiBedEngine {
   }
 
   private func emit(_ status: UInt8, _ d1: UInt8, _ d2: UInt8, port: Int = 0) {
+    // Remember which notes are sounding (see `sounding`).
+    if port != 1 {
+      let kind = status & 0xF0
+      let key = (Int(status & 0x0F) << 8) | Int(d1)
+      if kind == 0x90 && d2 > 0 {
+        sounding.insert(key)
+      } else if kind == 0x80 || kind == 0x90 {
+        sounding.remove(key)
+      }
+    }
     let loopsOwn = config?.loops.ownPort ?? false
     // System messages (clock, start, stop) are for other apps only. With the loops on their own port
     // they go out that source only.
