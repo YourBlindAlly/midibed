@@ -50,29 +50,53 @@ describe('whole screen smoke test', () => {
     expect(labels(tree)).toEqual(expect.arrayContaining(['Play', 'Scene 1', 'Scene 4']));
 
     // Live
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Bass drone layer', 'Percussion layer', 'Tempo', 'Swing', 'Freeze', 'After this scene', 'What happens next']));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Bass drone layer', 'Percussion layer', 'Solo drums', 'Tempo', 'Swing', 'Freeze', 'All notes off', 'What happens next']));
     expect(labels(tree)).not.toContain('Progression preset');
     expect(labels(tree)).not.toContain('Bass: stay normal for');
 
-    await tabPress('Harmony');
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Key (root note)', 'Progression preset', 'Mode', 'Bass follows chords', 'Pad follows chords']));
-    expect(labels(tree)).not.toContain('Tempo');
-    expect(labels(tree)).not.toContain('Root note');
-
-    await tabPress('Rhythm');
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Kick hits', 'Loops', 'Loop program']));
-
-    await tabPress('Breathe');
+    // Parts: the first part is the bass drone, with the same headings every part has
+    await tabPress('Parts');
     expect(labels(tree)).toEqual(
-      expect.arrayContaining(['Breathing preset', 'Right now', 'Bass: stay normal for', 'Pad: stay normal for', 'Drums: play for', 'Scene start sound in this scene', 'Drums break sound in this scene', 'Drums return sound in this scene', 'Recurring sound in this scene']),
+      expect.arrayContaining(['Part', 'Bass drone on', 'Solo Bass drone', 'Bass drone MIDI channel', 'Bass drone level', 'Bass drone fade in', 'Bass follows chords', 'Bass drone program', 'Cutoff wander']),
+    );
+    expect(labels(tree)).not.toContain('Tempo');
+    expect(labels(tree)).not.toContain('Pad follows chords');
+    expect(labels(tree)).not.toContain('Bass: stay normal for');
+    expect(labels(tree)).not.toContain('Kick hits');
+
+    // Choose another part with the Part stepper: its own controls replace the bass ones
+    const partStepper = tree.root.findAll((n: any) => n.props && n.props.accessibilityLabel === 'Part' && n.props.accessibilityActions)[0];
+    expect(partStepper).toBeDefined();
+    await act(async () => partStepper.props.onAccessibilityAction({ nativeEvent: { actionName: 'increment' } }));
+    expect(labels(tree)).toEqual(expect.arrayContaining(['Pad follows chords', 'Pad MIDI channel', 'Chord pad level']));
+    expect(labels(tree)).not.toContain('Bass follows chords');
+
+    // Scene: the chords and key, breathing, what happens after, and the transitions
+    await tabPress('Scene');
+    expect(labels(tree)).toEqual(
+      expect.arrayContaining([
+        'Key (root note)',
+        'Progression preset',
+        'Mode',
+        'After this scene',
+        'Breathing preset',
+        'Right now',
+        'Bass: stay normal for',
+        'Pad: stay normal for',
+        'Drums: play for',
+        'Scene start sound in this scene',
+        'Recurring sound in this scene',
+        'Shortest lead-in',
+        'Recurring sound',
+      ]),
     );
     expect(labels(tree)).not.toContain('Kick hits');
 
-    await tabPress('Sound');
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Cutoff wander', 'Bass drone fade in', 'Chord pad program', 'Shortest lead-in', 'Scene start sound', 'Drums break sound', 'Drums return sound', 'Recurring sound']));
-
+    // Setup
     await tabPress('Setup');
-    expect(labels(tree)).toEqual(expect.arrayContaining(['Send MIDI', 'Built-in test sound', 'Announce breathing changes', 'Drums app profile']));
+    expect(labels(tree)).toEqual(
+      expect.arrayContaining(['Send MIDI', 'Built-in test sound', 'Announce breathing changes', 'Keyboard shortcuts', 'Last key received', 'Send levels to the apps', 'Fade volume control number', 'New app name']),
+    );
 
     // The strip is still there on every tab.
     expect(labels(tree)).toEqual(expect.arrayContaining(['Play', 'Scene 2']));

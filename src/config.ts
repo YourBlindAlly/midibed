@@ -1,6 +1,7 @@
 import { buildBassChords, buildPadChords, clampMode } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
+import type { Layer } from './shortcuts';
 import { cycleBarsFromOldSpeed, phaseOffset, smoothBeatsFromOldSmooth } from './wander';
 import { MotionState, defaultMotion, drumRole } from './motion';
 import {
@@ -160,6 +161,8 @@ export type LoopsState = {
 export type PortsState = { bass: boolean; pad: boolean; dancer: boolean; drums: boolean };
 
 export type BedState = {
+  /** Hear only this part. Never saved as on (like Freeze): it silences the others by the normal fades. */
+  solo: Layer | null;
   /** Per-part levels sent as volume control changes (see mixer.ts). Global. */
   mixer: MixerState;
   /** Hardware keyboard shortcuts while MidiBed is in front (see shortcuts.ts). */
@@ -469,6 +472,7 @@ function nextJourneyNumber(list: Journey[]): number {
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
   keyOffset: 0,
+  solo: null,
   mixer: defaultMixer,
   shortcuts: true,
   ports: { bass: false, pad: false, dancer: false, drums: false },
@@ -785,6 +789,7 @@ export function migrateState(rawInput: unknown): BedState {
     ...merged,
     keyOffset,
     frozen: false, // never come back frozen
+    solo: null, // never come back soloed
     sounds,
     activeScene: active,
     scenes: merged.scenes.map((sc, i) => (i === active ? captureScene({ ...merged, keyOffset }) : sc)),
@@ -841,7 +846,7 @@ export function toEngineJson(s: BedState): string {
       target: pickTarget(s.advance, s.activeScene, s.scenes.length, 0),
     },
     loops: {
-      enabled: s.loops.enabled,
+      enabled: s.solo ? s.solo === 'loops' : s.loops.enabled,
       channel: s.loops.channel,
       program: s.loops.program,
       bankMSB: s.loops.sendBank ? s.loops.bankMSB : -1,
@@ -851,7 +856,7 @@ export function toEngineJson(s: BedState): string {
       ownPort: s.loops.ownPort,
     },
     drums: s.drums.map((d) => ({
-      enabled: s.percussion && d.enabled,
+      enabled: (s.solo ? s.solo === 'drums' : s.percussion) && d.enabled,
       role: drumRole(d.name),
       note: d.note,
       channel: d.channel,
@@ -863,7 +868,7 @@ export function toEngineJson(s: BedState): string {
       humanize: d.humanize / 100,
     })),
     drone: {
-      enabled: s.drone.enabled,
+      enabled: s.solo ? s.solo === 'bass' : s.drone.enabled,
       channel: s.drone.channel,
       chords: droneChords(s),
       altChords: droneAltChords(s),
@@ -871,7 +876,7 @@ export function toEngineJson(s: BedState): string {
       retriggerBars: s.drone.retriggerBars,
     },
     pad: {
-      enabled: s.pad.enabled,
+      enabled: s.solo ? s.solo === 'pad' : s.pad.enabled,
       channel: s.pad.channel,
       velocity: s.pad.velocity,
       humanize: s.pad.humanize / 100,
@@ -901,13 +906,19 @@ export function toEngineJson(s: BedState): string {
     },
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
     ports: s.ports,
-    dancer: {
-      enabled: s.dancer.enabled,
-      channel: s.dancer.channel,
-      spaceMult: s.dancer.spaceMult,
-      pick: s.dancer.pick,
-      phrases: s.dancer.enabled ? makePhrases(s.dancer, s.harmony.mode, keyRoot(s)) : [],
-    },
+    dancer: (() => {
+      const on = s.solo ? s.solo === 'dancer' : s.dancer.enabled;
+      return {
+        enabled: on,
+        channel: s.dancer.channel,
+        mode: s.dancer.mode,
+        spaceMult: s.dancer.spaceMult,
+        restBars: s.dancer.restBars,
+        carryOn: s.dancer.carryOn,
+        pick: s.dancer.pick,
+        phrases: on ? makePhrases(s.dancer, s.harmony.mode, keyRoot(s)) : [],
+      };
+    })(),
     fade: {
       cc: s.fade.cc,
       droneIn: s.fade.droneIn / 10,

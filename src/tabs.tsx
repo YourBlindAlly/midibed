@@ -5,10 +5,8 @@ import { colors } from './controls';
 
 export const TABS = [
   { id: 'live', label: 'Live' },
-  { id: 'breathe', label: 'Breathe' },
-  { id: 'harmony', label: 'Harmony' },
-  { id: 'rhythm', label: 'Rhythm' },
-  { id: 'sound', label: 'Sound' },
+  { id: 'parts', label: 'Parts' },
+  { id: 'scene', label: 'Scene' },
   { id: 'setup', label: 'Setup' },
 ] as const;
 
@@ -24,7 +22,7 @@ export function neighborTab(current: TabId, direction: 'next' | 'previous'): Tab
   return TABS[Math.max(0, Math.min(TABS.length - 1, i))].id;
 }
 
-/** What VoiceOver should say after changing tab, e.g. "Harmony, tab 2 of 5". */
+/** What VoiceOver should say after changing tab, e.g. "Parts, tab 2 of 4". */
 export function tabAnnouncement(id: TabId): string {
   return `${TABS[tabIndex(id)].label}, tab ${tabIndex(id) + 1} of ${TABS.length}`;
 }

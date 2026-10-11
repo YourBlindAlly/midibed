@@ -1,14 +1,4 @@
-import {
-  SCALES,
-  cycleBars,
-  defaultDancer,
-  describePhrase,
-  makePhrase,
-  makePhrases,
-  mulberry32,
-  resolveScale,
-  scaleTones,
-} from '../src/dancer';
+import { SCALES, cycleBars, defaultDancer, describePhrase, makePhrase, makePhrases, mulberry32, resolveScale, scaleTones, soloBars, DANCER_MODE_NAMES } from '../src/dancer';
 import { defaultState, migrateState, switchScene, toEngineJson } from '../src/config';
 
 const pc = (n: number, root: number) => (((n - root) % 12) + 12) % 12;
@@ -167,5 +157,46 @@ describe('settings', () => {
     const old = migrateState({ bpm: 90 });
     expect(old.dancer).toEqual(defaultState.dancer);
     expect(old.scenes.every((sc) => sc.dancer.enabled === false)).toBe(true);
+  });
+});
+
+describe('solo mode', () => {
+  const solo = { ...defaultDancer, enabled: true, mode: 1, thin: 60, density: 80 };
+
+  it('solo is a separate mode with its own rest, thinning and carry-on settings', () => {
+    expect(defaultDancer.mode).toBe(0);
+    expect(defaultDancer.carryOn).toBe(true);
+    expect(soloBars(2, 1)).toBe(3);
+    expect(soloBars(1, 0)).toBe(1);
+    expect(DANCER_MODE_NAMES).toHaveLength(2);
+  });
+
+  it('the pool runs from sparse to busy, ending at the density you set', () => {
+    const counts = makePhrases({ ...solo, rests: 0, maxBars: 4 }, 1, ROOT).map((p) => p.events.length);
+    expect(counts[counts.length - 1]).toBeGreaterThan(counts[0]);
+    expect(counts[0]).toBeLessThanOrEqual(counts[3]);
+  });
+
+  it('call and response ignores the thinning', () => {
+    const a = makePhrases({ ...solo, mode: 0 }, 1, ROOT);
+    const b = makePhrases({ ...solo, mode: 0, thin: 0 }, 1, ROOT);
+    expect(a).toEqual(b);
+  });
+
+  it('is sent to the engine with its mode', () => {
+    const on = { ...defaultState, dancer: { ...defaultState.dancer, enabled: true, mode: 1, restBars: 2, carryOn: false, pick: 3 } };
+    expect(JSON.parse(toEngineJson(on)).dancer).toMatchObject({ mode: 1, restBars: 2, carryOn: false, pick: 3 });
+  });
+
+  it('describes a solo phrase with its rest instead of a space for you', () => {
+    const p = { span: 1, events: [[0, 4, 62, 70]] };
+    expect(describePhrase(p, 1, 1, 2)).toContain('2 bars of rest');
+    expect(describePhrase(p, 1, 1, 0)).toContain('follows straight on');
+    expect(describePhrase(p, 1, 0)).toContain('of space for you');
+  });
+
+  it('old saved dancer settings get the new defaults', () => {
+    const s = migrateState({ dancer: { enabled: true, density: 70 } });
+    expect(s.dancer).toMatchObject({ enabled: true, density: 70, mode: 0, restBars: 1, thin: 40, carryOn: true });
   });
 });

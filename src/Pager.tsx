@@ -11,7 +11,7 @@ let NativePager: React.ComponentType<{
   style?: StyleProp<ViewStyle>;
   onPage?: (e: { nativeEvent: { direction: 'next' | 'previous' } }) => void;
   onMagicTap?: () => void;
-  onKey?: (e: { nativeEvent: { key: string; keyCode: number } }) => void;
+  onKey?: (e: { nativeEvent: { key: string; keyCode: number; shift?: boolean } }) => void;
   children?: React.ReactNode;
 }> | null = null;
 
@@ -32,7 +32,7 @@ export function Pager({
 }: {
   onPage: (direction: 'next' | 'previous') => void;
   onMagicTap?: () => void;
-  onKey?: (key: string) => void;
+  onKey?: (key: string, shift: boolean) => void;
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
 }) {
@@ -42,7 +42,7 @@ export function Pager({
       style={style}
       onPage={(e) => onPage(e.nativeEvent.direction)}
       onMagicTap={() => onMagicTap?.()}
-      onKey={(e) => onKey?.(e.nativeEvent.key)}
+      onKey={(e) => onKey?.(e.nativeEvent.key, e.nativeEvent.shift === true)}
     >
       {children}
     </NativePager>

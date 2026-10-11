@@ -38,7 +38,8 @@ export function resolveScale(scale: number, mode: number): number {
 
 export const CONTOUR_NAMES = ['Free', 'Rising', 'Falling', 'Arch'];
 export const START_NAMES = ['On the downbeat', 'Anywhere in the bar'];
-export const PICK_NAMES = ['In turn', 'At random', 'The same one every time'];
+export const PICK_NAMES = ['In turn', 'At random', 'The same one every time', 'Back and forth, sparse to busy'];
+export const DANCER_MODE_NAMES = ['Call and response', 'Solo, plays by itself'];
 
 export type DancerState = {
   enabled: boolean;
@@ -55,7 +56,15 @@ export type DancerState = {
   maxBars: number; // 1-4, the longest a phrase may run
   start: number; // 0 downbeat, 1 anywhere in the bar
   spaceMult: number; // 1-4, response space = this many times the bars the phrase takes
-  pick: number; // 0 in turn, 1 random, 2 the same one every time
+  pick: number; // 0 in turn, 1 random, 2 the same one every time, 3 back and forth through the pool
+  /** 0 call and response (a gap for the player), 1 solo (keeps playing by itself). */
+  mode: number;
+  /** Solo: whole bars of rest between phrases (0 = the next phrase follows straight on). */
+  restBars: number;
+  /** Solo: how much sparser the quietest phrases are than the busiest, in percent (they are picked from the pool). */
+  thin: number;
+  /** Solo: keep going through a scene change instead of starting again on its first bar. */
+  carryOn: boolean;
   seed: number; // change it to get different phrases
 };
 
@@ -74,6 +83,10 @@ export const defaultDancer: DancerState = {
   start: 1,
   spaceMult: 1,
   pick: 1,
+  mode: 0,
+  restBars: 1,
+  thin: 40,
+  carryOn: true,
   seed: 1,
 };
 
@@ -185,7 +198,11 @@ export function makePhrase(d: DancerState, mode: number, root: number, rng: () =
 export function makePhrases(d: DancerState, mode: number, root: number): Phrase[] {
   const out: Phrase[] = [];
   for (let i = 0; i < PHRASES_IN_POOL; i++) {
-    out.push(makePhrase(d, mode, root, mulberry32(Math.imul(Math.round(d.seed) + 1, 7919) + i * 104729)));
+    // In solo mode the pool runs from sparse to busy, so picking back and forth through it makes the
+    // playing thin out and fill in over time. The last phrase is always at the density you set.
+    const scale = d.mode === 1 ? 1 - (Math.max(0, Math.min(100, d.thin)) / 100) * (1 - i / (PHRASES_IN_POOL - 1)) : 1;
+    const dd = scale === 1 ? d : { ...d, density: d.density * scale };
+    out.push(makePhrase(dd, mode, root, mulberry32(Math.imul(Math.round(d.seed) + 1, 7919) + i * 104729)));
   }
   return out;
 }
@@ -195,14 +212,24 @@ export function cycleBars(span: number, spaceMult: number): number {
   return Math.max(1, span) * (1 + Math.max(1, spaceMult));
 }
 
+/** Bars from the start of one solo phrase to the start of the next: the phrase, then the rest. */
+export function soloBars(span: number, restBars: number): number {
+  return Math.max(1, span) + Math.max(0, Math.round(restBars));
+}
+
 const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 /** A sentence describing a phrase, so it can be checked without hearing it. */
-export function describePhrase(p: Phrase, spaceMult: number): string {
+export function describePhrase(p: Phrase, spaceMult: number, mode = 0, restBars = 1): string {
   if (p.events.length === 0) return 'No notes (the range is empty)';
   const notes = p.events.map((e) => NAMES[e[2] % 12]).join(' ');
   const first = p.events[0][0];
   const bars = p.span === 1 ? '1 bar' : `${p.span} bars`;
+  const start = `Starts on beat ${Math.floor(first / 4) + 1}${first % 4 ? ' and a bit' : ''}, takes ${bars}`;
+  if (mode === 1) {
+    const rest = Math.max(0, Math.round(restBars));
+    return `${notes}. ${start}, then ${rest === 0 ? 'the next phrase follows straight on' : `${rest} ${rest === 1 ? 'bar' : 'bars'} of rest`}`;
+  }
   const space = p.span * Math.max(1, spaceMult);
-  return `${notes}. Starts on beat ${Math.floor(first / 4) + 1}${first % 4 ? ' and a bit' : ''}, takes ${bars}, then ${space} ${space === 1 ? 'bar' : 'bars'} of space for you`;
+  return `${notes}. ${start}, then ${space} ${space === 1 ? 'bar' : 'bars'} of space for you`;
 }

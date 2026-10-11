@@ -161,8 +161,11 @@ struct MidiBedDancerPhrase: Decodable {
 struct MidiBedDancerConfig: Decodable {
   var enabled: Bool
   var channel: Int
+  var mode: Int             // 0 call and response, 1 solo (plays by itself)
   var spaceMult: Int
-  var pick: Int             // 0 in turn, 1 at random, 2 the same one every time
+  var restBars: Int         // solo: whole bars of rest between phrases
+  var carryOn: Bool         // solo: carry on through a scene change
+  var pick: Int             // 0 in turn, 1 at random, 2 the same one every time, 3 back and forth
   var phrases: [MidiBedDancerPhrase]
 }
 
@@ -1020,8 +1023,11 @@ final class MidiBedEngine {
     recurPlay = false
     recurScheduled = true
     recurTurn = 0
-    dancerWait = 0
-    dancerTurn = 0
+    // Solo mode with carry-on keeps its place through a scene change.
+    if !(cfg.dancer.mode == 1 && cfg.dancer.carryOn) {
+      dancerWait = 0
+      dancerTurn = 0
+    }
     advanceBarsLeft = cfg.advance.mode > 0 ? max(0, cfg.advance.bars) : 0
     advanceTarget = pickAdvanceTarget(cfg)
     advanceEntranceScheduled = false
@@ -1045,10 +1051,21 @@ final class MidiBedEngine {
       dancerTurn += 1
     } else if d.pick == 1 {
       idx = Int.random(in: 0..<n, using: &rng)
+    } else if d.pick == 3 {
+      // Back and forth through the pool (it runs from sparse to busy in solo mode).
+      let period = max(1, 2 * (n - 1))
+      let t = dancerTurn % period
+      idx = t < n ? t : period - t
+      dancerTurn += 1
     }
     let phrase = d.phrases[idx]
     // The phrase's own bars, then the response space (the same again, times spaceMult).
-    dancerWait = max(1, phrase.span) * (1 + max(1, d.spaceMult))
+    if d.mode == 1 {
+      // Solo: the phrase, then the rest (0 = the next phrase follows straight on).
+      dancerWait = max(1, phrase.span) + max(0, d.restBars)
+    } else {
+      dancerWait = max(1, phrase.span) * (1 + max(1, d.spaceMult))
+    }
     let stepDur = tickDur * Double(ticksPerStep)
     let ch = UInt8(max(0, min(15, d.channel)))
     for e in phrase.events where e.count >= 4 {

@@ -80,3 +80,40 @@ describe('mixer', () => {
     expect(JSON.parse(toEngineJson(defaultState)).mixer).toBeUndefined();
   });
 });
+
+describe('solo', () => {
+  const j = (s: object) => JSON.parse(toEngineJson({ ...defaultState, dancer: { ...defaultState.dancer, enabled: true }, ...s } as typeof defaultState));
+
+  it('solo silences every other part and plays the soloed one even if it was off', () => {
+    const e = j({ solo: 'pad', pad: { ...defaultState.pad, enabled: false } });
+    expect(e.pad.enabled).toBe(true);
+    expect(e.drone.enabled).toBe(false);
+    expect(e.dancer.enabled).toBe(false);
+    expect(e.dancer.phrases).toEqual([]);
+    expect(e.loops.enabled).toBe(false);
+    expect(e.drums.every((d: { enabled: boolean }) => !d.enabled)).toBe(true);
+  });
+
+  it('soloing the drums keeps each drum its own switch', () => {
+    const e = j({ solo: 'drums' });
+    expect(e.drums.filter((d: { enabled: boolean }) => d.enabled).length).toBeGreaterThan(0);
+    expect(e.pad.enabled).toBe(false);
+    expect(e.drone.enabled).toBe(false);
+  });
+
+  it('with no solo the normal switches apply, and solo is never restored from saved settings', () => {
+    expect(j({}).drone.enabled).toBe(true);
+    expect(migrateState({ solo: 'drums' }).solo).toBeNull();
+    expect(defaultState.solo).toBeNull();
+  });
+
+  it('a capital letter or shift solos that part; O then a letter, and X, are the no-shift way', () => {
+    expect(actionForKey('d', true)).toEqual({ type: 'solo', layer: 'drums' });
+    expect(actionForKey('D')).toEqual({ type: 'solo', layer: 'drums' });
+    expect(actionForKey('d')).toEqual({ type: 'layer', layer: 'drums' });
+    expect(actionForKey('o')).toEqual({ type: 'armSolo' });
+    expect(actionForKey('x')).toEqual({ type: 'clearSolo' });
+    // shift on a number is still the scene
+    expect(actionForKey('2', true)).toEqual({ type: 'scene', index: 1 });
+  });
+});

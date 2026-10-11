@@ -15,7 +15,10 @@ export type ShortcutAction =
   | { type: 'playStop' }
   | { type: 'freeze' }
   | { type: 'panic' }
-  | { type: 'layer'; layer: Layer };
+  | { type: 'layer'; layer: Layer }
+  | { type: 'solo'; layer: Layer }
+  | { type: 'armSolo' }
+  | { type: 'clearSolo' };
 
 const LAYER_KEYS: Record<string, Layer> = { r: 'bass', c: 'pad', m: 'dancer', d: 'drums', l: 'loops' };
 
@@ -27,9 +30,17 @@ export const LAYER_NAMES: Record<Layer, string> = {
   loops: 'Loops',
 };
 
-export function actionForKey(raw: string): ShortcutAction | null {
-  const key = raw.trim().toLowerCase();
+/**
+ * `shift` is true when the key came with Shift (or as a capital). A capital layer letter solos that
+ * layer instead of switching it on or off. O arms a solo for the next layer key (for a keyboard
+ * with no Shift), and X clears the solo.
+ */
+export function actionForKey(raw: string, shift = false): ShortcutAction | null {
+  const trimmed = raw.trim();
+  const key = trimmed.toLowerCase();
   if (key.length !== 1) return null;
+  const capital = shift || (trimmed !== key && trimmed === trimmed.toUpperCase());
+  if (capital && LAYER_KEYS[key]) return { type: 'solo', layer: LAYER_KEYS[key] };
   if (key >= '1' && key <= '9') return { type: 'scene', index: Number(key) - 1 };
   switch (key) {
     case 'n':
@@ -46,6 +57,10 @@ export function actionForKey(raw: string): ShortcutAction | null {
       return { type: 'freeze' };
     case 'p':
       return { type: 'panic' };
+    case 'o':
+      return { type: 'armSolo' };
+    case 'x':
+      return { type: 'clearSolo' };
     default:
       return LAYER_KEYS[key] ? { type: 'layer', layer: LAYER_KEYS[key] } : null;
   }
@@ -60,4 +75,6 @@ export const SHORTCUT_HELP: string[] = [
   'F: freeze on or off',
   'P: all notes off',
   'D: drums on or off, C: chord pad, R: bass drone (root), M: MidiDancer, L: loops',
+  'A capital letter (or Shift) solos that part: Shift D hears only the drums. Pressing it again clears the solo.',
+  'No capitals? Press O, then the part letter, to solo it. X clears the solo.',
 ];

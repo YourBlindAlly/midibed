@@ -52,8 +52,11 @@ class MidiBedPagerView: ExpoView {
       if key.modifierFlags.contains(.command) || key.modifierFlags.contains(.control) || key.modifierFlags.contains(.alternate) {
         continue
       }
-      let text = key.charactersIgnoringModifiers.lowercased()
-      if !text.isEmpty { onKey(["key": text, "keyCode": Int(key.keyCode.rawValue)]) }
+      let plain = key.charactersIgnoringModifiers
+      let text = plain.lowercased()
+      // A capital: Shift held (or caps lock), or the typed character is not the plain one.
+      let shift = key.modifierFlags.contains(.shift) || (key.characters != plain && key.characters.lowercased() == text)
+      if !text.isEmpty { onKey(["key": text, "keyCode": Int(key.keyCode.rawValue), "shift": shift]) }
     }
     super.pressesBegan(presses, with: event)
   }
