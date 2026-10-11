@@ -40,6 +40,7 @@ import {
   toEngineJson,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
+import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, actionForKey } from './src/shortcuts';
 import { levelText, mixerMessages } from './src/mixer';
 import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
@@ -464,6 +465,14 @@ export default function App() {
     if (programTimers.current[i]) clearTimeout(programTimers.current[i]);
     programTimers.current[i] = setTimeout(() => sendSound(next), 200);
   };
+
+  // The built-in bass voice: send its on/off and settings whenever they change (and at Play).
+  const bassJson = bassVoiceJson(state.bassVoice);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setBassVoice(bassJson), 80);
+    return () => clearTimeout(t);
+  }, [bassJson, ready]);
 
   // Mixer: send every part's level as a volume control (only when 'Send levels' is on).
   const sendMixerLevels = () => {
@@ -1018,6 +1027,66 @@ export default function App() {
               )}
           </Section>
 
+          {part === 'bass' && (
+            <>
+              <Section title="Bass drone: built-in bass voice">
+                <Text style={styles.note}>
+                  A bass synth inside MidiBed, in the style of the Moog Taurus and the Cherry Audio Lowdown. Switch it on and the bass drone plays this sound through MidiBed's own audio, with no other app to start. Filter movement on the bass channel moves its cutoff and resonance. It needs the built-in test sound switched on, on the Setup tab.
+                </Text>
+                <Toggle label="Use the built-in bass voice" value={state.bassVoice.enabled} onChange={(v) => patch({ bassVoice: { ...state.bassVoice, enabled: v } })} />
+                <Toggle
+                  label="Built-in sound plays only the bass voice"
+                  value={state.bassVoice.exclusive}
+                  onChange={(v) => patch({ bassVoice: { ...state.bassVoice, exclusive: v } })}
+                  hint="Silences the built-in pad, drums and other channels, so only the bass drone is heard from MidiBed's own sound. Use it when other apps play the rest."
+                />
+                <Stepper
+                  label="Bass voice preset"
+                  value={state.bassVoice.preset}
+                  onChange={(v) => patch({ bassVoice: applyBassPreset(state.bassVoice, v) })}
+                  min={0}
+                  max={BASS_PRESETS.length - 1}
+                  format={(v) => BASS_PRESETS[v].name}
+                  hint="Sets every bass voice setting at once. Changing any setting yourself makes it Custom."
+                />
+              </Section>
+              {(
+                [
+                  ['oscillators', 'Bass voice: oscillators'],
+                  ['filter', 'Bass voice: filter'],
+                  ['envelopes', 'Bass voice: envelopes'],
+                  ['movement', 'Bass voice: movement and output'],
+                ] as const
+              ).map(([group, title]) => (
+                <Section key={group} title={title}>
+                  {BASS_PARAMS.filter((d) => d.group === group).map((d: BassParamDef) =>
+                    d.unit === 'toggle' ? (
+                      <Toggle
+                        key={d.key}
+                        label={d.label}
+                        value={state.bassVoice.v[d.key] >= 1}
+                        onChange={(v) => patch({ bassVoice: setBassParam(state.bassVoice, d.key, v ? 1 : 0) })}
+                        hint={d.hint}
+                      />
+                    ) : (
+                      <Stepper
+                        key={d.key}
+                        label={d.label}
+                        value={state.bassVoice.v[d.key]}
+                        onChange={(v) => patch({ bassVoice: setBassParam(state.bassVoice, d.key, v) })}
+                        min={d.min}
+                        max={d.max}
+                        step={d.step}
+                        bigStep={d.bigStep}
+                        format={(v) => paramText(d, v)}
+                        hint={d.hint}
+                      />
+                    ),
+                  )}
+                </Section>
+              ))}
+            </>
+          )}
           {soundSlot !== undefined && (
             <Section title={`${partName}: sound`}>
               <Text style={styles.note}>

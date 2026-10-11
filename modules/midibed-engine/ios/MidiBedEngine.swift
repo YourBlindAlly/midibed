@@ -412,6 +412,7 @@ final class MidiBedEngine {
     synth.enabled = decoded.synthOut
     syncWanderers()
     rebuildChannelPorts(decoded)
+    synth.bassChannel = decoded.drone.channel
     updateIdleClock()
     if running {
       reconcileDrone()
@@ -419,6 +420,24 @@ final class MidiBedEngine {
       // this; starting it here too would double-trigger it.
       if !atBar || !padOn(decoded) { reconcilePadEnabled() }
       reconcileLoops(decoded)
+    }
+  }
+
+  /// The built-in bass voice: whether it is on, whether the built-in sound plays only it, and its settings.
+  /// Kept out of the main configuration so editing a knob never re-queues a scene.
+  func setBassVoice(json: String) {
+    struct BassVoiceConfig: Decodable {
+      var enabled: Bool
+      var exclusive: Bool
+      var values: [Double]
+    }
+    guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(BassVoiceConfig.self, from: data) else {
+      NSLog("MidiBedEngine: could not decode bass voice")
+      return
+    }
+    queue.async {
+      if let ch = self.config?.drone.channel { self.synth.bassChannel = ch }
+      self.synth.configureBass(on: c.enabled, exclusive: c.exclusive, values: c.values.map { Float($0) })
     }
   }
 

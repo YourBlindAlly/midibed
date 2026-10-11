@@ -16,6 +16,7 @@ import {
 } from './transitions';
 import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice, getProfile } from './profiles';
+import { BassVoiceState, defaultBassVoice } from './bassvoice';
 import { MixerState, defaultMixer } from './mixer';
 import { Favorite, addFav, favsFromPrograms, parseFavMap, stringifyFavMap } from './soundFavs';
 
@@ -161,6 +162,8 @@ export type LoopsState = {
 export type PortsState = { bass: boolean; pad: boolean; dancer: boolean; drums: boolean };
 
 export type BedState = {
+  /** The built-in bass voice (see bassvoice.ts). Global. */
+  bassVoice: BassVoiceState;
   /** Hear only this part. Never saved as on (like Freeze): it silences the others by the normal fades. */
   solo: Layer | null;
   /** Per-part levels sent as volume control changes (see mixer.ts). Global. */
@@ -472,6 +475,7 @@ function nextJourneyNumber(list: Journey[]): number {
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
   keyOffset: 0,
+  bassVoice: defaultBassVoice,
   solo: null,
   mixer: defaultMixer,
   shortcuts: true,

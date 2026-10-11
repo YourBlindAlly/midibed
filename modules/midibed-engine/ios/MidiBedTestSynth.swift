@@ -87,6 +87,22 @@ final class MidiBedTestSynth {
   /// one buffer is harmless, so no lock.
   var enabled: Bool = true
 
+  // The bass voice (BassVoice.swift): when on, notes on `bassChannel` play it instead of a pad voice.
+  // With `bassExclusive` the built-in sound plays ONLY that channel (no pads, drums or other channels).
+  private let bass = BassVoice()
+  var bassOn = false
+  var bassExclusive = false
+  var bassChannel = -1
+
+  /// Control side: switch the bass voice on or off and give it its settings (BassParam order).
+  func configureBass(on: Bool, exclusive: Bool, values: [Float]) {
+    let wasOn = bassOn
+    for i in 0..<min(values.count, BassParam.count) { bass.params[i] = values[i] }
+    bassExclusive = exclusive
+    bassOn = on
+    if wasOn && !on { post(status: 0xB0 | UInt8(max(0, min(15, bassChannel))), d1: 123, d2: 0) }
+  }
+
   init() {
     lock = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
     lock.initialize(to: os_unfair_lock_s())
@@ -129,6 +145,7 @@ final class MidiBedTestSynth {
     let format = engine.outputNode.inputFormat(forBus: 0)
     sampleRate = Float(format.sampleRate > 0 ? format.sampleRate : 44100)
     let renderFormat = AVAudioFormat(standardFormatWithSampleRate: Double(sampleRate), channels: 2)
+    bass.setSampleRate(sampleRate)
 
     let node = AVAudioSourceNode(format: renderFormat ?? format) { [unowned self] _, _, frameCount, audioBufferList -> OSStatus in
       self.render(frameCount: Int(frameCount), bufferList: audioBufferList)
@@ -247,20 +264,33 @@ final class MidiBedTestSynth {
   private func handle(_ e: Event) {
     let type = e.status & 0xF0
     let channel = e.status & 0x0F
+    let isBass = bassOn && Int(channel) == bassChannel
+    // Exclusive: only the bass voice's channel plays; everything else is ignored (controls still apply).
+    let muted = bassOn && bassExclusive && !isBass
     switch type {
     case 0x90 where e.d2 > 0:
-      noteOn(channel: channel, note: Int(e.d1), velocity: Float(e.d2) / 127)
+      if muted { return }
+      if isBass {
+        bass.noteOn(note: Int(e.d1), velocity: Float(e.d2) / 127)
+      } else {
+        noteOn(channel: channel, note: Int(e.d1), velocity: Float(e.d2) / 127)
+      }
     case 0x80, 0x90:
-      noteOff(channel: channel, note: Int(e.d1))
+      if isBass { bass.noteOff(note: Int(e.d1)) } else { noteOff(channel: channel, note: Int(e.d1)) }
     case 0xB0:
       if e.d1 == 74 {
         if channel == 9 { drumCutoffCC = Float(e.d2) } else { cutoffCC = Float(e.d2) }
+        if isBass { bass.cutoffCC = Float(e.d2) }
       }
       if e.d1 == 71 {
         if channel == 9 { drumResonanceCC = Float(e.d2) } else { resonanceCC = Float(e.d2) }
+        if isBass { bass.resonanceCC = Float(e.d2) }
       }
       if e.d1 == 7 || e.d1 == 11 { expTarget[Int(channel)] = Float(e.d2) / 127 }
-      if e.d1 == 123 || e.d1 == 120 { allNotesOff() }
+      if e.d1 == 123 || e.d1 == 120 {
+        allNotesOff()
+        bass.allNotesOff()
+      }
     default:
       break
     }
@@ -553,6 +583,10 @@ final class MidiBedTestSynth {
       drumIc1 = 2 * dv1 - drumIc1
       drumIc2 = 2 * dv2 - drumIc2
       out += dv2
+
+      if bassOn, bassChannel >= 0, bassChannel < 16 {
+        out += bass.nextSample() * 0.85 * expCurrent[bassChannel]
+      }
 
       // The built-in test sound switch silences the instruments, but NOT the
       // transition noise: you want that even when another app makes the music.
