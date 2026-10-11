@@ -831,6 +831,12 @@ export default function App() {
                 );
               })}
             </View>
+            <Toggle
+              label="Freeze"
+              value={state.frozen}
+              onChange={(v) => patch({ frozen: v })}
+              hint="Holds the bed as it is: the scene stops moving on by itself, and the breathing and the recurring sound pause. The chords and the filters keep going. Switch it off to carry on."
+            />
             <Text style={styles.note}>
               {queuedScene !== null
                 ? `Scene ${state.activeScene + 1} starts at the next bar`
@@ -894,26 +900,20 @@ export default function App() {
               Quick on and off for each part, and solo to hear one part alone. Switching one fades it in or out using your fade times. On and off is saved in each scene; solo is never saved.
             </Text>
             <Toggle label="Bass drone layer" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
+            <Toggle label="Solo bass drone" value={state.solo === 'bass'} onChange={(v) => setSolo(v ? 'bass' : null)} hint="Hear only the bass drone. The others fade out and come back when you clear the solo" />
             <Toggle label="Chord pad layer" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
+            <Toggle label="Solo chord pad" value={state.solo === 'pad'} onChange={(v) => setSolo(v ? 'pad' : null)} />
+            <Toggle label="MidiDancer layer" value={state.dancer.enabled} onChange={(v) => patchDancer({ enabled: v })} />
+            <Toggle label="Solo MidiDancer" value={state.solo === 'dancer'} onChange={(v) => setSolo(v ? 'dancer' : null)} />
             <Toggle
               label="Percussion layer"
               value={state.percussion}
               onChange={(v) => patch({ percussion: v })}
               hint="Turns all the drums on or off together. Each drum keeps its own setting"
             />
-            <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
-            <Toggle label="MidiDancer layer" value={state.dancer.enabled} onChange={(v) => patchDancer({ enabled: v })} />
-            <Toggle label="Solo bass drone" value={state.solo === 'bass'} onChange={(v) => setSolo(v ? 'bass' : null)} hint="Hear only the bass drone. The others fade out and come back when you clear the solo" />
-            <Toggle label="Solo chord pad" value={state.solo === 'pad'} onChange={(v) => setSolo(v ? 'pad' : null)} />
             <Toggle label="Solo drums" value={state.solo === 'drums'} onChange={(v) => setSolo(v ? 'drums' : null)} />
+            <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
             <Toggle label="Solo loops" value={state.solo === 'loops'} onChange={(v) => setSolo(v ? 'loops' : null)} />
-            <Toggle label="Solo MidiDancer" value={state.solo === 'dancer'} onChange={(v) => setSolo(v ? 'dancer' : null)} />
-            <Toggle
-              label="Freeze"
-              value={state.frozen}
-              onChange={(v) => patch({ frozen: v })}
-              hint="Holds the bed as it is: the scene stops moving on by itself, and the breathing and the recurring sound pause. The chords and the filters keep going. Switch it off to carry on."
-            />
           </Section>
 
           <Section title="Tempo and swing">
