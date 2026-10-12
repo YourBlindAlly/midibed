@@ -200,3 +200,41 @@ describe('solo mode', () => {
     expect(s.dancer).toMatchObject({ enabled: true, density: 70, mode: 0, restBars: 1, thin: 40, carryOn: true });
   });
 });
+
+describe('legato and humanize', () => {
+  const d = { ...defaultDancer, enabled: true };
+
+  it('are saved with defaults for older settings', () => {
+    expect(defaultDancer.legato).toBe(50);
+    expect(defaultDancer.humanize).toBe(30);
+    expect(migrateState({ dancer: { enabled: true } }).dancer).toMatchObject({ legato: 50, humanize: 30 });
+  });
+
+  it('legato is sent to the engine', () => {
+    const on = { ...defaultState, dancer: { ...defaultState.dancer, enabled: true, legato: 80 } };
+    expect(JSON.parse(toEngineJson(on)).dancer.legato).toBe(80);
+  });
+
+  it('humanize varies the velocities, and with zero changes nothing', () => {
+    const spread = (h: number) => {
+      const vs = makePhrases({ ...d, humanize: h, density: 100, maxBars: 4, rests: 0 }, 1, ROOT).flatMap((p) => p.events.map((e) => e[3]));
+      return Math.max(...vs) - Math.min(...vs);
+    };
+    expect(spread(100)).toBeGreaterThan(spread(0));
+    const a = makePhrases({ ...d, humanize: 0 }, 1, ROOT);
+    const b = makePhrases({ ...d, humanize: 0 }, 1, ROOT);
+    expect(a).toEqual(b);
+    makePhrases({ ...d, humanize: 100 }, 1, ROOT).forEach((p) => p.events.forEach((e) => {
+      expect(e[3]).toBeGreaterThanOrEqual(1);
+      expect(e[3]).toBeLessThanOrEqual(127);
+    }));
+  });
+
+  it('humanize does not move notes or change their lengths', () => {
+    const plain = makePhrases({ ...d, humanize: 0 }, 1, ROOT);
+    const human = makePhrases({ ...d, humanize: 100 }, 1, ROOT);
+    plain.forEach((p, i) => {
+      expect(human[i].events.map((e) => e.slice(0, 3))).toEqual(p.events.map((e) => e.slice(0, 3)));
+    });
+  });
+});

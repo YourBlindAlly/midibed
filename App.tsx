@@ -1232,6 +1232,8 @@ export default function App() {
             <Stepper label="Range" value={state.dancer.octaves} onChange={(v) => patchDancer({ octaves: v })} min={1} max={3} format={(v) => `${v} ${v === 1 ? 'octave' : 'octaves'}`} />
             <Stepper label="Register (centre note)" value={state.dancer.register} onChange={(v) => patchDancer({ register: v })} min={36} max={96} bigStep={12} format={noteName} />
             <Stepper label="MidiDancer velocity" value={state.dancer.velocity} onChange={(v) => patchDancer({ velocity: v })} min={1} max={127} bigStep={10} />
+            <Stepper label="Legato" value={state.dancer.legato} onChange={(v) => patchDancer({ legato: v })} min={0} max={100} step={10} format={(v) => (v === 0 ? 'none, notes are separate' : v === 100 ? 'full, each note holds into the next' : `${v} percent joined`)} hint="Joins notes that follow straight on from one another, so a mono or sampled sound connects them instead of breathing between them" />
+            <Stepper label="Humanize" value={state.dancer.humanize} onChange={(v) => patchDancer({ humanize: v })} min={0} max={100} step={10} format={(v) => (v === 0 ? 'none' : `${v} percent`)} hint="Varies how hard each note is played, with a gentle swell across the phrase, like breath pressure" />
             <Stepper label="Longest phrase" value={state.dancer.maxBars} onChange={(v) => patchDancer({ maxBars: v })} min={1} max={4} format={(v) => `${v} ${v === 1 ? 'bar' : 'bars'}`} />
             <Stepper label="Phrase starts" value={state.dancer.start} onChange={(v) => patchDancer({ start: v })} min={0} max={START_NAMES.length - 1} format={(v) => START_NAMES[v]} />
             {state.dancer.mode === 0 ? (

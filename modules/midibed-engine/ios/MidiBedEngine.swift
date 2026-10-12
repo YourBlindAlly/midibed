@@ -165,6 +165,7 @@ struct MidiBedDancerConfig: Decodable {
   var spaceMult: Int
   var restBars: Int         // solo: whole bars of rest between phrases
   var carryOn: Bool         // solo: carry on through a scene change
+  var legato: Int           // 0...100: how much consecutive notes are joined
   var pick: Int             // 0 in turn, 1 at random, 2 the same one every time, 3 back and forth
   var phrases: [MidiBedDancerPhrase]
 }
@@ -1087,13 +1088,23 @@ final class MidiBedEngine {
     }
     let stepDur = tickDur * Double(ticksPerStep)
     let ch = UInt8(max(0, min(15, d.channel)))
-    for e in phrase.events where e.count >= 4 {
-      let start = time + Double(max(0, e[0])) * stepDur
+    let legato = Double(max(0, min(100, d.legato))) / 100
+    let events = phrase.events.filter { $0.count >= 4 }
+    for (i, e) in events.enumerated() {
+      let startStep = max(0, e[0])
+      let start = time + Double(startStep) * stepDur
       let len = Double(max(1, e[1]))
       let note = UInt8(max(0, min(127, e[2])))
       let vel = UInt8(max(1, min(127, e[3])))
+      var off = start + len * stepDur * 0.92
+      // Legato: when the next note follows straight on, let this one overlap it a little, so a mono sound
+      // joins them and a sampled instrument does not breathe between them.
+      if legato > 0, i + 1 < events.count, events[i + 1][0] == startStep + Int(len) {
+        let joined = start + len * stepDur + 0.03
+        off += (joined - off) * legato
+      }
       pending.append(Pending(time: start, status: 0x90 | ch, d1: note, d2: vel))
-      pending.append(Pending(time: start + len * stepDur * 0.92, status: 0x80 | ch, d1: note, d2: 0))
+      pending.append(Pending(time: off, status: 0x80 | ch, d1: note, d2: 0))
     }
   }
 

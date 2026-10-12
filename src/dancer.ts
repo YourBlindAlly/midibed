@@ -65,6 +65,10 @@ export type DancerState = {
   thin: number;
   /** Solo: keep going through a scene change instead of starting again on its first bar. */
   carryOn: boolean;
+  /** 0-100: how much consecutive notes are joined (0 detached, 100 each note holds until the next begins). */
+  legato: number;
+  /** 0-100: how much the loudness varies from note to note, like breath pressure. */
+  humanize: number;
   seed: number; // change it to get different phrases
 };
 
@@ -87,6 +91,8 @@ export const defaultDancer: DancerState = {
   restBars: 1,
   thin: 40,
   carryOn: true,
+  legato: 50,
+  humanize: 30,
   seed: 1,
 };
 
@@ -189,6 +195,19 @@ export function makePhrase(d: DancerState, mode: number, root: number, rng: () =
     if (choices.length > 0) {
       last[2] = choices.reduce((best, n) => (Math.abs(n - last[2]) < Math.abs(best - last[2]) ? n : best), choices[0]);
     }
+  }
+
+  // Humanize: a breath-like swell across the phrase plus a little per-note variation. With zero it
+  // changes nothing, so older phrases are unchanged.
+  const h = clamp(d.humanize ?? 0, 0, 100) / 100;
+  if (h > 0) {
+    const n = events.length;
+    events.forEach((e, i) => {
+      const pos = n > 1 ? i / (n - 1) : 0.5;
+      const breath = Math.sin(Math.PI * pos); // 0 at the ends, 1 in the middle
+      const swell = 1 - h * 0.25 + h * 0.35 * breath;
+      e[3] = clamp(Math.round(e[3] * swell + (rng() - 0.5) * h * 30), 1, 127);
+    });
   }
 
   return { span: Math.max(1, Math.ceil(end / 16)), events };

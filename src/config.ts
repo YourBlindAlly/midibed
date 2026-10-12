@@ -919,6 +919,7 @@ export function toEngineJson(s: BedState): string {
         spaceMult: s.dancer.spaceMult,
         restBars: s.dancer.restBars,
         carryOn: s.dancer.carryOn,
+        legato: s.dancer.legato,
         pick: s.dancer.pick,
         phrases: on ? makePhrases(s.dancer, s.harmony.mode, keyRoot(s)) : [],
       };

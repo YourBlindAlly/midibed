@@ -14,7 +14,7 @@ export type BassParamDef = {
   max: number;
   step: number;
   bigStep?: number;
-  unit: 'pct' | 'ms' | 'cents' | 'int' | 'hz10' | 'toggle';
+  unit: 'pct' | 'ms' | 'cents' | 'int' | 'hz10' | 'hz' | 'toggle';
   def: number;
   hint?: string;
   /** Screen value to the number the DSP uses. */
@@ -55,6 +55,9 @@ export const BASS_PARAMS: BassParamDef[] = [
   { key: 'velocity', label: 'Velocity response', group: 'movement', min: 0, max: 100, step: 10, unit: 'pct', def: 50, toDsp: pct },
   { key: 'weight', label: 'Low end weight', group: 'movement', min: 0, max: 100, step: 5, unit: 'pct', def: 30, toDsp: pct, hint: 'Adds body below about 120 Hz' },
   { key: 'level', label: 'Bass voice level', group: 'movement', min: 0, max: 100, step: 5, unit: 'pct', def: 70, toDsp: pct },
+  { key: 'moveDepth', label: 'Filter movement depth', group: 'filter', min: 0, max: 100, step: 5, unit: 'pct', def: 40, toDsp: pct, hint: 'How far the filter movement on the Parts tab swings this voice. Lower keeps the bass from disappearing when the filter dips' },
+  { key: 'floorHz', label: 'Filter floor', group: 'filter', min: 20, max: 500, step: 10, bigStep: 50, unit: 'hz', def: 120, toDsp: same, hint: 'The cutoff never closes below this, so the bass stays audible' },
+  { key: 'subBypass', label: 'Sub bypasses the filter', group: 'oscillators', min: 0, max: 100, step: 10, unit: 'pct', def: 70, toDsp: pct, hint: 'How much of the sub oscillator skips the filter, so the low note stays when the filter closes' },
 ];
 
 export const BASS_PARAM_COUNT = BASS_PARAMS.length;
@@ -76,27 +79,27 @@ export const BASS_PRESETS: Preset[] = [
   { name: 'Custom', values: {} },
   {
     name: 'Taurus pedal',
-    values: { waveA: 0, waveB: 0, octaveB: 0, detuneB: 9, mixB: 50, sub: 70, pulseWidth: 50, cutoff: 28, resonance: 15, drive: 35, keyTrack: 20, filterEnv: 25, fAttack: 5, fDecay: 600, fSustain: 30, fRelease: 600, aAttack: 8, aDecay: 300, aSustain: 95, aRelease: 700, glide: 0, legato: 1, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 40, weight: 55, level: 70 },
+    values: { waveA: 0, waveB: 0, octaveB: 0, detuneB: 9, mixB: 50, sub: 70, pulseWidth: 50, cutoff: 28, resonance: 15, drive: 35, keyTrack: 20, filterEnv: 25, fAttack: 5, fDecay: 600, fSustain: 30, fRelease: 600, aAttack: 8, aDecay: 300, aSustain: 95, aRelease: 700, glide: 0, legato: 1, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 40, weight: 55, level: 70, moveDepth: 40, floorHz: 120, subBypass: 70 },
   },
   {
     name: 'Lowdown growl',
-    values: { waveA: 0, waveB: 1, octaveB: -1, detuneB: 5, mixB: 55, sub: 40, pulseWidth: 35, cutoff: 30, resonance: 40, drive: 60, keyTrack: 40, filterEnv: 55, fAttack: 3, fDecay: 250, fSustain: 15, fRelease: 250, aAttack: 5, aDecay: 180, aSustain: 80, aRelease: 300, glide: 40, legato: 1, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 70, weight: 40, level: 70 },
+    values: { waveA: 0, waveB: 1, octaveB: -1, detuneB: 5, mixB: 55, sub: 40, pulseWidth: 35, cutoff: 30, resonance: 40, drive: 60, keyTrack: 40, filterEnv: 55, fAttack: 3, fDecay: 250, fSustain: 15, fRelease: 250, aAttack: 5, aDecay: 180, aSustain: 80, aRelease: 300, glide: 40, legato: 1, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 70, weight: 40, level: 70, moveDepth: 40, floorHz: 120, subBypass: 70 },
   },
   {
     name: 'Deep sub',
-    values: { waveA: 2, waveB: 2, octaveB: 0, detuneB: 0, mixB: 0, sub: 90, pulseWidth: 50, cutoff: 20, resonance: 0, drive: 10, keyTrack: 0, filterEnv: 10, fAttack: 5, fDecay: 300, fSustain: 50, fRelease: 300, aAttack: 15, aDecay: 200, aSustain: 100, aRelease: 400, glide: 0, legato: 1, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 30, weight: 60, level: 75 },
+    values: { waveA: 2, waveB: 2, octaveB: 0, detuneB: 0, mixB: 0, sub: 90, pulseWidth: 50, cutoff: 20, resonance: 0, drive: 10, keyTrack: 0, filterEnv: 10, fAttack: 5, fDecay: 300, fSustain: 50, fRelease: 300, aAttack: 15, aDecay: 200, aSustain: 100, aRelease: 400, glide: 0, legato: 1, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 30, weight: 60, level: 75, moveDepth: 25, floorHz: 80, subBypass: 90 },
   },
   {
     name: 'Pluck',
-    values: { waveA: 0, waveB: 1, octaveB: 0, detuneB: 6, mixB: 40, sub: 50, pulseWidth: 40, cutoff: 20, resonance: 30, drive: 30, keyTrack: 30, filterEnv: 70, fAttack: 2, fDecay: 180, fSustain: 0, fRelease: 200, aAttack: 2, aDecay: 260, aSustain: 0, aRelease: 200, glide: 0, legato: 0, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 70, weight: 40, level: 75 },
+    values: { waveA: 0, waveB: 1, octaveB: 0, detuneB: 6, mixB: 40, sub: 50, pulseWidth: 40, cutoff: 20, resonance: 30, drive: 30, keyTrack: 30, filterEnv: 70, fAttack: 2, fDecay: 180, fSustain: 0, fRelease: 200, aAttack: 2, aDecay: 260, aSustain: 0, aRelease: 200, glide: 0, legato: 0, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 70, weight: 40, level: 75, moveDepth: 40, floorHz: 120, subBypass: 70 },
   },
   {
     name: 'Warm drone',
-    values: { waveA: 0, waveB: 2, octaveB: 0, detuneB: 6, mixB: 45, sub: 60, pulseWidth: 50, cutoff: 30, resonance: 20, drive: 20, keyTrack: 20, filterEnv: 20, fAttack: 800, fDecay: 1500, fSustain: 60, fRelease: 1500, aAttack: 600, aDecay: 800, aSustain: 100, aRelease: 1500, glide: 150, legato: 1, lfoRate: 8, lfoFilter: 25, lfoPitch: 0, velocity: 20, weight: 45, level: 70 },
+    values: { waveA: 0, waveB: 2, octaveB: 0, detuneB: 6, mixB: 45, sub: 60, pulseWidth: 50, cutoff: 30, resonance: 20, drive: 20, keyTrack: 20, filterEnv: 20, fAttack: 800, fDecay: 1500, fSustain: 60, fRelease: 1500, aAttack: 600, aDecay: 800, aSustain: 100, aRelease: 1500, glide: 150, legato: 1, lfoRate: 8, lfoFilter: 25, lfoPitch: 0, velocity: 20, weight: 45, level: 70, moveDepth: 40, floorHz: 120, subBypass: 70 },
   },
   {
     name: 'Acid squelch',
-    values: { waveA: 0, waveB: 0, octaveB: 0, detuneB: 0, mixB: 0, sub: 0, pulseWidth: 50, cutoff: 15, resonance: 75, drive: 40, keyTrack: 30, filterEnv: 80, fAttack: 2, fDecay: 200, fSustain: 0, fRelease: 150, aAttack: 2, aDecay: 200, aSustain: 80, aRelease: 120, glide: 60, legato: 1, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 60, weight: 20, level: 65 },
+    values: { waveA: 0, waveB: 0, octaveB: 0, detuneB: 0, mixB: 0, sub: 0, pulseWidth: 50, cutoff: 15, resonance: 75, drive: 40, keyTrack: 30, filterEnv: 80, fAttack: 2, fDecay: 200, fSustain: 0, fRelease: 150, aAttack: 2, aDecay: 200, aSustain: 80, aRelease: 120, glide: 60, legato: 1, lfoRate: 20, lfoFilter: 0, lfoPitch: 0, velocity: 60, weight: 20, level: 65, moveDepth: 60, floorHz: 60, subBypass: 0 },
   },
 ];
 
@@ -148,6 +151,8 @@ export function paramText(def: BassParamDef, value: number): string {
       return `${value} cents`;
     case 'hz10':
       return `${(value / 10).toFixed(1)} hertz`;
+    case 'hz':
+      return `${value} hertz`;
     case 'toggle':
       return value ? 'on' : 'off';
     default:

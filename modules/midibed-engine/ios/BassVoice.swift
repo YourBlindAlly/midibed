@@ -43,8 +43,11 @@ enum BassParam: Int {
   case velocity        // 0...1, how much velocity matters
   case weight          // 0...1, low-end boost
   case level           // 0...1
+  case moveDepth       // 0...1, how far CC 74 moves the cutoff: 0...4 octaves either way (0.4 = 1.6)
+  case floorHz         // 20...500 Hz, the cutoff never closes below this
+  case subBypass       // 0...1, how much of the sub skips the filter (so it stays when the filter closes)
 
-  static let count = 28
+  static let count = 31
 
   /// A mild Taurus-like starting point: saw + pulse, a little detune, sub, closed-ish filter that opens a
   /// touch on each note.
@@ -54,6 +57,7 @@ enum BassParam: Int {
     0.005, 0.35, 0.2, 0.4,
     0.01, 0.2, 0.9, 0.5,
     0, 1, 2, 0, 0, 0.5, 0.3, 0.7,
+    0.4, 120, 0.7,
   ]
 }
 
@@ -62,8 +66,8 @@ final class BassVoice {
   /// Written by the control side. `BassParam.count` floats.
   let params: UnsafeMutablePointer<Float>
 
-  /// Controllers (MIDI 0...127): CC 74 moves the cutoff by up to +-3 octaves around its knob, CC 71 adds up
-  /// to +-0.25 of resonance. 64 is neutral, so a synth that never receives them sounds as set.
+  /// Controllers (MIDI 0...127): CC 74 moves the cutoff around its knob by up to +-`moveDepth` x 4 octaves, CC 71
+  /// adds up to +-0.25 of resonance. 64 is neutral, so a synth that never receives them sounds as set.
   var cutoffCC: Float = 64
   var resonanceCC: Float = 64
 
@@ -284,7 +288,9 @@ final class BassVoice {
     let oscA = oscillator(wave: Int(p(.waveA)), phase: phA, dt: dtA, width: width)
     let oscB = oscillator(wave: Int(p(.waveB)), phase: phB, dt: dtB, width: width)
     let mix = p(.mixB)
-    var x = (oscA * (1 - mix) + oscB * mix) * 0.6 + sinf(2 * Float.pi * phS) * p(.sub) * 0.6
+    let subWave = sinf(2 * Float.pi * phS)
+    let bypass = max(0, min(1, p(.subBypass)))
+    var x = (oscA * (1 - mix) + oscB * mix) * 0.6 + subWave * p(.sub) * (1 - bypass) * 0.6
 
     // Envelopes
     stepEnvelope(&fStage, &fEnv, attackC: fAttackC, decayC: fDecayC, sustain: p(.fSustain), releaseC: fReleaseC)
@@ -296,9 +302,9 @@ final class BassVoice {
     var octaves = p(.cutoff) * 8
     octaves += fEnv * velGain * p(.filterEnv) * 5
     octaves += p(.keyTrack) * (curNote - 36) / 12
-    octaves += (cutoffCC - 64) / 64 * 3
+    octaves += (cutoffCC - 64) / 64 * p(.moveDepth) * 4
     octaves += lfo * p(.lfoFilter) * 2
-    let fc = min(max(30 * exp2f(octaves), 20), 0.42 * sr)
+    let fc = min(max(30 * exp2f(octaves), max(20, p(.floorHz))), 0.42 * sr)
     let g = 1 - expf(-2 * Float.pi * fc / sr)
     let res = max(0, min(1, p(.resonance) + (resonanceCC - 64) / 127 * 0.5))
     let k = res * 3.9
@@ -312,7 +318,8 @@ final class BassVoice {
     // Weight: a low shelf made from a low-passed copy
     let gw = 1 - expf(-2 * Float.pi * 120 / sr)
     lowShelf += gw * (y4 - lowShelf)
-    var out = y4 + p(.weight) * 1.2 * lowShelf
+    // The part of the sub that skips the filter joins here, so a closed filter cannot lose the low end.
+    var out = y4 + subWave * p(.sub) * bypass * 0.5 + p(.weight) * 1.2 * lowShelf
 
     out *= ampEnv * velGain * p(.level) * 0.9
 

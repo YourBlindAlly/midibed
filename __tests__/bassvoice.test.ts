@@ -23,8 +23,8 @@ describe('bass voice settings table', () => {
     const block = swift.slice(swift.indexOf('enum BassParam'), swift.indexOf('static let count'));
     const cases = [...block.matchAll(/^\s*case\s+(\w+)/gm)].map((m) => m[1]);
     expect(cases).toEqual(BASS_PARAMS.map((p) => p.key));
-    expect(BASS_PARAM_COUNT).toBe(28);
-    expect(swift).toMatch(/static let count = 28/);
+    expect(BASS_PARAM_COUNT).toBe(31);
+    expect(swift).toMatch(/static let count = 31/);
   });
 
   it('its native defaults match the screen defaults', () => {
@@ -34,7 +34,7 @@ describe('bass voice settings table', () => {
       .split(/[,\s]+/)
       .filter((s: string) => s !== '')
       .map(Number);
-    expect(nums).toHaveLength(28);
+    expect(nums).toHaveLength(31);
     const screen = bassVoiceValues(defaultBassVoice);
     nums.forEach((n: number, i: number) => expect(screen[i]).toBeCloseTo(n, 3));
   });
@@ -79,7 +79,7 @@ describe('bass voice presets and values', () => {
 
   it('converts to the units the engine uses', () => {
     const v = bassVoiceValues({ ...defaultBassVoice, v: { ...defaultBassVoice.v, cutoff: 50, aRelease: 1500, lfoRate: 25 } });
-    expect(v).toHaveLength(28);
+    expect(v).toHaveLength(31);
     expect(v[BASS_PARAMS.findIndex((p) => p.key === 'cutoff')]).toBeCloseTo(0.5);
     expect(v[BASS_PARAMS.findIndex((p) => p.key === 'aRelease')]).toBeCloseTo(1.5);
     expect(v[BASS_PARAMS.findIndex((p) => p.key === 'lfoRate')]).toBeCloseTo(2.5);
