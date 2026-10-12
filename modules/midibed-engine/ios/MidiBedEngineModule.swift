@@ -31,6 +31,10 @@ public class MidiBedEngineModule: Module {
       }
     }
 
+    Function("setDrumVoices") { (json: String) in
+      self.engine.setDrumVoices(json: json)
+    }
+
     Function("setBassVoice") { (json: String) in
       self.engine.setBassVoice(json: json)
     }

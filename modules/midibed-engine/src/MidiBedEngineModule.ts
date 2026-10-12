@@ -6,6 +6,8 @@ declare class MidiBedEngineModule extends NativeModule<MidiBedEngineEvents> {
   stop(): void;
   /** End every sounding note on every port. */
   panic(): void;
+  /** The built-in drum sounds: JSON [{note, channel, type, tune, decay, tone, snap, level}]. */
+  setDrumVoices(json: string): void;
   /** The built-in bass voice: JSON {enabled, exclusive, values[]} (see src/bassvoice.ts). */
   setBassVoice(json: string): void;
   reclaimKeyFocus(): void;

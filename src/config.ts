@@ -32,6 +32,13 @@ export type DrumState = {
   velocity: number;
   probability: number; // percent 0-100
   humanize: number; // percent 0-100
+  /** Built-in sound only (see drumvoice.ts): sound type and its controls. Global, not saved in a scene. */
+  voice: number;
+  tune: number;
+  decay: number;
+  tone: number;
+  snap: number;
+  level: number;
 };
 
 export type DroneState = {
@@ -267,7 +274,7 @@ export type SceneData = {
   advance: AdvanceRule;
   transitionUse: TransitionUse;
   pad: Omit<PadState, 'channel'>;
-  drums: Omit<DrumState, 'name' | 'note' | 'channel'>[];
+  drums: Omit<DrumState, 'name' | 'note' | 'channel' | 'voice' | 'tune' | 'decay' | 'tone' | 'snap' | 'level'>[];
   wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'cycleBars' | 'looseness' | 'phase' | 'smoothBeats' | 'opposes' | 'opposeAmount'>[];
   loops: Pick<LoopsState, 'enabled' | 'program' | 'sendBank' | 'bankMSB' | 'bankLSB'>;
 };
@@ -511,10 +518,10 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     favorites: '',
   },
   drums: [
-    { name: 'Kick', enabled: true, note: 36, channel: 9, steps: 16, hits: 4, rotation: 0, velocity: 100, probability: 100, humanize: 20 },
-    { name: 'Snare', enabled: true, note: 38, channel: 9, steps: 16, hits: 2, rotation: 4, velocity: 90, probability: 100, humanize: 25 },
-    { name: 'Hat', enabled: true, note: 42, channel: 9, steps: 16, hits: 11, rotation: 0, velocity: 70, probability: 90, humanize: 50 },
-    { name: 'Shaker', enabled: true, note: 82, channel: 9, steps: 5, hits: 3, rotation: 0, velocity: 60, probability: 80, humanize: 40 },
+    { name: 'Kick', enabled: true, note: 36, channel: 9, steps: 16, hits: 4, rotation: 0, velocity: 100, probability: 100, humanize: 20, voice: 0, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
+    { name: 'Snare', enabled: true, note: 38, channel: 9, steps: 16, hits: 2, rotation: 4, velocity: 90, probability: 100, humanize: 25, voice: 1, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
+    { name: 'Hat', enabled: true, note: 42, channel: 9, steps: 16, hits: 11, rotation: 0, velocity: 70, probability: 90, humanize: 50, voice: 4, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
+    { name: 'Shaker', enabled: true, note: 82, channel: 9, steps: 5, hits: 3, rotation: 0, velocity: 60, probability: 80, humanize: 40, voice: 6, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
   ],
   drone: {
     enabled: true,

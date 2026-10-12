@@ -512,6 +512,29 @@ final class MidiBedEngine {
     DispatchQueue.main.async { cb?(body) }
   }
 
+  /// The built-in drum sounds: type and settings for each drum, looked up by note. Kept out of the main
+  /// configuration so editing a knob never re-queues a scene.
+  func setDrumVoices(json: String) {
+    struct DrumVoiceConfig: Decodable {
+      var note: Int
+      var channel: Int
+      var type: Int
+      var tune: Double
+      var decay: Double
+      var tone: Double
+      var snap: Double
+      var level: Double
+    }
+    guard let data = json.data(using: .utf8), let list = try? JSONDecoder().decode([DrumVoiceConfig].self, from: data) else {
+      NSLog("MidiBedEngine: could not decode drum voices")
+      return
+    }
+    queue.async {
+      self.synth.configureDrums(
+        list.map { (note: $0.note, kind: $0.type, tune: Float($0.tune), decay: Float($0.decay), tone: Float($0.tone), snap: Float($0.snap), level: Float($0.level)) })
+    }
+  }
+
   /// The built-in bass voice: whether it is on, whether the built-in sound plays only it, and its settings.
   /// Kept out of the main configuration so editing a knob never re-queues a scene.
   func setBassVoice(json: String) {

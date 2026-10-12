@@ -12,6 +12,7 @@ type Native = {
   start(): void;
   stop(): void;
   panic(): void;
+  setDrumVoices(json: string): void;
   setBassVoice(json: string): void;
   reclaimKeyFocus(): void;
   applyConfig(json: string, queued: boolean): void;
@@ -109,6 +110,8 @@ export const engine = {
   stop: () => native?.stop(),
   /** End every sounding note on every port (a stuck note). */
   panic: () => native?.panic(),
+  /** The built-in drum sounds (see src/drumvoice.ts). */
+  setDrumVoices: (json: string) => native?.setDrumVoices(json),
   /** The built-in bass voice on/off and its settings. */
   setBassVoice: (json: string) => native?.setBassVoice(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */

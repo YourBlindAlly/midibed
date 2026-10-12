@@ -37,14 +37,37 @@ final class MidiBedTestSynth {
     var channel: UInt8 = 0
   }
 
+  /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 shaker, 7 tom,
+  /// 8 wood block (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
+  /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
   private struct DrumVoice {
     var active = false
-    var kind: Int = 0   // 0 kick, 1 snare, 2 closed hat, 3 open hat, 4 perc
+    var kind: Int = 0
     var t: Float = 0    // seconds since trigger
     var velocity: Float = 0
     var phase: Float = 0
     var hpPrev: Float = 0
     var xPrev: Float = 0
+    var hp2Prev: Float = 0
+    var xPrev2: Float = 0
+    var lp: Float = 0
+    var lp2: Float = 0
+    var tuneRatio: Float = 1
+    var decay: Float = 1
+    var tone: Float = 0.5
+    var snap: Float = 0.5
+    var level: Float = 1
+  }
+
+  /// A drum's settings, looked up by MIDI note on channel 10. Without one, the General MIDI note decides.
+  private struct DrumPatch {
+    var valid = false
+    var kind = 0
+    var tune: Float = 0
+    var decay: Float = 1
+    var tone: Float = 0.5
+    var snap: Float = 0.5
+    var level: Float = 1
   }
 
   private let engine = AVAudioEngine()
@@ -60,6 +83,7 @@ final class MidiBedTestSynth {
   // Audio-thread-only state.
   private var pads: UnsafeMutablePointer<PadVoice>
   private var drums: UnsafeMutablePointer<DrumVoice>
+  private var drumPatches: UnsafeMutablePointer<DrumPatch>
   private let padCount = 16
   private let drumCount = 8
 
@@ -94,6 +118,14 @@ final class MidiBedTestSynth {
   var bassExclusive = false
   var bassChannel = -1
 
+  /// Control side: the drums' sound settings, by MIDI note. Replaces the whole table.
+  func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float)]) {
+    for i in 0..<128 { drumPatches[i] = DrumPatch() }
+    for d in list where d.note >= 0 && d.note < 128 {
+      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(8, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
+    }
+  }
+
   /// Control side: switch the bass voice on or off and give it its settings (BassParam order).
   func configureBass(on: Bool, exclusive: Bool, values: [Float]) {
     let wasOn = bassOn
@@ -112,6 +144,8 @@ final class MidiBedTestSynth {
     pads.initialize(repeating: PadVoice(), count: padCount)
     drums = UnsafeMutablePointer<DrumVoice>.allocate(capacity: drumCount)
     drums.initialize(repeating: DrumVoice(), count: drumCount)
+    drumPatches = UnsafeMutablePointer<DrumPatch>.allocate(capacity: 128)
+    drumPatches.initialize(repeating: DrumPatch(), count: 128)
     expTarget = UnsafeMutablePointer<Float>.allocate(capacity: 16)
     expTarget.initialize(repeating: 1, count: 16)
     expCurrent = UnsafeMutablePointer<Float>.allocate(capacity: 16)
@@ -128,6 +162,7 @@ final class MidiBedTestSynth {
     lock.deallocate()
     pads.deallocate()
     drums.deallocate()
+    drumPatches.deallocate()
     expTarget.deallocate()
     expCurrent.deallocate()
     noiseRing.deallocate()
@@ -298,18 +333,33 @@ final class MidiBedTestSynth {
 
   private func noteOn(channel: UInt8, note: Int, velocity: Float) {
     if channel == 9 {
-      let kind: Int
-      switch note {
-      case 35, 36: kind = 0
-      case 38, 40: kind = 1
-      case 42, 44: kind = 2
-      case 46: kind = 3
-      default: kind = 4
+      var v = DrumVoice(active: true, kind: 8, t: 0, velocity: velocity)
+      let patch = drumPatches[max(0, min(127, note))]
+      if patch.valid {
+        v.kind = patch.kind
+        v.tuneRatio = powf(2, patch.tune / 12)
+        v.decay = patch.decay
+        v.tone = patch.tone
+        v.snap = patch.snap
+        v.level = patch.level
+      } else {
+        // No settings for this note: the General MIDI drum map decides.
+        switch note {
+        case 35, 36: v.kind = 0
+        case 37: v.kind = 2
+        case 38, 40: v.kind = 1
+        case 39: v.kind = 3
+        case 41, 43, 45, 47, 48, 50: v.kind = 7
+        case 42, 44: v.kind = 4
+        case 46: v.kind = 5
+        case 70, 82: v.kind = 6
+        default: v.kind = 8
+        }
       }
       // Reuse a free voice, else steal the first one.
       var slot = 0
       for i in 0..<drumCount where !drums[i].active { slot = i; break }
-      drums[slot] = DrumVoice(active: true, kind: kind, t: 0, velocity: velocity, phase: 0, hpPrev: 0, xPrev: 0)
+      drums[slot] = v
       return
     }
     padAgeCounter += 1
@@ -548,33 +598,88 @@ final class MidiBedTestSynth {
 
       for i in 0..<drumCount where drums[i].active {
         let t = drums[i].t
+        let D = max(0.2, drums[i].decay)
+        let f = drums[i].tuneRatio
+        let tone = drums[i].tone
+        let snap = drums[i].snap
+        let noise = nextNoise()
         var s: Float = 0
+        var alive = true
         switch drums[i].kind {
-        case 0:
-          let freq = 45 + 120 * expf(-t * 28)
+        case 0: // kick: sine sweep, plus a click when snap is above half
+          let freq = (45 + 120 * expf(-t * 28)) * f
           drums[i].phase += freq * dt
           if drums[i].phase >= 1 { drums[i].phase -= 1 }
-          s = sinf(2 * Float.pi * drums[i].phase) * expf(-t * 7)
-          if t > 0.5 { drums[i].active = false }
-        case 1:
-          let tone = sinf(2 * Float.pi * 190 * t) * expf(-t * 26)
-          s = (nextNoise() * 0.7 * expf(-t * 17)) + tone * 0.5
-          if t > 0.4 { drums[i].active = false }
-        case 2, 3:
-          let n = nextNoise()
-          // crude one-pole highpass
-          let hp = n - drums[i].xPrev + 0.93 * drums[i].hpPrev
-          drums[i].xPrev = n
+          s = sinf(2 * Float.pi * drums[i].phase) * expf(-t * 7 / D)
+          s += noise * max(0, snap - 0.5) * 0.7 * expf(-t * 500)
+          alive = t <= 0.5 * D + 0.05
+        case 1: // snare: two tones plus band-passed noise
+          let body = (sinf(2 * Float.pi * 190 * f * t) * 0.55 + sinf(2 * Float.pi * 330 * f * t) * 0.3) * expf(-t * 26 / D)
+          let r = 0.95 - 0.10 * tone
+          let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
+          drums[i].xPrev = noise
           drums[i].hpPrev = hp
-          let decay: Float = drums[i].kind == 2 ? 70 : 11
-          s = hp * 0.5 * expf(-t * decay)
-          if t > (drums[i].kind == 2 ? 0.15 : 0.8) { drums[i].active = false }
-        default:
-          s = sinf(2 * Float.pi * 820 * t) * expf(-t * 45) * 0.7
-          if t > 0.25 { drums[i].active = false }
+          let a = 0.10 + 0.35 * tone
+          drums[i].lp += a * (hp - drums[i].lp)
+          drums[i].lp2 += a * (drums[i].lp - drums[i].lp2)
+          s = body + drums[i].lp2 * snap * 1.3 * expf(-t * 17 / D)
+          alive = t <= 0.35 * D + 0.1
+        case 2: // rim click: two short tones and a click
+          let tones = (sinf(2 * Float.pi * 1700 * f * t) * 0.5 + sinf(2 * Float.pi * 480 * f * t) * 0.5) * expf(-t * 420 / D)
+          s = tones * 0.9 + noise * snap * 0.6 * expf(-t * 1500)
+          alive = t <= 0.05 * D + 0.02
+        case 3: // clap: three quick noise bursts and a tail
+          let r = 0.90 - 0.15 * tone
+          let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
+          drums[i].xPrev = noise
+          drums[i].hpPrev = hp
+          let a = 0.08 + 0.30 * tone
+          drums[i].lp += a * (hp - drums[i].lp)
+          drums[i].lp2 += a * (drums[i].lp - drums[i].lp2)
+          var burst: Float = 0
+          if t >= 0 { burst += expf(-t * 300) }
+          if t >= 0.0105 { burst += expf(-(t - 0.0105) * 300) }
+          if t >= 0.0215 { burst += expf(-(t - 0.0215) * 300) }
+          let tail: Float = t > 0.03 ? 0.55 * expf(-(t - 0.03) * 35 / D) : 0
+          s = drums[i].lp2 * min(1.3, burst + tail) * (0.6 + snap) * 5.2
+          alive = t <= 0.4 * D + 0.1
+        case 4, 5: // closed and open hat: high-passed noise
+          let r = 0.92 - 0.2 * tone
+          let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
+          drums[i].xPrev = noise
+          drums[i].hpPrev = hp
+          let hp2 = hp - drums[i].xPrev2 + r * drums[i].hp2Prev
+          drums[i].xPrev2 = hp
+          drums[i].hp2Prev = hp2
+          drums[i].lp += 0.6 * (hp2 - drums[i].lp)
+          let rate: Float = drums[i].kind == 4 ? 70 : 11
+          s = drums[i].lp * 0.92 * expf(-t * rate / D)
+          alive = t <= (drums[i].kind == 4 ? 0.15 : 0.8) * D + 0.05
+        case 6: // shaker: soft band-passed noise with a gentle attack
+          let r = 0.80 - 0.25 * tone
+          let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
+          drums[i].xPrev = noise
+          drums[i].hpPrev = hp
+          let a = 0.18 + 0.35 * tone
+          drums[i].lp += a * (hp - drums[i].lp)
+          drums[i].lp2 += a * (drums[i].lp - drums[i].lp2)
+          let attack = max(0.002, 0.03 - 0.025 * snap)
+          let env = (1 - expf(-t / attack)) * expf(-t * 30 / D)
+          s = drums[i].lp2 * env * 5.45
+          alive = t <= 0.25 * D + 0.05
+        case 7: // tom: falling sine with a little stick noise
+          let freq = (80 + 130 * expf(-t * 18)) * f
+          drums[i].phase += freq * dt
+          if drums[i].phase >= 1 { drums[i].phase -= 1 }
+          s = sinf(2 * Float.pi * drums[i].phase) * expf(-t * 8 / D) * 0.9 + noise * snap * 0.25 * expf(-t * 90)
+          alive = t <= 0.7 * D + 0.05
+        default: // wood block
+          s = sinf(2 * Float.pi * 820 * f * t) * expf(-t * 45 / D) * 0.7
+          alive = t <= 0.25 * D + 0.02
         }
+        if !alive { drums[i].active = false }
         drums[i].t += dt
-        drumSum += s * drums[i].velocity * 0.45
+        drumSum += s * drums[i].velocity * 0.45 * drums[i].level
       }
 
       let dv3 = drumSum - drumIc2

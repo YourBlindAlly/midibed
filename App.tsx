@@ -41,6 +41,7 @@ import {
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
+import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { MIDI_ACTIONS, actionForMidi, assignTrigger, clearTrigger, describeMidi, describeTrigger, parseMidiMap } from './src/midicontrol';
 import { levelText, mixerMessages } from './src/mixer';
@@ -467,6 +468,14 @@ export default function App() {
     if (programTimers.current[i]) clearTimeout(programTimers.current[i]);
     programTimers.current[i] = setTimeout(() => sendSound(next), 200);
   };
+
+  // The built-in drum sounds: send each drum's type and settings whenever they change.
+  const drumVoicesText = drumVoicesJson(state.drums);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setDrumVoices(drumVoicesText), 80);
+    return () => clearTimeout(t);
+  }, [drumVoicesText, ready]);
 
   // The built-in bass voice: send its on/off and settings whenever they change (and at Play).
   const bassJson = bassVoiceJson(state.bassVoice);
@@ -1339,6 +1348,12 @@ export default function App() {
               />
               <Stepper label={`${d.name} MIDI channel`} value={d.channel} onChange={(v) => patchDrum(i, { channel: v })} min={0} max={15} format={channelText} hint="Channel 10 is General MIDI drums." />
               <ActionButton label={`Play ${d.name} test hit`} hint="Sends this note on this channel once, to check what the other app does with it" onPress={() => engine.sendNote(d.channel, d.note, d.velocity, 200)} />
+              <Stepper label={`${d.name} built-in sound`} value={d.voice} onChange={(v) => patchDrum(i, { voice: v })} min={0} max={DRUM_TYPES.length - 1} format={(v) => DRUM_TYPES[v]} hint="Which sound the built-in drum plays for this drum, whatever its note. Another app ignores this" />
+              <Stepper label={`${d.name} tune`} value={d.tune} onChange={(v) => patchDrum(i, { tune: v })} min={-12} max={12} format={drumTuneText} />
+              <Stepper label={`${d.name} decay`} value={d.decay} onChange={(v) => patchDrum(i, { decay: v })} min={25} max={300} step={5} bigStep={25} format={(v) => `${v} percent`} hint="How long the sound rings" />
+              <Stepper label={`${d.name} tone`} value={d.tone} onChange={(v) => patchDrum(i, { tone: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="Darker or brighter" />
+              <Stepper label={`${d.name} snap`} value={d.snap} onChange={(v) => patchDrum(i, { snap: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How much click, noise or attack the sound has" />
+              <Stepper label={`${d.name} sound level`} value={d.level} onChange={(v) => patchDrum(i, { level: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
               <Stepper label={`${d.name} hits`} value={d.hits} onChange={(v) => patchDrum(i, { hits: v })} min={0} max={d.steps} />
               <Stepper
                 label={`${d.name} steps`}
