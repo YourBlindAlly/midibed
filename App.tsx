@@ -41,12 +41,13 @@ import {
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
-import { LAYER_NAMES, Layer, SHORTCUT_HELP, actionForKey } from './src/shortcuts';
+import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
+import { MIDI_ACTIONS, actionForMidi, assignTrigger, clearTrigger, describeMidi, describeTrigger, parseMidiMap } from './src/midicontrol';
 import { levelText, mixerMessages } from './src/mixer';
 import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
-import { engine, hasNativeEngine, onBeat, onMotion, onScene, testSweep } from './src/engine';
+import { engine, hasNativeEngine, onBeat, onMidiIn, onMotion, onScene, testSweep } from './src/engine';
 import {
   CONTOUR_NAMES,
   DANCER_MODE_NAMES,
@@ -512,6 +513,12 @@ export default function App() {
       soloArmedAt.current = 0;
       action = { type: 'solo', layer: action.layer };
     }
+    runAction(action);
+  };
+
+  // Perform one action (from a key, or from a MIDI controller).
+  const runAction = (action: ShortcutAction) => {
+    const now = Date.now();
     const sceneCount = state.scenes.length;
     switch (action.type) {
       case 'scene':
@@ -574,6 +581,32 @@ export default function App() {
       }
     }
   };
+
+  // ---- MIDI controller (a foot pedal): learn a message for an action, then run it when it arrives.
+  const [learnIdx, setLearnIdx] = useState(0);
+  const [learning, setLearning] = useState(false);
+  const learningRef = useRef<string | null>(null);
+  const [lastMidiText, setLastMidiText] = useState('none yet');
+  const runActionRef = useRef(runAction);
+  runActionRef.current = runAction;
+  useEffect(() => {
+    return onMidiIn((m) => {
+      setLastMidiText(describeMidi(m));
+      const s = latest.current;
+      if (learningRef.current) {
+        const id = learningRef.current;
+        if (m.kind !== 'pc' && m.value === 0) return; // wait for the press, not the release
+        learningRef.current = null;
+        setLearning(false);
+        setState((st) => ({ ...st, midiControl: { ...st.midiControl, map: assignTrigger(st.midiControl.map, id, m) } }));
+        announceLater(`Learned ${describeMidi(m)}`, 100);
+        return;
+      }
+      if (!s.midiControl.enabled) return;
+      const action = actionForMidi(s.midiControl.map, m, s.midiControl.channel);
+      if (action) runActionRef.current(action);
+    });
+  }, []);
 
   // ---- Parts tab helpers
   const PARTS = ['bass', 'pad', 'dancer', 'drums', 'loops'] as const;
@@ -1775,6 +1808,51 @@ export default function App() {
                 {line}
               </Text>
             ))}
+          </Section>
+
+          <Section title="MIDI controller">
+            <Toggle label="MIDI controller" value={state.midiControl.enabled} onChange={(v) => patch({ midiControl: { ...state.midiControl, enabled: v } })} hint="Lets a MIDI foot pedal or keyboard run the same actions as the keys. It works while another app is in front." />
+            <Stepper
+              label="MIDI controller channel"
+              value={state.midiControl.channel + 1}
+              onChange={(v) => patch({ midiControl: { ...state.midiControl, channel: Math.max(0, Math.min(16, v)) - 1 } })}
+              min={0}
+              max={16}
+              format={(v) => (v === 0 ? 'any channel' : `channel ${v}`)}
+              hint="Listen to one channel only, so a pedal shared with other apps can use a different channel for each"
+            />
+            <Stepper
+              label="Action to map"
+              value={learnIdx}
+              onChange={(v) => {
+                setLearnIdx(Math.max(0, Math.min(MIDI_ACTIONS.length - 1, v)));
+                learningRef.current = null;
+                setLearning(false);
+              }}
+              min={0}
+              max={MIDI_ACTIONS.length - 1}
+              format={(v) => `${MIDI_ACTIONS[v].label}, ${describeTrigger(parseMidiMap(state.midiControl.map)[MIDI_ACTIONS[v].id])}`}
+              hint="Choose an action, then press Learn and press a button on the controller"
+            />
+            <ActionButton
+              label={learning ? 'Waiting for a button' : 'Learn'}
+              hint="Then press a button on the controller. The next message it sends is assigned to the chosen action"
+              onPress={() => {
+                learningRef.current = learning ? null : MIDI_ACTIONS[learnIdx].id;
+                setLearning(!learning);
+                announceLater(learning ? 'Cancelled' : 'Press a button on the controller', 100);
+              }}
+            />
+            <ActionButton
+              label="Clear this mapping"
+              onPress={() => {
+                setState((s) => ({ ...s, midiControl: { ...s.midiControl, map: clearTrigger(s.midiControl.map, MIDI_ACTIONS[learnIdx].id) } }));
+                announceLater('Cleared', 100);
+              }}
+            />
+            <View accessible accessibilityLabel="Last MIDI received" accessibilityValue={{ text: lastMidiText }}>
+              <Text style={styles.note}>{`Last MIDI received: ${lastMidiText}`}</Text>
+            </View>
           </Section>
 
           <Section title="Output">

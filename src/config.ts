@@ -17,6 +17,7 @@ import {
 import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice, getProfile } from './profiles';
 import { BassVoiceState, defaultBassVoice } from './bassvoice';
+import type { MidiControlState } from './midicontrol';
 import { MixerState, defaultMixer } from './mixer';
 import { Favorite, addFav, favsFromPrograms, parseFavMap, stringifyFavMap } from './soundFavs';
 
@@ -162,6 +163,8 @@ export type LoopsState = {
 export type PortsState = { bass: boolean; pad: boolean; dancer: boolean; drums: boolean };
 
 export type BedState = {
+  /** A MIDI controller (foot pedal) running the same actions as the keyboard shortcuts. Global. */
+  midiControl: MidiControlState;
   /** The built-in bass voice (see bassvoice.ts). Global. */
   bassVoice: BassVoiceState;
   /** Hear only this part. Never saved as on (like Freeze): it silences the others by the normal fades. */
@@ -475,6 +478,7 @@ function nextJourneyNumber(list: Journey[]): number {
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
   keyOffset: 0,
+  midiControl: { enabled: true, channel: -1, map: '{}' },
   bassVoice: defaultBassVoice,
   solo: null,
   mixer: defaultMixer,

@@ -20,3 +20,8 @@ npm-debug.*
 /Payload
 *.ipa
 builds/
+
+# Third-party Loopy Pro templates downloaded for study: not ours to publish
+Loopy pro templates/*.zip
+Loopy pro templates/*.lpproj
+Loopy pro templates/*.lpproj_dir/

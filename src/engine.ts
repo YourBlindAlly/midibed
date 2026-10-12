@@ -1,4 +1,4 @@
-import type { BeatPayload, MotionPayload, SceneEventPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
+import type { BeatPayload, MidiInPayload, MotionPayload, SceneEventPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
 
 /**
  * Thin wrapper over the native module with a silent fallback so the UI still
@@ -23,6 +23,7 @@ type Native = {
   addListener(name: 'onBeat', cb: (e: BeatPayload) => void): unknown;
   addListener(name: 'onMotion', cb: (e: MotionPayload) => void): unknown;
   addListener(name: 'onScene', cb: (e: SceneEventPayload) => void): unknown;
+  addListener(name: 'onMidiIn', cb: (e: MidiInPayload) => void): unknown;
 };
 
 let native: Native | null = null;
@@ -81,6 +82,23 @@ export function onScene(cb: (e: SceneEventPayload) => void): () => void {
   sceneSubscribers.add(cb);
   return () => {
     sceneSubscribers.delete(cb);
+  };
+}
+
+const midiInSubscribers = new Set<(e: MidiInPayload) => void>();
+let midiInHooked = false;
+
+/** Presses from a MIDI controller (pedal, keyboard). One native listener, fanned out. */
+export function onMidiIn(cb: (e: MidiInPayload) => void): () => void {
+  if (native && !midiInHooked) {
+    midiInHooked = true;
+    native.addListener('onMidiIn', (e) => {
+      midiInSubscribers.forEach((fn) => fn(e));
+    });
+  }
+  midiInSubscribers.add(cb);
+  return () => {
+    midiInSubscribers.delete(cb);
   };
 }
 

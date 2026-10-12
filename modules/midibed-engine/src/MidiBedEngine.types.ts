@@ -19,8 +19,17 @@ export type SceneEventPayload = {
   reason: 'tick' | 'auto';
 };
 
+/** A press from a MIDI controller: a note on, a control change or a program change. */
+export type MidiInPayload = {
+  kind: 'cc' | 'note' | 'pc';
+  channel: number; // 0-15
+  number: number;
+  value: number;
+};
+
 export type MidiBedEngineEvents = {
   onBeat: (event: BeatPayload) => void;
   onMotion: (event: MotionPayload) => void;
   onScene: (event: SceneEventPayload) => void;
+  onMidiIn: (event: MidiInPayload) => void;
 };

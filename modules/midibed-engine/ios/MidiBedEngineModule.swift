@@ -8,7 +8,7 @@ public class MidiBedEngineModule: Module {
   public func definition() -> ModuleDefinition {
     Name("MidiBedEngine")
 
-    Events("onBeat", "onMotion", "onScene")
+    Events("onBeat", "onMotion", "onScene", "onMidiIn")
 
     // The screen-wide container that receives VoiceOver's three-finger page swipe.
     View(MidiBedPagerView.self) {
@@ -25,6 +25,9 @@ public class MidiBedEngineModule: Module {
       }
       self.engine.onScene = { [weak self] body in
         self?.sendEvent("onScene", body)
+      }
+      self.engine.onMidiIn = { [weak self] body in
+        self?.sendEvent("onMidiIn", body)
       }
     }
 

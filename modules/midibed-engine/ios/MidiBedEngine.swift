@@ -234,6 +234,13 @@ final class MidiBedEngine {
   /// Called on the main queue when a breathing rule changes (or restarts with a scene).
   var onMotion: (([String: Any?]) -> Void)?
 
+  /// Called on the main queue for each MIDI message from a controller (a pedal, a keyboard): note on,
+  /// control change, program change. {kind: cc|note|pc, channel 0-15, number, value}.
+  var onMidiIn: (([String: Any?]) -> Void)?
+  private var inputPort = MIDIPortRef()
+  private var inputDestination = MIDIEndpointRef()
+  private var lastControlTime: [Int: Double] = [:]
+
   /// Called on the main queue every bar line (how long is left in this scene) and when the engine
   /// moved to another scene by itself.
   var onScene: (([String: Any?]) -> Void)?
@@ -338,7 +345,10 @@ final class MidiBedEngine {
   private var rng = SystemRandomNumberGenerator()
 
   init() {
-    MIDIClientCreate("MidiBed" as CFString, nil, nil, &client)
+    // The notification block rescans the sources whenever one appears (a Bluetooth pedal connecting).
+    MIDIClientCreateWithBlock("MidiBed" as CFString, &client) { [weak self] _ in
+      self?.connectInputs()
+    }
     // MIDISourceCreate is deprecated on iOS 14+ in favour of the protocol-based
     // variant but still works and is what every receiving app understands.
     MIDISourceCreate(client, "MidiBed" as CFString, &source)
@@ -348,6 +358,15 @@ final class MidiBedEngine {
       MIDISourceCreate(client, name as CFString, &endpoint)
       portSources[i] = endpoint
     }
+    // Input: listen to every other MIDI source (pedals, keyboards), and offer a destination other apps
+    // (or AUM) can send to.
+    MIDIInputPortCreateWithBlock(client, "MidiBed Input" as CFString, &inputPort) { [weak self] list, _ in
+      self?.handleIncoming(list)
+    }
+    MIDIDestinationCreateWithBlock(client, "MidiBed In" as CFString, &inputDestination) { [weak self] list, _ in
+      self?.handleIncoming(list)
+    }
+    connectInputs()
     synth.startEngine()
 
     NotificationCenter.default.addObserver(
@@ -422,6 +441,65 @@ final class MidiBedEngine {
       if !atBar || !padOn(decoded) { reconcilePadEnabled() }
       reconcileLoops(decoded)
     }
+  }
+
+  /// Connect the input port to every MIDI source except MidiBed's own (so it never hears itself).
+  private func connectInputs() {
+    guard inputPort != 0 else { return }
+    let count = MIDIGetNumberOfSources()
+    for i in 0..<count {
+      let src = MIDIGetSource(i)
+      if src == 0 || portSources.contains(src) { continue }
+      MIDIPortConnectSource(inputPort, src, nil)
+    }
+  }
+
+  /// Parse the MIDI packets of a controller and report presses to JS.
+  private func handleIncoming(_ list: UnsafePointer<MIDIPacketList>) {
+    var packet = list.pointee.packet
+    for _ in 0..<Int(list.pointee.numPackets) {
+      let len = min(Int(packet.length), 256)
+      withUnsafeBytes(of: packet.data) { raw in
+        var i = 0
+        while i < len {
+          let status = raw[i]
+          if status >= 0xF8 { i += 1; continue }   // real-time (clock etc.)
+          if status >= 0xF0 { break }              // system exclusive and friends: skip the rest
+          if status < 0x80 { i += 1; continue }    // stray data byte
+          let kind = status & 0xF0
+          let need = (kind == 0xC0 || kind == 0xD0) ? 1 : 2
+          if i + need >= len { break }
+          let d1 = Int(raw[i + 1])
+          let d2 = need == 2 ? Int(raw[i + 2]) : 0
+          report(status: status, d1: d1, d2: d2)
+          i += 1 + need
+        }
+      }
+      packet = MIDIPacketNext(&packet).pointee
+    }
+  }
+
+  private func report(status: UInt8, d1: Int, d2: Int) {
+    let kind = status & 0xF0
+    let channel = Int(status & 0x0F)
+    var name: String
+    switch kind {
+    case 0x90 where d2 > 0: name = "note"
+    case 0xB0: name = "cc"
+    case 0xC0: name = "pc"
+    default: return
+    }
+    // A knob or an expression pedal sends a flood of control changes: let only the ends and a few
+    // in between through, so the bridge to JS is never swamped.
+    if name == "cc", d2 != 0, d2 != 127 {
+      let key = (channel << 8) | d1
+      let now = ProcessInfo.processInfo.systemUptime
+      if let last = lastControlTime[key], now - last < 0.04 { return }
+      lastControlTime[key] = now
+    }
+    let body: [String: Any?] = ["kind": name, "channel": channel, "number": d1, "value": name == "pc" ? 127 : d2]
+    let cb = onMidiIn
+    DispatchQueue.main.async { cb?(body) }
   }
 
   /// The built-in bass voice: whether it is on, whether the built-in sound plays only it, and its settings.
