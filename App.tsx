@@ -52,6 +52,7 @@ import {
   CONTOUR_NAMES,
   DANCER_MODE_NAMES,
   DancerState,
+  VIBRATO_MODE_NAMES,
   PICK_NAMES,
   SCALES,
   START_NAMES,
@@ -1267,6 +1268,24 @@ export default function App() {
             <Stepper label="MidiDancer velocity" value={state.dancer.velocity} onChange={(v) => patchDancer({ velocity: v })} min={1} max={127} bigStep={10} />
             <Stepper label="Legato" value={state.dancer.legato} onChange={(v) => patchDancer({ legato: v })} min={0} max={100} step={10} format={(v) => (v === 0 ? 'none, notes are separate' : v === 100 ? 'full, each note holds into the next' : `${v} percent joined`)} hint="Joins notes that follow straight on from one another, so a mono or sampled sound connects them instead of breathing between them" />
             <Stepper label="Humanize" value={state.dancer.humanize} onChange={(v) => patchDancer({ humanize: v })} min={0} max={100} step={10} format={(v) => (v === 0 ? 'none' : `${v} percent`)} hint="Varies how hard each note is played, with a gentle swell across the phrase, like breath pressure" />
+            <Stepper label="Vibrato depth" value={state.dancer.vibratoDepth} onChange={(v) => patchDancer({ vibratoDepth: v })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'off' : `${v} cents`)} hint="A gentle wobble in the pitch, like a flute player's. Zero is off" />
+            {state.dancer.vibratoDepth > 0 && (
+              <>
+                <Stepper label="Vibrato rate" value={state.dancer.vibratoRate} onChange={(v) => patchDancer({ vibratoRate: v })} min={10} max={100} step={5} format={(v) => `${(v / 10).toFixed(1)} hertz`} />
+                <Stepper label="Vibrato delay" value={state.dancer.vibratoDelay} onChange={(v) => patchDancer({ vibratoDelay: v })} min={0} max={1500} step={50} bigStep={250} format={(v) => (v === 0 ? 'none' : `${v} milliseconds`)} hint="How long after a note starts the vibrato begins" />
+                <Stepper label="Vibrato sent as" value={state.dancer.vibratoMode} onChange={(v) => patchDancer({ vibratoMode: v })} min={0} max={VIBRATO_MODE_NAMES.length - 1} format={(v) => VIBRATO_MODE_NAMES[v]} hint="Pitch bend works with any sound. Mod wheel lets a sound that has its own vibrato do it" />
+              </>
+            )}
+            <Stepper label="Pitch bend range of the sound" value={state.dancer.bendRange} onChange={(v) => patchDancer({ bendRange: v })} min={1} max={24} format={(v) => `${v} ${v === 1 ? 'semitone' : 'semitones'}`} hint="Set this to the pitch bend range of the receiving sound. Two is the usual default" />
+            <Stepper label="Bend chance" value={state.dancer.bendChance} onChange={(v) => patchDancer({ bendChance: v })} min={0} max={100} step={10} format={(v) => `${v} percent of notes`} />
+            <Stepper label="Scoop up from" value={state.dancer.scoop} onChange={(v) => patchDancer({ scoop: v })} min={0} max={400} step={10} bigStep={50} format={(v) => (v === 0 ? 'off' : `${v} cents below`)} hint="A note starts below its pitch and slides up into it" />
+            {state.dancer.scoop > 0 && (
+              <Stepper label="Scoop time" value={state.dancer.scoopTime} onChange={(v) => patchDancer({ scoopTime: v })} min={30} max={500} step={10} bigStep={50} format={(v) => `${v} milliseconds`} />
+            )}
+            <Stepper label="Fall off by" value={state.dancer.fall} onChange={(v) => patchDancer({ fall: v })} min={0} max={600} step={10} bigStep={50} format={(v) => (v === 0 ? 'off' : `${v} cents`)} hint="The end of a note drops in pitch" />
+            {state.dancer.fall > 0 && (
+              <Stepper label="Fall time" value={state.dancer.fallTime} onChange={(v) => patchDancer({ fallTime: v })} min={30} max={600} step={10} bigStep={50} format={(v) => `${v} milliseconds`} />
+            )}
             <Stepper label="Longest phrase" value={state.dancer.maxBars} onChange={(v) => patchDancer({ maxBars: v })} min={1} max={4} format={(v) => `${v} ${v === 1 ? 'bar' : 'bars'}`} />
             <Stepper label="Phrase starts" value={state.dancer.start} onChange={(v) => patchDancer({ start: v })} min={0} max={START_NAMES.length - 1} format={(v) => START_NAMES[v]} />
             {state.dancer.mode === 0 ? (

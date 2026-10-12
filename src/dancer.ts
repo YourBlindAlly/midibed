@@ -40,6 +40,7 @@ export const CONTOUR_NAMES = ['Free', 'Rising', 'Falling', 'Arch'];
 export const START_NAMES = ['On the downbeat', 'Anywhere in the bar'];
 export const PICK_NAMES = ['In turn', 'At random', 'The same one every time', 'Back and forth, sparse to busy'];
 export const DANCER_MODE_NAMES = ['Call and response', 'Solo, plays by itself'];
+export const VIBRATO_MODE_NAMES = ['Pitch bend', 'Mod wheel (CC 1)'];
 
 export type DancerState = {
   enabled: boolean;
@@ -69,6 +70,22 @@ export type DancerState = {
   legato: number;
   /** 0-100: how much the loudness varies from note to note, like breath pressure. */
   humanize: number;
+  /** Vibrato depth in cents (0 = off), rate in tenths of a hertz, and how long after a note starts it begins (ms). */
+  vibratoDepth: number;
+  vibratoRate: number;
+  vibratoDelay: number;
+  /** 0 sent as pitch bend (works with any synth), 1 sent as the mod wheel (CC 1: the synth makes its own vibrato). */
+  vibratoMode: number;
+  /** The pitch bend range of the receiving sound, in semitones (the usual default is 2). */
+  bendRange: number;
+  /** Percent of notes that get a bend. */
+  bendChance: number;
+  /** Scoop: start this many cents below the note and slide up over scoopTime ms (0 = none). */
+  scoop: number;
+  scoopTime: number;
+  /** Fall off: drop this many cents over the last fallTime ms of a note (0 = none). */
+  fall: number;
+  fallTime: number;
   seed: number; // change it to get different phrases
 };
 
@@ -93,6 +110,16 @@ export const defaultDancer: DancerState = {
   carryOn: true,
   legato: 50,
   humanize: 30,
+  vibratoDepth: 0,
+  vibratoRate: 50,
+  vibratoDelay: 300,
+  vibratoMode: 0,
+  bendRange: 2,
+  bendChance: 50,
+  scoop: 0,
+  scoopTime: 120,
+  fall: 0,
+  fallTime: 150,
   seed: 1,
 };
 

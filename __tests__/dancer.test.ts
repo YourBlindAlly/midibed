@@ -238,3 +238,45 @@ describe('legato and humanize', () => {
     });
   });
 });
+
+describe('vibrato and bends', () => {
+  it('are off by default, saved, and older settings get the defaults', () => {
+    expect(defaultDancer.vibratoDepth).toBe(0);
+    expect(defaultDancer.scoop).toBe(0);
+    expect(defaultDancer.fall).toBe(0);
+    expect(defaultDancer.bendRange).toBe(2);
+    const s = migrateState({ dancer: { enabled: true, vibratoDepth: 25 } });
+    expect(s.dancer).toMatchObject({ vibratoDepth: 25, vibratoRate: 50, vibratoDelay: 300, bendRange: 2, bendChance: 50 });
+  });
+
+  it('reach the engine in seconds, hertz, cents and a 0-1 chance', () => {
+    const on = {
+      ...defaultState,
+      dancer: { ...defaultState.dancer, enabled: true, vibratoDepth: 30, vibratoRate: 55, vibratoDelay: 400, vibratoMode: 1, bendRange: 12, bendChance: 25, scoop: 120, scoopTime: 90, fall: 200, fallTime: 250 },
+    };
+    expect(JSON.parse(toEngineJson(on)).dancer).toMatchObject({
+      vibratoCents: 30,
+      vibratoHz: 5.5,
+      vibratoDelay: 0.4,
+      vibratoMode: 1,
+      bendRange: 12,
+      bendChance: 0.25,
+      scoopCents: 120,
+      scoopSec: 0.09,
+      fallCents: 200,
+      fallSec: 0.25,
+    });
+  });
+
+  it('are saved per scene', () => {
+    const live = { ...defaultState, dancer: { ...defaultState.dancer, vibratoDepth: 40 } };
+    expect(switchScene(switchScene(live, 1), 0).dancer.vibratoDepth).toBe(40);
+    expect(switchScene(live, 1).dancer.vibratoDepth).toBe(0);
+  });
+
+  it('do not change which notes or lengths a phrase has', () => {
+    const plain = makePhrases({ ...defaultDancer, enabled: true }, 1, ROOT);
+    const bent = makePhrases({ ...defaultDancer, enabled: true, vibratoDepth: 50, scoop: 200, fall: 300 }, 1, ROOT);
+    expect(bent).toEqual(plain);
+  });
+});

@@ -166,6 +166,16 @@ struct MidiBedDancerConfig: Decodable {
   var restBars: Int         // solo: whole bars of rest between phrases
   var carryOn: Bool         // solo: carry on through a scene change
   var legato: Int           // 0...100: how much consecutive notes are joined
+  var vibratoCents: Double  // 0 = off
+  var vibratoHz: Double
+  var vibratoDelay: Double  // seconds after a note starts
+  var vibratoMode: Int      // 0 pitch bend, 1 mod wheel (CC 1)
+  var bendRange: Int        // semitones the receiving sound bends for a full pitch bend
+  var bendChance: Double    // 0...1: share of notes that get a scoop and/or a fall
+  var scoopCents: Double    // start this far below and slide up (0 = none)
+  var scoopSec: Double
+  var fallCents: Double     // drop this far over the end of a note (0 = none)
+  var fallSec: Double
   var pick: Int             // 0 in turn, 1 at random, 2 the same one every time, 3 back and forth
   var phrases: [MidiBedDancerPhrase]
 }
@@ -1181,6 +1191,68 @@ final class MidiBedEngine {
         let joined = start + len * stepDur + 0.03
         off += (joined - off) * legato
       }
+      // Pitch: vibrato, scoop and fall-off, sent as pitch bend (and the mod wheel for vibrato in mode 1).
+      let dur = off - start
+      let range = Double(max(1, min(48, d.bendRange)))
+      let bends = d.bendChance > 0 && Double.random(in: 0..<1, using: &rng) < d.bendChance
+      let scoop = bends ? d.scoopCents : 0
+      let fall = bends ? d.fallCents : 0
+      let vibrato = d.vibratoCents
+      if scoop > 0 || fall > 0 || vibrato > 0 {
+        func pb(_ cents: Double) -> (UInt8, UInt8) {
+          let v = Int((8192 + cents / (range * 100) * 8192).rounded())
+          let c = max(0, min(16383, v))
+          return (UInt8(c & 0x7F), UInt8((c >> 7) & 0x7F))
+        }
+        var t = 0.0
+        var lastPB = -1
+        var lastMod = -1
+        let stepSec = 0.012
+        while t <= dur {
+          var cents = 0.0
+          if scoop > 0 {
+            let k = min(1, t / max(0.01, d.scoopSec))
+            cents -= scoop * (1 - k) * (1 - k)
+          }
+          if fall > 0 {
+            let fs = dur - d.fallSec
+            if t > fs {
+              let k = min(1, (t - fs) / max(0.01, d.fallSec))
+              cents -= fall * k * k
+            }
+          }
+          var vib = 0.0
+          if vibrato > 0, t > d.vibratoDelay {
+            let ramp = min(1, (t - d.vibratoDelay) / 0.15)
+            vib = vibrato * ramp * sin(2 * Double.pi * d.vibratoHz * (t - d.vibratoDelay))
+          }
+          let total = d.vibratoMode == 0 ? cents + vib : cents
+          let (lsb, msb) = pb(total)
+          let packed = Int(msb) << 7 | Int(lsb)
+          if packed != lastPB {
+            // the first one goes just before the note so it starts already bent
+            let when = t == 0 ? start - 0.003 : start + t
+            pending.append(Pending(time: when, status: 0xE0 | ch, d1: lsb, d2: msb))
+            lastPB = packed
+          }
+          if d.vibratoMode == 1, vibrato > 0 {
+            let ramp = t > d.vibratoDelay ? min(1, (t - d.vibratoDelay) / 0.2) : 0
+            let m = Int((min(1, vibrato / 100) * 127 * ramp).rounded())
+            if m != lastMod {
+              pending.append(Pending(time: start + t, status: 0xB0 | ch, d1: 1, d2: UInt8(m)))
+              lastMod = m
+            }
+          }
+          t += stepSec
+        }
+        // Back to the centre when the note ends, unless the next note follows straight on and sets its own.
+        let nextStarts = i + 1 < events.count ? time + Double(max(0, events[i + 1][0])) * stepDur : Double.infinity
+        if nextStarts - off > 0.15 {
+          let (lsb, msb) = pb(0)
+          pending.append(Pending(time: off + 0.03, status: 0xE0 | ch, d1: lsb, d2: msb))
+          if d.vibratoMode == 1 { pending.append(Pending(time: off + 0.03, status: 0xB0 | ch, d1: 1, d2: 0)) }
+        }
+      }
       pending.append(Pending(time: start, status: 0x90 | ch, d1: note, d2: vel))
       pending.append(Pending(time: off, status: 0x80 | ch, d1: note, d2: 0))
     }
@@ -1605,6 +1677,10 @@ final class MidiBedEngine {
     allNotesOff()
     if midi {
       for ch in 0..<16 { sendMIDI(0xB0 | UInt8(ch), 120, 0, to: [0, 1, 2, 3, 4, 5]) }
+      // and put the pitch bend back to the centre on the MidiDancer channel
+      if let dch = config?.dancer.channel {
+        sendMIDI(0xE0 | UInt8(max(0, min(15, dch))), 0, 0x40, to: [0, 1, 2, 3, 4, 5])
+      }
     }
   }
 
