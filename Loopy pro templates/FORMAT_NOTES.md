@@ -66,3 +66,21 @@ Padded, SL4 IP5 slim, RC-30 style, Serial Looper Unquantized, Stan Loops SOLO V2
 Zoom UAC Guitars vocals. Device types in all of them are only `MIDI` (iRig BlueBoard, SINCO, FootCtrl, Quad Cortex,
 AIRSTEP, ...) and `Internal`. Plan: when a file with a key binding arrives, decode its device Type/Trigger, then add
 key triggers beside the pedal's MIDI triggers on the same widgets (a 4-button MIDI pedal AND the Hable keys).
+
+## Typing-keyboard bindings DECODED (from KeyboardLoopy, 2026-10-12)
+- A keyboard controller is a profile file of `Type: Keyboard`, `Device: Keyboard`, `Device Name: Keyboard`, stored as
+  `Control Profiles/<ProfileName>.lpcontrolprofile/Keyboard.Keyboard.controllerprofile`.
+- A binding's `Trigger` is the plain key name: `a`, `1`, `Spacebar`, `Equal Sign`, `Hyphen`. Actions are the same as
+  for MIDI: e.g. `Trigger Widget` with `Widget Action: Press`, or `Track Record/Stop` directly on a `Subject: #<track id>`.
+- A profile is switched on by its NAME in the Project object's `activeControlProfileNames` (a Set) inside
+  Project.sqlite. Serial Looper has Pedalboard, Record Mode, Always On, Clear All Multi-Switch; Play Mode / Record Mode
+  are swapped by the Mode dial.
+- A `.lpproj` file is a zip whose root holds Project.sqlite, Info.plist, Resources.plist, Thumbnail.jpg and the control
+  profile folders. (Patchstorage wraps it in another zip.)
+- Other things KeyboardLoopy shows: `Toggle Metronome` (key 0), `Set Tempo` +/-10, `Undo`, `Track Select`,
+  `Clear Track` on `Selected Track`, `Track Play/Stop` on `All Tracks`.
+
+## Built variant (tools/build_keyboard_variant.py -> built/Serial Looper Keyboard.lpproj)
+Serial Looper Unquantized unchanged, plus a Keyboard profile: A S D record/overdub loops A B C, Q W E play/stop,
+F peel, G replace, R retro record, V reverse, X clear all, O fade out, M pedal mode, I init. Only the Project object's
+activeControlProfileNames differs from the original (verified by diffing every object). UNTESTED inside Loopy Pro.

@@ -25,3 +25,4 @@ builds/
 Loopy pro templates/*.zip
 Loopy pro templates/*.lpproj
 Loopy pro templates/*.lpproj_dir/
+Loopy pro templates/built/
