@@ -104,3 +104,13 @@ describe('settings', () => {
     expect(describeFill({ ...defaultFill, enabled: true }, 4)).toBe('A fill every 8 bars, before a scene change, as the drums come back, and when you ask, 70 percent of the time');
   });
 });
+
+describe('fills follow the drum layer', () => {
+  it('are not sent to the engine as enabled while drums are muted or another part is soloed', () => {
+    const base = { ...defaultState, fill: { ...defaultState.fill, enabled: true } };
+    expect(JSON.parse(toEngineJson({ ...base, percussion: true })).fill.enabled).toBe(true);
+    expect(JSON.parse(toEngineJson({ ...base, percussion: false })).fill.enabled).toBe(false);
+    expect(JSON.parse(toEngineJson({ ...base, solo: 'pad' })).fill.enabled).toBe(false);
+    expect(JSON.parse(toEngineJson({ ...base, percussion: false, solo: 'drums' })).fill.enabled).toBe(true);
+  });
+});

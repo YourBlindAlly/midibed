@@ -979,6 +979,9 @@ final class MidiBedEngine {
       {
         due = true // the drums come back at the next bar line
       }
+      // During a breakdown the drums are out on purpose: no scheduled fill, except the one that leads the
+      // drums back in (the afterBreakdown trigger above).
+      if due, drumRT.alt, !(f.afterBreakdown && drumRT.barsLeft == 1) { due = false }
       if due, Double.random(in: 0..<1, using: &rng) < f.chance { play = true }
       if fillRequested {
         play = true

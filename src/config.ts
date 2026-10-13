@@ -949,7 +949,8 @@ export function toEngineJson(s: BedState): string {
     },
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
     fill: {
-      enabled: s.fill.enabled,
+      // Fills are drums: with the drum layer muted (or another part soloed) they stay silent too.
+      enabled: s.fill.enabled && (s.solo ? s.solo === 'drums' : s.percussion),
       everyBars: s.fill.everyBars,
       beforeScene: s.fill.beforeScene,
       afterBreakdown: s.fill.afterBreakdown,
