@@ -499,6 +499,7 @@ final class MidiBedEngine {
     syncWanderers()
     rebuildChannelPorts(decoded)
     synth.bassChannel = decoded.drone.channel
+    synth.setPartChannels(bass: decoded.drone.channel, pad: decoded.pad.channel, dancer: decoded.dancer.channel)
     updateIdleClock()
     if running {
       reconcileDrone()
@@ -606,6 +607,19 @@ final class MidiBedEngine {
     queue.async {
       if let ch = self.config?.drone.channel { self.synth.bassChannel = ch }
       self.synth.configureBass(on: c.enabled, exclusive: c.exclusive, values: c.values.map { Float($0) })
+    }
+  }
+
+  /// The built-in effects (UglyFX): the settings as one list of numbers in `UglyFXParam` order.
+  /// Kept out of the main configuration so editing a knob never re-queues a scene.
+  func setFX(json: String) {
+    struct FXConfig: Decodable { var values: [Double] }
+    guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(FXConfig.self, from: data) else {
+      NSLog("MidiBedEngine: could not decode effects")
+      return
+    }
+    queue.async {
+      for i in 0..<min(c.values.count, UglyFXParam.count) { self.synth.fx.params[i] = Float(c.values[i]) }
     }
   }
 

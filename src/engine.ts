@@ -15,6 +15,7 @@ type Native = {
   playFill(): void;
   setDrumVoices(json: string): void;
   setBassVoice(json: string): void;
+  setFX(json: string): void;
   reclaimKeyFocus(): void;
   applyConfig(json: string, queued: boolean): void;
   setScenes(json: string): void;
@@ -117,6 +118,7 @@ export const engine = {
   setDrumVoices: (json: string) => native?.setDrumVoices(json),
   /** The built-in bass voice on/off and its settings. */
   setBassVoice: (json: string) => native?.setBassVoice(json),
+  setFX: (json: string) => native?.setFX(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */
   reclaimKeys: () => native?.reclaimKeyFocus(),
   /** queued = wait for the next bar line while playing (scene switches). */

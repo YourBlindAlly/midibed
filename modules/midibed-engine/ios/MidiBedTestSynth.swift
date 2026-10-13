@@ -114,6 +114,10 @@ final class MidiBedTestSynth {
   // The bass voice (BassVoice.swift): when on, notes on `bassChannel` play it instead of a pad voice.
   // With `bassExclusive` the built-in sound plays ONLY that channel (no pads, drums or other channels).
   private let bass = BassVoice()
+  /// The built-in effects (UglyFX.swift) and which part each MIDI channel belongs to
+  /// (0 bass, 1 pad, 2 MidiDancer; drums are always part 3).
+  let fx = UglyFX()
+  private var partOfChannel = [Int](repeating: 1, count: 16)
   var bassOn = false
   var bassExclusive = false
   var bassChannel = -1
@@ -124,6 +128,13 @@ final class MidiBedTestSynth {
     for d in list where d.note >= 0 && d.note < 128 {
       drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(12, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
     }
+  }
+
+  /// Control side: which MIDI channel each pitched part plays on, so each can have its own effects.
+  func setPartChannels(bass b: Int, pad p: Int, dancer d: Int) {
+    var map = [Int](repeating: 1, count: 16)
+    for (ch, part) in [(p, 1), (d, 2), (b, 0)] where ch >= 0 && ch < 16 { map[ch] = part }
+    partOfChannel = map
   }
 
   /// Control side: switch the bass voice on or off and give it its settings (BassParam order).
@@ -181,6 +192,7 @@ final class MidiBedTestSynth {
     sampleRate = Float(format.sampleRate > 0 ? format.sampleRate : 44100)
     let renderFormat = AVAudioFormat(standardFormatWithSampleRate: Double(sampleRate), channels: 2)
     bass.setSampleRate(sampleRate)
+    fx.setSampleRate(sampleRate)
 
     let node = AVAudioSourceNode(format: renderFormat ?? format) { [unowned self] _, _, frameCount, audioBufferList -> OSStatus in
       self.render(frameCount: Int(frameCount), bufferList: audioBufferList)
@@ -571,7 +583,10 @@ final class MidiBedTestSynth {
     let da3 = dg * da2
 
     for frame in 0..<frameCount {
-      var out: Float = 0
+      // Each part's mono signal, so the effects (UglyFX) can treat the parts separately.
+      var partBass: Float = 0
+      var partPad: Float = 0
+      var partDancer: Float = 0
       var drumSum: Float = 0
 
       for c in 0..<16 {
@@ -596,7 +611,12 @@ final class MidiBedTestSynth {
           pads[i].env -= pads[i].env * release
           if pads[i].env < 0.0005 { pads[i].active = false }
         }
-        out += v2 * pads[i].env * pads[i].velocity * 0.09 * expCurrent[Int(pads[i].channel)]
+        let padOut = v2 * pads[i].env * pads[i].velocity * 0.09 * expCurrent[Int(pads[i].channel)]
+        switch partOfChannel[Int(pads[i].channel)] {
+        case 0: partBass += padOut
+        case 2: partDancer += padOut
+        default: partPad += padOut
+        }
       }
 
       for i in 0..<drumCount where drums[i].active {
@@ -722,25 +742,36 @@ final class MidiBedTestSynth {
       let dv2 = drumIc2 + da2 * drumIc1 + da3 * dv3
       drumIc1 = 2 * dv1 - drumIc1
       drumIc2 = 2 * dv2 - drumIc2
-      out += dv2
 
       if bassOn, bassChannel >= 0, bassChannel < 16 {
-        out += bass.nextSample() * 0.85 * expCurrent[bassChannel]
+        partBass += bass.nextSample() * 0.85 * expCurrent[bassChannel]
       }
 
       // The built-in test sound switch silences the instruments, but NOT the
       // transition noise: you want that even when another app makes the music.
-      if !on { out = 0 }
+      if !on {
+        partBass = 0
+        partPad = 0
+        partDancer = 0
+      }
+      let partDrums: Float = on ? dv2 : 0
       var noiseOut: Float = 0
       for i in 0..<noiseVoiceCount where noiseVoices[i].active {
         noiseOut += renderNoise(i, dt: dt, sr: sr)
       }
+      // The parts go through the effects (stereo out); the transition noise stays dry and centred.
+      var left: Float = 0
+      var right: Float = 0
+      fx.process(partBass, partPad, partDancer, partDrums, left: &left, right: &right)
       // gentle soft clip so stacked voices can't blast
-      out = tanhf(out + noiseOut)
+      left = tanhf(left + noiseOut)
+      right = tanhf(right + noiseOut)
 
+      var channelIndex = 0
       for buffer in abl {
         let p = buffer.mData!.assumingMemoryBound(to: Float.self)
-        p[frame] = out
+        p[frame] = channelIndex == 1 ? right : left
+        channelIndex += 1
       }
     }
   }

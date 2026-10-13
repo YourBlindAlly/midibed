@@ -40,6 +40,7 @@ import {
   toEngineJson,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
+import { DELAY_NOTES, FxPart, FxPartState, panText, uglyFxJson } from './src/uglyfx';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
 import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { FillState, describeFill, fillPalette } from './src/fill';
@@ -120,6 +121,7 @@ function announceLater(message: string, delay = 400) {
 }
 const channelText = (v: number) => String(v + 1);
 const barsText = (v: number) => (v === 0 ? 'off' : v === 1 ? '1 bar' : `${v} bars`);
+const fxPercent = (v: number) => (v === 0 ? 'off' : `${v} percent`);
 const fadeText = (v: number) => (v === 0 ? 'none' : `${(v / 10).toFixed(1)} seconds`);
 
 export default function App() {
@@ -364,6 +366,8 @@ export default function App() {
     announceLater(`${MODE_NAMES[next.harmony.mode]}, key ${noteName(keyRoot(next)).replace(/-?\d+$/, '')}. The same chords keep playing.`, 500);
   };
 
+  const patchFxPart = (p: FxPart, change: Partial<FxPartState>) =>
+    setState((s) => ({ ...s, fx: { ...s.fx, [p]: { ...s.fx[p], ...change } } }));
   const patchFade =(p: Partial<FadeState>) => setState((s) => ({ ...s, fade: { ...s.fade, ...p } }));
   const loopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendLoopChoice = (l: LoopsState) =>
@@ -486,6 +490,14 @@ export default function App() {
     const t = setTimeout(() => engine.setBassVoice(bassJson), 80);
     return () => clearTimeout(t);
   }, [bassJson, ready]);
+
+  // The built-in effects (Ugly FX): send the settings whenever they or the tempo change (the delay follows the tempo).
+  const fxJson = uglyFxJson(state.fx, state.bpm);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setFX(fxJson), 80);
+    return () => clearTimeout(t);
+  }, [fxJson, ready]);
 
   // Mixer: send every part's level as a volume control (only when 'Send levels' is on).
   const sendMixerLevels = () => {
@@ -1214,6 +1226,55 @@ export default function App() {
               <Text style={styles.note}>This part has no fade of its own: switching it on or off is immediate.</Text>
             )}
           </Section>
+
+          {part !== 'loops' && (
+            <Section title={`${partName}: Ugly FX`}>
+              <Stepper
+                label={`${partName} pan`}
+                value={state.fx[part as FxPart].pan}
+                onChange={(v) => patchFxPart(part as FxPart, { pan: v })}
+                min={-100}
+                max={100}
+                step={10}
+                bigStep={50}
+                format={panText}
+                hint="Where this part sits left to right in the built-in sound"
+              />
+              <Stepper
+                label={`${partName} reverb`}
+                value={state.fx[part as FxPart].reverb}
+                onChange={(v) => patchFxPart(part as FxPart, { reverb: v })}
+                min={0}
+                max={100}
+                step={5}
+                bigStep={20}
+                format={fxPercent}
+                hint="How much of this part goes into the shared reverb"
+              />
+              <Stepper
+                label={`${partName} delay`}
+                value={state.fx[part as FxPart].delay}
+                onChange={(v) => patchFxPart(part as FxPart, { delay: v })}
+                min={0}
+                max={100}
+                step={5}
+                bigStep={20}
+                format={fxPercent}
+                hint="How much of this part goes into the shared delay"
+              />
+              <Stepper
+                label={`${partName} chorus`}
+                value={state.fx[part as FxPart].chorus}
+                onChange={(v) => patchFxPart(part as FxPart, { chorus: v })}
+                min={0}
+                max={100}
+                step={5}
+                bigStep={20}
+                format={fxPercent}
+                hint="Thickens and widens this part"
+              />
+            </Section>
+          )}
 
           <Section title={`${partName}: what it plays`}>
             {part === 'bass' && (
@@ -1960,6 +2021,52 @@ export default function App() {
               hint="Off: only the clock is sent, so an app that follows it is started and stopped by the loop controls instead. On: Play and Stop also send MIDI Start and Stop messages"
             />
             <Toggle label="Built-in test sound" value={state.synthOut} onChange={(v) => patch({ synthOut: v })} hint="Turn off when another app is making the sound" />
+          </Section>
+
+          <Section title="Ugly FX: shared reverb and delay">
+            <Text style={styles.note}>These effects are in MidiBed's own sound only. Each part's amounts are on the Parts tab.</Text>
+            <Stepper
+              label="Reverb size"
+              value={state.fx.size}
+              onChange={(v) => patch({ fx: { ...state.fx, size: v } })}
+              min={0}
+              max={100}
+              step={5}
+              bigStep={20}
+              format={(v) => `${v} percent`}
+              hint="From a small room to a long tail"
+            />
+            <Stepper
+              label="Reverb darkness"
+              value={state.fx.damp}
+              onChange={(v) => patch({ fx: { ...state.fx, damp: v } })}
+              min={0}
+              max={100}
+              step={5}
+              bigStep={20}
+              format={(v) => `${v} percent`}
+              hint="Higher is a darker, softer tail"
+            />
+            <Stepper
+              label="Delay time"
+              value={state.fx.delayNote}
+              onChange={(v) => patch({ fx: { ...state.fx, delayNote: v } })}
+              min={0}
+              max={2}
+              format={(v) => DELAY_NOTES[v] ?? ''}
+              hint="A note length at the current tempo, so the repeats stay in time"
+            />
+            <Stepper
+              label="Delay repeats"
+              value={state.fx.repeats}
+              onChange={(v) => patch({ fx: { ...state.fx, repeats: v } })}
+              min={0}
+              max={70}
+              step={5}
+              bigStep={10}
+              format={(v) => `${v} percent`}
+              hint="How long the echoes last. Keep it low for a small delay"
+            />
           </Section>
 
           <Section title="Levels and fades">

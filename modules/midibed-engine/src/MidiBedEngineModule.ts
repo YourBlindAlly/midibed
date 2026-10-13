@@ -12,6 +12,8 @@ declare class MidiBedEngineModule extends NativeModule<MidiBedEngineEvents> {
   setDrumVoices(json: string): void;
   /** The built-in bass voice: JSON {enabled, exclusive, values[]} (see src/bassvoice.ts). */
   setBassVoice(json: string): void;
+  /** The built-in effects: JSON {values[]} in the order of UglyFXParam (see src/uglyfx.ts). */
+  setFX(json: string): void;
   reclaimKeyFocus(): void;
   /** Whole settings object as a JSON string; see MidiBedConfig in MidiBedEngine.swift. */
   applyConfig(json: string, queued: boolean): void;
