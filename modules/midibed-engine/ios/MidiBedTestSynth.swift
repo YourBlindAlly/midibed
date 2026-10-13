@@ -670,12 +670,6 @@ final class MidiBedTestSynth {
           let env = (1 - expf(-t / attack)) * expf(-t * 30 / D)
           s = drums[i].lp2 * env * 5.45
           alive = t <= 0.25 * D + 0.05
-        case 7: // tom: falling sine with a little stick noise
-          let freq = (80 + 130 * expf(-t * 18)) * f
-          drums[i].phase += freq * dt
-          if drums[i].phase >= 1 { drums[i].phase -= 1 }
-          s = sinf(2 * Float.pi * drums[i].phase) * expf(-t * 8 / D) * 0.9 + noise * snap * 0.25 * expf(-t * 90)
-          alive = t <= 0.7 * D + 0.05
         case 9: // tambourine: band-limited noise plus ringing jingle partials
           let r = 0.70 - 0.25 * tone
           let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
@@ -693,17 +687,27 @@ final class MidiBedTestSynth {
           let env = 1 - expf(-t / attack)
           s = (drums[i].lp * 1.58 * expf(-t * 26 / D) + jingle * 0.158 * expf(-t * 14 / D)) * env
           alive = t <= 0.45 * D + 0.05
-        case 10, 11, 12: // low, mid and high tom
-          var b: Float = 62
-          var sweep: Float = 95
-          var rate: Float = 14
-          var dec: Float = 6
-          if drums[i].kind == 11 { b = 98; sweep = 130; rate = 16; dec = 7.5 }
-          if drums[i].kind == 12 { b = 150; sweep = 200; rate = 20; dec = 9.5 }
-          let freq = (b + sweep * expf(-t * rate)) * f
+        case 7, 10, 11, 12: // toms: a small pitch drop, membrane overtones and a stick attack (designed in scratchpad tom_check.py)
+          var b: Float = 105
+          var drop: Float = 0.30
+          var rate: Float = 40
+          var dec: Float = 7.0
+          if drums[i].kind == 10 { b = 82; rate = 38; dec = 6.2 }
+          if drums[i].kind == 11 { b = 118; rate = 40; dec = 7.5 }
+          if drums[i].kind == 12 { b = 168; drop = 0.28; rate = 42; dec = 9.0 }
+          let freq = b * (1 + drop * expf(-t * rate)) * f
           drums[i].phase += freq * dt
           if drums[i].phase >= 1 { drums[i].phase -= 1 }
-          s = sinf(2 * Float.pi * drums[i].phase) * expf(-t * dec / D) * 0.9 + noise * snap * 0.25 * expf(-t * 90)
+          let ph = drums[i].phase
+          let over = 0.35 + 1.3 * tone // tone brings the overtones up
+          var body = sinf(2 * Float.pi * ph) * expf(-t * dec / D)
+          body += sinf(2 * Float.pi * 1.59 * ph) * 0.55 * over * expf(-t * dec * 1.7 / D)
+          body += sinf(2 * Float.pi * 2.14 * ph) * 0.32 * over * expf(-t * dec * 2.2 / D)
+          body += sinf(2 * Float.pi * 2.65 * ph) * 0.18 * over * expf(-t * dec * 2.8 / D)
+          body += sinf(2 * Float.pi * 2.92 * ph) * 0.10 * over * expf(-t * dec * 3.4 / D)
+          drums[i].lp += 0.45 * (noise - drums[i].lp)
+          let stick = drums[i].lp * snap * 0.8 * expf(-t * 260)
+          s = (body * 0.55 + stick) * 0.91
           alive = t <= 0.9 * D + 0.05
         default: // wood block
           s = sinf(2 * Float.pi * 820 * f * t) * expf(-t * 45 / D) * 0.7
