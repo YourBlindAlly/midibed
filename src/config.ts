@@ -1,4 +1,5 @@
 import { FxState, defaultFx } from './uglyfx';
+import { EndingState, defaultEnding } from './ending';
 import { buildBassChords, buildPadChords, clampMode } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
@@ -213,6 +214,8 @@ export type BedState = {
   bassVoice: BassVoiceState;
   /** The built-in effects (src/uglyfx.ts): global, not in scenes or journeys. */
   fx: FxState;
+  /** How Stop ends the music (src/ending.ts): global. */
+  ending: EndingState;
   /** Hear only this part. Never saved as on (like Freeze): it silences the others by the normal fades. */
   solo: Layer | null;
   /** Per-part levels sent as volume control changes (see mixer.ts). Global. */
@@ -550,6 +553,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   midiControl: { enabled: true, channel: -1, map: '{}' },
   bassVoice: defaultBassVoice,
   fx: defaultFx,
+  ending: defaultEnding,
   solo: null,
   mixer: defaultMixer,
   shortcuts: true,

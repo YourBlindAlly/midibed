@@ -16,6 +16,7 @@ export type ShortcutAction =
   | { type: 'freeze' }
   | { type: 'panic' }
   | { type: 'fill' }
+  | { type: 'stopStyle' }
   | { type: 'layer'; layer: Layer }
   | { type: 'solo'; layer: Layer }
   | { type: 'armSolo' }
@@ -60,6 +61,8 @@ export function actionForKey(raw: string, shift = false): ShortcutAction | null 
       return { type: 'panic' };
     case 'u':
       return { type: 'fill' };
+    case 't':
+      return { type: 'stopStyle' };
     case 'o':
       return { type: 'armSolo' };
     case 'x':
@@ -78,6 +81,7 @@ export const SHORTCUT_HELP: string[] = [
   'F: freeze on or off',
   'P: all notes off',
   'U: a drum fill now',
+  'T: change the type of stop (now, end of the bar, end of the progression, end of the scene)',
   'D: drums on or off, C: chord pad, R: bass drone (root), M: MidiDancer, L: loops',
   'A capital letter (or Shift) solos that part: Shift D hears only the drums. Pressing it again clears the solo.',
   'No capitals? Press O, then the part letter, to solo it. X clears the solo.',

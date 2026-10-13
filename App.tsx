@@ -40,6 +40,7 @@ import {
   toEngineJson,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
+import { ENDING_FADE_NAMES, STOP_STYLE_NAMES, barsLeftText, endingJson, endingSentence, nextStopStyle } from './src/ending';
 import { DELAY_NOTES, FxPart, FxPartState, panText, uglyFxJson } from './src/uglyfx';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
 import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
@@ -50,7 +51,7 @@ import { levelText, mixerMessages } from './src/mixer';
 import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
-import { engine, hasNativeEngine, onBeat, onMidiIn, onMotion, onScene, testSweep } from './src/engine';
+import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion, onScene, testSweep } from './src/engine';
 import {
   CONTOUR_NAMES,
   DANCER_MODE_NAMES,
@@ -190,6 +191,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const offEnding = onEnding((e) => setEndingBars(e.reason === 'end' ? 0 : e.barsLeft));
+    const offEnded = onEnded(() => {
+      setPlaying(false);
+      setPosition('1.1');
+      motionRef.current = { bass: false, pad: false, drums: false };
+      setMotionNow(motionRef.current);
+      setAdvanceInfo({ barsLeft: 0, target: -1 });
+      setEndingBars(null);
+      if (latest.current.announce) announceLater('Ended', 100);
+    });
+    return () => {
+      offEnding();
+      offEnded();
+    };
+  }, []);
+
+  useEffect(() => {
     return onMotion((e) => {
       const now = { bass: e.bass, pad: e.pad, drums: e.drums };
       const prev = motionRef.current;
@@ -236,20 +254,37 @@ export default function App() {
     }
   }, [playing]);
 
-  const togglePlay = () => {
+  // An orchestrated stop that is waiting: null = none, else the bars left (-1 = not known yet).
+  const [endingBars, setEndingBars] = useState<number | null>(null);
+
+  const resetAfterStop = () => {
+    setPlaying(false);
+    setPosition('1.1');
+    motionRef.current = { bass: false, pad: false, drums: false };
+    setMotionNow(motionRef.current);
+    setAdvanceInfo({ barsLeft: 0, target: -1 });
+    setEndingBars(null);
+  };
+
+  /** Start, stop, or set an ending (the chosen type of stop). Returns what to say. */
+  const togglePlay = (): string => {
     if (playing) {
+      const style = latest.current.ending.style;
+      if (style > 0 && endingBars === null) {
+        engine.requestEnd(endingJson(latest.current.ending));
+        setEndingBars(-1);
+        return endingSentence(style);
+      }
+      // No ending chosen, or one is already waiting: stop at once.
       engine.stop();
-      setPlaying(false);
-      setPosition('1.1');
-      motionRef.current = { bass: false, pad: false, drums: false };
-      setMotionNow(motionRef.current);
-      setAdvanceInfo({ barsLeft: 0, target: -1 });
-    } else {
-      engine.applyConfig(json);
-      engine.start();
-      setPlaying(true);
-      sendMixerLevels();
+      resetAfterStop();
+      return 'Stopped';
     }
+    engine.applyConfig(json);
+    engine.start();
+    setPlaying(true);
+    sendMixerLevels();
+    return 'Playing';
   };
 
   // Tabs. A three-finger swipe (or the braille-keyboard equivalent) moves between them.
@@ -265,9 +300,7 @@ export default function App() {
   // stops playback. It is received by the native Pager view around the whole screen
   // (not an accessibility element, so every control inside stays reachable).
   const onMagicTap = () => {
-    const stopping = playing;
-    togglePlay();
-    announceLater(stopping ? 'Stopped' : 'Playing', 300);
+    announceLater(togglePlay(), 300);
   };
 
   const patch = (p: Partial<BedState>) => setState((s) => ({ ...s, ...p }));
@@ -585,6 +618,12 @@ export default function App() {
         engine.playFill();
         announceLater('Fill', 100);
         break;
+      case 'stopStyle': {
+        const next = nextStopStyle(state.ending.style);
+        patch({ ending: { ...state.ending, style: next } });
+        announceLater(`Stop style: ${STOP_STYLE_NAMES[next]}`, 100);
+        break;
+      }
       case 'layer': {
         const name = LAYER_NAMES[action.layer];
         let on: boolean;
@@ -876,10 +915,13 @@ export default function App() {
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={[styles.play, playing && { backgroundColor: '#7d2f2f' }]}
             accessibilityRole="button"
-            accessibilityLabel={playing ? 'Stop' : 'Play'}
-            onPress={togglePlay}
+            accessibilityLabel={playing ? (endingBars !== null ? 'Stop now' : 'Stop') : 'Play'}
+            onPress={() => {
+              const said = togglePlay();
+              if (said !== 'Stopped' && said !== 'Playing') announceLater(said, 300);
+            }}
           >
-            <Text style={styles.playText}>{playing ? 'Stop' : 'Play'}</Text>
+            <Text style={styles.playText}>{playing ? (endingBars !== null ? 'Stop now' : 'Stop') : 'Play'}</Text>
           </Pressable>
 
           {/* Fixed label: the value changes every beat and must not make
@@ -887,6 +929,11 @@ export default function App() {
           <View accessible accessibilityLabel="Bar and beat position" style={styles.positionBox}>
             <Text style={styles.position}>{position}</Text>
           </View>
+          {playing && endingBars !== null && endingBars > 0 && (
+            <View accessible accessibilityLabel="Ending" accessibilityValue={{ text: barsLeftText(endingBars) }}>
+              <Text style={styles.note}>{barsLeftText(endingBars)}</Text>
+            </View>
+          )}
 
             <View style={styles.sceneRow}>
               {Array.from({ length: SCENE_COUNT }, (_, i) => {
@@ -990,6 +1037,53 @@ export default function App() {
             <Toggle label="Solo drums" value={state.solo === 'drums'} onChange={(v) => setSolo(v ? 'drums' : null)} />
             <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
             <Toggle label="Solo loops" value={state.solo === 'loops'} onChange={(v) => setSolo(v ? 'loops' : null)} />
+          </Section>
+
+          <Section title="Ending">
+            <Stepper
+              label="Stop style"
+              value={state.ending.style}
+              onChange={(v) => patch({ ending: { ...state.ending, style: v } })}
+              min={0}
+              max={3}
+              format={(v) => STOP_STYLE_NAMES[v] ?? ''}
+              hint="What the Stop button, the magic tap and the S key do. Press stop again while an ending is waiting to stop at once. The T key changes this"
+            />
+            <Stepper
+              label="Ending shape"
+              value={state.ending.fade}
+              onChange={(v) => patch({ ending: { ...state.ending, fade: v } })}
+              min={0}
+              max={2}
+              format={(v) => ENDING_FADE_NAMES[v] ?? ''}
+            />
+            <Toggle
+              label="Final kick on the last downbeat"
+              value={state.ending.finalHit}
+              onChange={(v) => patch({ ending: { ...state.ending, finalHit: v } })}
+            />
+            <Toggle
+              label="Ending noise on the last downbeat"
+              value={state.ending.noise}
+              onChange={(v) => patch({ ending: { ...state.ending, noise: v } })}
+            />
+            <Stepper
+              label="Ending noise sound"
+              value={state.ending.noiseShape}
+              onChange={(v) => patch({ ending: { ...state.ending, noiseShape: v } })}
+              min={0}
+              max={4}
+              format={(v) => NOISE_SHAPE_NAMES[v] ?? ''}
+            />
+            <Stepper
+              label="Ending noise level"
+              value={state.ending.noiseLevel}
+              onChange={(v) => patch({ ending: { ...state.ending, noiseLevel: v } })}
+              min={0}
+              max={100}
+              step={5}
+              format={(v) => `${v} percent`}
+            />
           </Section>
 
           <Section title="Tempo and swing">

@@ -24,6 +24,16 @@ struct MidiBedDrumConfig: Decodable {
   var looseMs: Double       // each hit up to this many ms late, at random
 }
 
+/// An orchestrated stop: where it lands and how it sounds.
+struct MidiBedEndRequest: Decodable {
+  var style: Int            // 1 end of this bar, 2 end of the progression, 3 end of the scene
+  var fadeBars: Int         // 0 = cut on the bar line (notes and reverb ring out), 1 or 2 = fade over the last bars
+  var finalHit: Bool        // a kick on the last downbeat
+  var noise: Bool           // a transition noise on the last downbeat
+  var noiseShape: Int
+  var noiseLevel: Double
+}
+
 /// Patterns that change by themselves (kick excluded).
 struct MidiBedEvolveConfig: Decodable {
   var everyBars: Int        // 0 = off
@@ -309,6 +319,11 @@ final class MidiBedEngine {
   private var inputDestination = MIDIEndpointRef()
   private var lastControlTime: [Int: Double] = [:]
 
+  /// Called on the main queue when an orchestrated stop is set (bars left) and every bar line after,
+  /// and once more (onEnded) when the engine has stopped by itself at the end.
+  var onEnding: (([String: Any?]) -> Void)?
+  var onEnded: (() -> Void)?
+
   /// Called on the main queue every bar line (how long is left in this scene) and when the engine
   /// moved to another scene by itself.
   var onScene: (([String: Any?]) -> Void)?
@@ -368,6 +383,11 @@ final class MidiBedEngine {
 
   // Drum fills: the normal pattern is silent from fillStartTick up to (not including) fillEndTick.
   private var fillStartTick = 0
+  // Orchestrated stop: the bar line (absolute tick) the music ends on, its plan, and the fade factor.
+  private var endTick = -1
+  private var endPlan: MidiBedEndRequest?
+  private var endFade = 1.0
+  private var ended = false
   // Evolving patterns: per drum, how far the hit count and rotation have been nudged, and how many nudges so far.
   private var evoHits: [Int] = []
   private var evoRot: [Int] = []
@@ -693,8 +713,18 @@ final class MidiBedEngine {
   }
 
   func stop() {
-    queue.async {
+    queue.async { self.stopOnQueue(soft: false) }
+  }
+
+  /// `soft`: the end of an orchestrated stop. Notes are released one by one and all-notes-off is sent, but
+  /// NOT all-sound-off (CC 120), so a synth lets its release and reverb ring out.
+  private func stopOnQueue(soft: Bool) {
+    do {
       guard self.running else { return }
+      self.endTick = -1
+      self.endPlan = nil
+      self.endFade = 1
+      self.ended = false
       self.running = false
       self.timer?.cancel()
       self.timer = nil
@@ -720,7 +750,7 @@ final class MidiBedEngine {
       let padCh = self.config?.pad.channel
       self.releaseDrone()
       self.releasePad()
-      self.silence()
+      self.silence(soft: soft)
       if let cfg = self.config {
         if self.loopsPlaying { self.stopLoops(cfg) }
         if cfg.clock && cfg.clockTransport { self.emit(0xFC, 0, 0) } // MIDI Stop
@@ -903,6 +933,27 @@ final class MidiBedEngine {
     }
     if tick == 0 { startLoops(cfg, at: time) }
 
+    // Orchestrated stop: fade, the fill into the last bar line, and the ending itself.
+    if ended { return }
+    if endTick >= 0 {
+      if let plan = endPlan, plan.fadeBars > 0 {
+        let start = endTick - plan.fadeBars * barTicks
+        endFade = tick < start ? 1 : max(0, Double(endTick - tick) / Double(max(1, endTick - start)))
+      } else {
+        endFade = 1
+      }
+      if tick >= endTick {
+        // (If the planned bar line was missed because the engine stalled, end now.)
+        performEnding(at: time, tickDur: tickDur, cfg: cfg)
+        return
+      }
+      if (endTick - tick) % barTicks == 0 {
+        let left = (endTick - tick) / barTicks
+        let cb = onEnding
+        DispatchQueue.main.async { cb?(["barsLeft": left, "reason": "tick"]) }
+      }
+    }
+
     // Breathing: at every bar line after the scene's first, step each rule.
     let sceneTick = tick - padStartTick
     if sceneTick > 0, sceneTick % barTicks == 0, !cfg.frozen {
@@ -984,6 +1035,7 @@ final class MidiBedEngine {
         vel *= 1 - drum.humanize * 0.4 * Double.random(in: 0..<1, using: &rng)
       }
       if i < drumLevels.count { vel *= drumLevels[i] }
+      vel *= endFade
       guard vel >= 1 else { continue }
       let v = UInt8(max(1, min(127, Int(vel))))
       let ch = UInt8(max(0, min(15, drum.channel)))
@@ -991,6 +1043,87 @@ final class MidiBedEngine {
       let start = time + swingDelay + loose
       pending.append(Pending(time: start, status: 0x90 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: v))
       pending.append(Pending(time: start + 0.09, status: 0x80 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: 0))
+    }
+  }
+
+  /// The planned bar line has arrived: the last hit, release everything softly and let the tails ring,
+  /// then stop the transport a moment later (so the final hit and the noise are still delivered).
+  private func performEnding(at time: Double, tickDur: Double, cfg: MidiBedConfig) {
+    guard let plan = endPlan else {
+      endTick = -1
+      return
+    }
+    if plan.finalHit, let k = cfg.drums.first(where: { $0.role == "kick" && $0.enabled }) {
+      let ch = UInt8(max(0, min(15, k.channel)))
+      let note = UInt8(max(0, min(127, k.note)))
+      pending.append(Pending(time: time, status: 0x90 | ch, d1: note, d2: 124))
+      pending.append(Pending(time: time + 0.25, status: 0x80 | ch, d1: note, d2: 0))
+    }
+    if plan.noise {
+      let bpm = max(20.0, min(300.0, cfg.bpm))
+      let secs = noiseSeconds(shape: plan.noiseShape, beats: 8, bpm: bpm)
+      pendingNoise.append(
+        PendingNoise(time: time, tag: 9, shape: plan.noiseShape, color: 2, pre: 0, post: max(secs.post, 1.5), offset: 0, level: plan.noiseLevel))
+    }
+    // The held bass and pad notes end exactly on the bar line (not a lookahead early).
+    for h in heldDrone + heldPad {
+      pending.append(Pending(time: time, status: 0x80 | UInt8(h.channel), d1: UInt8(h.note), d2: 0))
+    }
+    heldDrone = []
+    heldPad = []
+    ended = true
+    endTick = -1
+    endPlan = nil
+    endFade = 1
+    let cb = onEnding
+    DispatchQueue.main.async { cb?(["barsLeft": 0, "reason": "end"]) }
+    queue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+      guard let self = self, self.running, self.ended else { return }
+      self.stopOnQueue(soft: true)
+      let done = self.onEnded
+      DispatchQueue.main.async { done?() }
+    }
+  }
+
+  /// Set an orchestrated stop. Works out the bar line it lands on (never closer than a beat away).
+  func requestEnd(json: String) {
+    guard let data = json.data(using: .utf8), let plan = try? JSONDecoder().decode(MidiBedEndRequest.self, from: data) else {
+      NSLog("MidiBedEngine: could not decode end request")
+      return
+    }
+    queue.async {
+      guard self.running, let cfg = self.config, !self.ended else { return }
+      let barTicks = self.ticksPerBeat * self.beatsPerBar
+      let toBar = (barTicks - (self.tickIndex % barTicks)) % barTicks
+      var firstBar = self.tickIndex + toBar
+      if toBar < self.ticksPerBeat { firstBar += barTicks }
+      var target = firstBar
+      let progression = { () -> Int in
+        let chordTicks = barTicks * max(1, cfg.harmony.barsPerChord)
+        let loop = chordTicks * max(1, cfg.harmony.count)
+        let rel = firstBar - self.padStartTick
+        let n = max(1, (rel + loop - 1) / loop)
+        return self.padStartTick + n * loop
+      }
+      switch plan.style {
+      case 2:
+        target = progression()
+      case 3:
+        if cfg.advance.mode > 0, self.advanceBarsLeft > 0 {
+          target = max(firstBar, (self.tickIndex + toBar) + (self.advanceBarsLeft - 1) * barTicks)
+        } else {
+          target = progression()
+        }
+      default:
+        break
+      }
+      self.endTick = target
+      self.endPlan = plan
+      // A fill into the last bar line, when fills are on.
+      if cfg.fill.enabled, !cfg.fill.palette.isEmpty { self.fillRequested = true }
+      let left = (target - self.tickIndex) / barTicks
+      let cb = self.onEnding
+      DispatchQueue.main.async { cb?(["barsLeft": left, "reason": "set"]) }
     }
   }
 
@@ -1653,7 +1786,8 @@ final class MidiBedEngine {
   private func sendChannelLevel(_ rawChannel: Int, force: Bool = false) {
     guard let cfg = config, cfg.fade.cc > 0 else { return }
     let ch = max(0, min(15, rawChannel))
-    guard let lvl = channelLevel(ch, cfg) else { return }
+    guard let level = channelLevel(ch, cfg) else { return }
+    let lvl = level * endFade
     let v = Int((lvl * lvl * 127).rounded())
     if force || channelLastCC[ch] != v {
       channelLastCC[ch] = v
@@ -1951,7 +2085,7 @@ final class MidiBedEngine {
 
   /// End every note we know is sounding (a note-off to every port), then all-notes-off and all-sound-off
   /// on every channel as a backstop for anything we lost track of.
-  private func silence() {
+  private func silence(soft: Bool = false) {
     let midi = config?.midiOut ?? true
     for key in sounding {
       let ch = UInt8((key >> 8) & 0x0F)
@@ -1961,7 +2095,7 @@ final class MidiBedEngine {
     }
     sounding.removeAll()
     allNotesOff()
-    if midi {
+    if midi, !soft {
       for ch in 0..<16 { sendMIDI(0xB0 | UInt8(ch), 120, 0, to: [0, 1, 2, 3, 4, 5]) }
       // and put the pitch bend back to the centre on the MidiDancer channel
       if let dch = config?.dancer.channel {

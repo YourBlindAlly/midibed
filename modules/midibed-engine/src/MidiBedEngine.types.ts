@@ -19,6 +19,12 @@ export type SceneEventPayload = {
   reason: 'tick' | 'auto';
 };
 
+/** An orchestrated stop: set (bars left), a bar line passes (tick), the music has ended (end). */
+export type EndingPayload = {
+  barsLeft: number;
+  reason: 'set' | 'tick' | 'end';
+};
+
 /** A press from a MIDI controller: a note on, a control change or a program change. */
 export type MidiInPayload = {
   kind: 'cc' | 'note' | 'pc';

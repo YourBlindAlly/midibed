@@ -1,4 +1,4 @@
-import type { BeatPayload, MidiInPayload, MotionPayload, SceneEventPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
+import type { BeatPayload, EndingPayload, MidiInPayload, MotionPayload, SceneEventPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
 
 /**
  * Thin wrapper over the native module with a silent fallback so the UI still
@@ -16,6 +16,7 @@ type Native = {
   setDrumVoices(json: string): void;
   setBassVoice(json: string): void;
   setFX(json: string): void;
+  requestEnd(json: string): void;
   reclaimKeyFocus(): void;
   applyConfig(json: string, queued: boolean): void;
   setScenes(json: string): void;
@@ -27,6 +28,8 @@ type Native = {
   addListener(name: 'onMotion', cb: (e: MotionPayload) => void): unknown;
   addListener(name: 'onScene', cb: (e: SceneEventPayload) => void): unknown;
   addListener(name: 'onMidiIn', cb: (e: MidiInPayload) => void): unknown;
+  addListener(name: 'onEnding', cb: (e: EndingPayload) => void): unknown;
+  addListener(name: 'onEnded', cb: (e: Record<string, never>) => void): unknown;
 };
 
 let native: Native | null = null;
@@ -88,6 +91,39 @@ export function onScene(cb: (e: SceneEventPayload) => void): () => void {
   };
 }
 
+const endingSubscribers = new Set<(e: EndingPayload) => void>();
+const endedSubscribers = new Set<() => void>();
+let endingHooked = false;
+
+function hookEnding() {
+  if (!native || endingHooked) return;
+  endingHooked = true;
+  native.addListener('onEnding', (e) => {
+    endingSubscribers.forEach((fn) => fn(e));
+  });
+  native.addListener('onEnded', () => {
+    endedSubscribers.forEach((fn) => fn());
+  });
+}
+
+/** An orchestrated stop is waiting (bars left), or has just landed. One native listener, fanned out. */
+export function onEnding(cb: (e: EndingPayload) => void): () => void {
+  hookEnding();
+  endingSubscribers.add(cb);
+  return () => {
+    endingSubscribers.delete(cb);
+  };
+}
+
+/** The engine stopped by itself at the end of an orchestrated stop. */
+export function onEnded(cb: () => void): () => void {
+  hookEnding();
+  endedSubscribers.add(cb);
+  return () => {
+    endedSubscribers.delete(cb);
+  };
+}
+
 const midiInSubscribers = new Set<(e: MidiInPayload) => void>();
 let midiInHooked = false;
 
@@ -119,6 +155,8 @@ export const engine = {
   /** The built-in bass voice on/off and its settings. */
   setBassVoice: (json: string) => native?.setBassVoice(json),
   setFX: (json: string) => native?.setFX(json),
+  /** An orchestrated stop (see src/ending.ts). */
+  requestEnd: (json: string) => native?.requestEnd(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */
   reclaimKeys: () => native?.reclaimKeyFocus(),
   /** queued = wait for the next bar line while playing (scene switches). */
