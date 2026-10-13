@@ -280,3 +280,26 @@ describe('vibrato and bends', () => {
     expect(bent).toEqual(plain);
   });
 });
+
+describe('dips on long notes, and the fall only at phrase ends', () => {
+  it('are off by default, saved per scene, and reach the engine in seconds and 0-1', () => {
+    expect(defaultDancer.dip).toBe(0);
+    expect(defaultDancer.dipChance).toBe(30);
+    expect(defaultDancer.dipTime).toBe(180);
+    const on = { ...defaultState, dancer: { ...defaultState.dancer, enabled: true, dip: 80, dipChance: 40, dipTime: 220 } };
+    expect(JSON.parse(toEngineJson(on)).dancer).toMatchObject({ dipCents: 80, dipChance: 0.4, dipSec: 0.22 });
+    expect(switchScene(switchScene(on, 1), 0).dancer.dip).toBe(80);
+    expect(migrateState({ dancer: { enabled: true } }).dancer).toMatchObject({ dip: 0, dipChance: 30, dipTime: 180 });
+  });
+
+  it('do not change which notes or lengths a phrase has', () => {
+    const plain = makePhrases({ ...defaultDancer, enabled: true }, 1, ROOT);
+    const dipped = makePhrases({ ...defaultDancer, enabled: true, dip: 120, fall: 300 }, 1, ROOT);
+    expect(dipped).toEqual(plain);
+  });
+
+  it('the phrase generator makes long notes (a beat and a half or more) for dips to use', () => {
+    const lengths = makePhrases({ ...defaultDancer, enabled: true, busyness: 0, density: 30, maxBars: 4 }, 1, ROOT).flatMap((p) => p.events.map((e) => e[1]));
+    expect(lengths.some((l) => l >= 6)).toBe(true);
+  });
+});

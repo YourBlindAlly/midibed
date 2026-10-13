@@ -1297,9 +1297,16 @@ export default function App() {
             {state.dancer.scoop > 0 && (
               <Stepper label="Scoop time" value={state.dancer.scoopTime} onChange={(v) => patchDancer({ scoopTime: v })} min={30} max={500} step={10} bigStep={50} format={(v) => `${v} milliseconds`} />
             )}
-            <Stepper label="Fall off by" value={state.dancer.fall} onChange={(v) => patchDancer({ fall: v })} min={0} max={600} step={10} bigStep={50} format={(v) => (v === 0 ? 'off' : `${v} cents`)} hint="The end of a note drops in pitch" />
+            <Stepper label="Fall off by" value={state.dancer.fall} onChange={(v) => patchDancer({ fall: v })} min={0} max={600} step={10} bigStep={50} format={(v) => (v === 0 ? 'off' : `${v} cents`)} hint="The last note of a phrase drops in pitch as it ends, before a rest. It never happens in the middle of a joined run" />
             {state.dancer.fall > 0 && (
               <Stepper label="Fall time" value={state.dancer.fallTime} onChange={(v) => patchDancer({ fallTime: v })} min={30} max={600} step={10} bigStep={50} format={(v) => `${v} milliseconds`} />
+            )}
+            <Stepper label="Dip on long notes" value={state.dancer.dip} onChange={(v) => patchDancer({ dip: v })} min={0} max={300} step={10} bigStep={50} format={(v) => (v === 0 ? 'off' : `${v} cents`)} hint="A long note, a beat and a half or more, occasionally sags down in pitch partway through and comes back" />
+            {state.dancer.dip > 0 && (
+              <>
+                <Stepper label="Dip chance" value={state.dancer.dipChance} onChange={(v) => patchDancer({ dipChance: v })} min={10} max={100} step={10} format={(v) => `${v} percent of long notes`} />
+                <Stepper label="Dip time" value={state.dancer.dipTime} onChange={(v) => patchDancer({ dipTime: v })} min={50} max={600} step={10} bigStep={50} format={(v) => `${v} milliseconds each way`} />
+              </>
             )}
             <Stepper label="Longest phrase" value={state.dancer.maxBars} onChange={(v) => patchDancer({ maxBars: v })} min={1} max={4} format={(v) => `${v} ${v === 1 ? 'bar' : 'bars'}`} />
             <Stepper label="Phrase starts" value={state.dancer.start} onChange={(v) => patchDancer({ start: v })} min={0} max={START_NAMES.length - 1} format={(v) => START_NAMES[v]} />

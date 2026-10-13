@@ -83,9 +83,15 @@ export type DancerState = {
   /** Scoop: start this many cents below the note and slide up over scoopTime ms (0 = none). */
   scoop: number;
   scoopTime: number;
-  /** Fall off: drop this many cents over the last fallTime ms of a note (0 = none). */
+  /** Fall off: drop this many cents over the last fallTime ms of a note (0 = none). Only at the END of a phrase (before a rest), never in the middle of a joined run. */
   fall: number;
   fallTime: number;
+  /** Dip: on occasional long notes (a beat and a half or more) the pitch sags by this many cents and recovers (0 = none). */
+  dip: number;
+  /** Percent of long notes that get a dip. */
+  dipChance: number;
+  /** How long the sag takes, each way, in ms. */
+  dipTime: number;
   seed: number; // change it to get different phrases
 };
 
@@ -120,6 +126,9 @@ export const defaultDancer: DancerState = {
   scoopTime: 120,
   fall: 0,
   fallTime: 150,
+  dip: 0,
+  dipChance: 30,
+  dipTime: 180,
   seed: 1,
 };
 

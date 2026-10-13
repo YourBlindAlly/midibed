@@ -963,6 +963,9 @@ export function toEngineJson(s: BedState): string {
         scoopSec: s.dancer.scoopTime / 1000,
         fallCents: s.dancer.fall,
         fallSec: s.dancer.fallTime / 1000,
+        dipCents: s.dancer.dip,
+        dipChance: s.dancer.dipChance / 100,
+        dipSec: s.dancer.dipTime / 1000,
         pick: s.dancer.pick,
         phrases: on ? makePhrases(s.dancer, s.harmony.mode, keyRoot(s)) : [],
       };

@@ -174,8 +174,11 @@ struct MidiBedDancerConfig: Decodable {
   var bendChance: Double    // 0...1: share of notes that get a scoop and/or a fall
   var scoopCents: Double    // start this far below and slide up (0 = none)
   var scoopSec: Double
-  var fallCents: Double     // drop this far over the end of a note (0 = none)
+  var fallCents: Double     // drop this far over the end of a phrase's last note (0 = none)
   var fallSec: Double
+  var dipCents: Double      // sag on occasional long notes (0 = none)
+  var dipChance: Double     // 0...1 of the long notes
+  var dipSec: Double        // each way
   var pick: Int             // 0 in turn, 1 at random, 2 the same one every time, 3 back and forth
   var phrases: [MidiBedDancerPhrase]
 }
@@ -1350,9 +1353,15 @@ final class MidiBedEngine {
       let range = Double(max(1, min(48, d.bendRange)))
       let bends = d.bendChance > 0 && Double.random(in: 0..<1, using: &rng) < d.bendChance
       let scoop = bends ? d.scoopCents : 0
-      let fall = bends ? d.fallCents : 0
+      // A fall-off belongs at the END of a phrase, before a rest: the last note, or one the next note
+      // does not follow straight on from. Never in the middle of a joined run.
+      let phraseEnd = i + 1 >= events.count || events[i + 1][0] != startStep + Int(len)
+      let fall = (bends && phraseEnd) ? d.fallCents : 0
+      // A dip is an occasional sag partway through a LONG note (a beat and a half or more).
+      let dip = (d.dipCents > 0 && Int(len) >= 6 && Double.random(in: 0..<1, using: &rng) < d.dipChance) ? d.dipCents : 0
+      let dipAt = dur * Double.random(in: 0.40..<0.65, using: &rng)
       let vibrato = d.vibratoCents
-      if scoop > 0 || fall > 0 || vibrato > 0 {
+      if scoop > 0 || fall > 0 || dip > 0 || vibrato > 0 {
         func pb(_ cents: Double) -> (UInt8, UInt8) {
           let v = Int((8192 + cents / (range * 100) * 8192).rounded())
           let c = max(0, min(16383, v))
@@ -1374,6 +1383,12 @@ final class MidiBedEngine {
               let k = min(1, (t - fs) / max(0.01, d.fallSec))
               cents -= fall * k * k
             }
+          }
+          if dip > 0 {
+            let dt = max(0.03, d.dipSec)
+            let x = (t - dipAt) / dt
+            func ease(_ v: Double) -> Double { let c = max(0, min(1, v)); return c * c * (3 - 2 * c) }
+            if x > 0 && x < 2 { cents -= dip * (x <= 1 ? ease(x) : 1 - ease(x - 1)) }
           }
           var vib = 0.0
           if vibrato > 0, t > d.vibratoDelay {
