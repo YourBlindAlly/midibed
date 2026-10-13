@@ -1,4 +1,5 @@
 import { defaultState, migrateState, toEngineJson, switchScene } from '../src/config';
+declare const __dirname: string;
 
 describe('per-part outputs', () => {
   it('default to everything on, for MIDI and the built-in sound', () => {
