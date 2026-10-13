@@ -695,10 +695,9 @@ final class MidiBedTestSynth {
           if drums[i].kind == 10 { b = 82; rate = 38; dec = 6.2 }
           if drums[i].kind == 11 { b = 118; rate = 40; dec = 7.5 }
           if drums[i].kind == 12 { b = 168; drop = 0.28; rate = 42; dec = 9.0 }
-          let freq = b * (1 + drop * expf(-t * rate)) * f
-          drums[i].phase += freq * dt
-          if drums[i].phase >= 1 { drums[i].phase -= 1 }
-          let ph = drums[i].phase
+          // Phase in closed form (the integral of the falling pitch), NOT wrapped: the overtones are multiples
+          // of it, and wrapping it once per cycle would put a click into them every cycle (a buzz).
+          let ph = b * f * (t + drop * (1 - expf(-t * rate)) / rate)
           let over = 0.35 + 1.3 * tone // tone brings the overtones up
           var body = sinf(2 * Float.pi * ph) * expf(-t * dec / D)
           body += sinf(2 * Float.pi * 1.59 * ph) * 0.55 * over * expf(-t * dec * 1.7 / D)
