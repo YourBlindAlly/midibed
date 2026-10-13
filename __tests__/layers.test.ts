@@ -4,20 +4,22 @@ describe('percussion master switch', () => {
   it('is on by default and sends every enabled drum', () => {
     expect(defaultState.percussion).toBe(true);
     const j = JSON.parse(toEngineJson(defaultState));
-    expect(j.drums.every((d: { enabled: boolean }) => d.enabled)).toBe(true);
+    // the four starting drums are on; the extra tambourine and toms start off
+    expect(j.drums.slice(0, 4).every((d: { enabled: boolean }) => d.enabled)).toBe(true);
+    expect(j.drums.slice(4).every((d: { enabled: boolean }) => !d.enabled)).toBe(true);
   });
 
   it('switches all drums off at once without touching each drum setting', () => {
     const live = { ...defaultState, percussion: false };
     const j = JSON.parse(toEngineJson(live));
     expect(j.drums.every((d: { enabled: boolean }) => !d.enabled)).toBe(true);
-    expect(live.drums.every((d) => d.enabled)).toBe(true); // per-drum switches untouched
+    expect(live.drums.slice(0, 4).every((d) => d.enabled)).toBe(true); // per-drum switches untouched
   });
 
   it('keeps a drum off when the master is on but that drum is off', () => {
     const live = { ...defaultState, drums: defaultState.drums.map((d) => (d.name === 'Hat' ? { ...d, enabled: false } : d)) };
     const j = JSON.parse(toEngineJson(live));
-    expect(j.drums.map((d: { enabled: boolean }) => d.enabled)).toEqual([true, true, false, true]);
+    expect(j.drums.map((d: { enabled: boolean }) => d.enabled)).toEqual([true, true, false, true, false, false, false, false]);
   });
 
   it('is remembered per scene', () => {
@@ -32,7 +34,7 @@ describe('percussion master switch', () => {
     const away = switchScene(live, 1);
     const back = switchScene(away, 0);
     expect(back.percussion).toBe(false);
-    expect(back.drums.every((d) => d.enabled)).toBe(true);
+    expect(back.drums.slice(0, 4).every((d) => d.enabled)).toBe(true);
     expect(switchScene({ ...back, percussion: true }, 0)).toEqual({ ...back, percussion: true });
   });
 

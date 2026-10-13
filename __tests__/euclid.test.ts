@@ -39,7 +39,7 @@ describe('config', () => {
     const j = JSON.parse(toEngineJson(defaultState));
     expect(j.bpm).toBe(88);
     expect(j.swing).toBeCloseTo(0.15);
-    expect(j.drums).toHaveLength(4);
+    expect(j.drums).toHaveLength(8);
     expect(j.drone.chords).toEqual([[38, 50, 45]]);
     expect(j.wanderers[0].cc).toBe(74);
     expect(j.wanderers[0].smoothBeats).toBe(4);
@@ -53,7 +53,7 @@ describe('saved-settings migration', () => {
     const old = { bpm: 100, drums: [{ name: 'Kick', note: 35 }] } as unknown;
     const s = migrateState(old);
     expect(s.bpm).toBe(100);
-    expect(s.drums).toHaveLength(4);
+    expect(s.drums).toHaveLength(8);
     expect(s.drums[0].note).toBe(35);
     expect(s.drums[0].steps).toBe(16);
     expect(s.sounds).toHaveLength(3);

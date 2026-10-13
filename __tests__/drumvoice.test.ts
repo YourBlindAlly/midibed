@@ -5,7 +5,16 @@ import { defaultState, migrateState, switchScene } from '../src/config';
 describe('built-in drum sounds', () => {
   it('the four starting drums get sensible sounds, and any slot can be any type', () => {
     const types = Object.fromEntries(defaultState.drums.map((d) => [d.name, DRUM_TYPES[d.voice]]));
-    expect(types).toEqual({ Kick: 'Kick', Snare: 'Snare', Hat: 'Closed hat', Shaker: 'Shaker' });
+    expect(types).toEqual({
+      Kick: 'Kick',
+      Snare: 'Snare',
+      Hat: 'Closed hat',
+      Shaker: 'Shaker',
+      Tambourine: 'Tambourine',
+      'Low tom': 'Low tom',
+      'Mid tom': 'Mid tom',
+      'High tom': 'High tom',
+    });
     // a hat slot can be made a clap, with its own settings
     const j = JSON.parse(drumVoicesJson([{ note: 42, channel: 9, voice: 3, tune: 2, decay: 150, tone: 20, snap: 80, level: 60 }]));
     expect(j[0]).toEqual({ note: 42, channel: 9, type: 3, tune: 2, decay: 1.5, tone: 0.2, snap: 0.8, level: 0.6 });
@@ -24,6 +33,13 @@ describe('built-in drum sounds', () => {
     const old = migrateState({ drums: [{ name: 'Kick', note: 40 }] });
     expect(old.drums[0]).toMatchObject({ note: 40, voice: 0, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 });
     expect(old.drums[3].voice).toBe(6);
+    // the four new drums arrive switched off, with their own sounds
+    expect(old.drums.slice(4).map((d) => [d.name, d.enabled, d.voice])).toEqual([
+      ['Tambourine', false, 9],
+      ['Low tom', false, 10],
+      ['Mid tom', false, 11],
+      ['High tom', false, 12],
+    ]);
   });
 
   it('names, and the default values', () => {
@@ -43,7 +59,7 @@ describe('built-in drum sounds', () => {
     const path = require('path');
     const swift: string = fs.readFileSync(path.join(__dirname, '..', 'modules', 'midibed-engine', 'ios', 'MidiBedTestSynth.swift'), 'utf8');
     const doc = swift.slice(swift.indexOf('/// One drum hit.'), swift.indexOf('private struct DrumVoice'));
-    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 shaker', '7 tom', '8 wood block'].forEach((s) => expect(doc).toContain(s));
-    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'shaker', 'tom', 'wood block']);
+    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 shaker', '7 tom', '8 wood block', '9 tambourine', '10 low tom', '11 mid tom', '12 high tom'].forEach((s) => expect(doc).toContain(s));
+    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'shaker', 'tom', 'wood block', 'tambourine', 'low tom', 'mid tom', 'high tom']);
   });
 });

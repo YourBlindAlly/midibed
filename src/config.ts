@@ -522,6 +522,11 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     { name: 'Snare', enabled: true, note: 38, channel: 9, steps: 16, hits: 2, rotation: 4, velocity: 90, probability: 100, humanize: 25, voice: 1, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
     { name: 'Hat', enabled: true, note: 42, channel: 9, steps: 16, hits: 11, rotation: 0, velocity: 70, probability: 90, humanize: 50, voice: 4, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
     { name: 'Shaker', enabled: true, note: 82, channel: 9, steps: 5, hits: 3, rotation: 0, velocity: 60, probability: 80, humanize: 40, voice: 6, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
+    // More drums, off to begin with. Any slot can be any built-in sound (see drumvoice.ts).
+    { name: 'Tambourine', enabled: false, note: 54, channel: 9, steps: 16, hits: 4, rotation: 2, velocity: 60, probability: 80, humanize: 40, voice: 9, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
+    { name: 'Low tom', enabled: false, note: 45, channel: 9, steps: 16, hits: 3, rotation: 6, velocity: 80, probability: 70, humanize: 30, voice: 10, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
+    { name: 'Mid tom', enabled: false, note: 47, channel: 9, steps: 16, hits: 3, rotation: 3, velocity: 78, probability: 70, humanize: 30, voice: 11, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
+    { name: 'High tom', enabled: false, note: 50, channel: 9, steps: 16, hits: 2, rotation: 10, velocity: 76, probability: 70, humanize: 30, voice: 12, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
   ],
   drone: {
     enabled: true,

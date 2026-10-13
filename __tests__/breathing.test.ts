@@ -18,7 +18,7 @@ describe('breathing: what is sent to the engine', () => {
     expect(j.motion.bass).toEqual({ baseBars: 0, altBars: 4, chance: 100, kind: 0 });
     expect(j.motion.preset).toBe(1);
     expect(j.motion.drums).toEqual({ baseBars: 0, breakBars: 2, chance: 100, style: 0 });
-    expect(j.drums.map((d: { role: string }) => d.role)).toEqual(['kick', 'snare', 'other', 'other']);
+    expect(j.drums.map((d: { role: string }) => d.role)).toEqual(['kick', 'snare', 'other', 'other', 'other', 'other', 'other', 'other']);
     expect(j.drone.altChords.length).toBeGreaterThan(0);
     expect(j.pad.altChords.length).toBeGreaterThan(0);
   });

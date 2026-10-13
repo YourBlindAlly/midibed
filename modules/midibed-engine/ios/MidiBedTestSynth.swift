@@ -38,7 +38,7 @@ final class MidiBedTestSynth {
   }
 
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 shaker, 7 tom,
-  /// 8 wood block (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
+  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
   private struct DrumVoice {
     var active = false
@@ -122,7 +122,7 @@ final class MidiBedTestSynth {
   func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float)]) {
     for i in 0..<128 { drumPatches[i] = DrumPatch() }
     for d in list where d.note >= 0 && d.note < 128 {
-      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(8, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
+      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(12, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
     }
   }
 
@@ -349,9 +349,12 @@ final class MidiBedTestSynth {
         case 37: v.kind = 2
         case 38, 40: v.kind = 1
         case 39: v.kind = 3
-        case 41, 43, 45, 47, 48, 50: v.kind = 7
+        case 41, 43: v.kind = 10
+        case 45, 47: v.kind = 11
+        case 48, 50: v.kind = 12
         case 42, 44: v.kind = 4
         case 46: v.kind = 5
+        case 54: v.kind = 9
         case 70, 82: v.kind = 6
         default: v.kind = 8
         }
@@ -673,6 +676,35 @@ final class MidiBedTestSynth {
           if drums[i].phase >= 1 { drums[i].phase -= 1 }
           s = sinf(2 * Float.pi * drums[i].phase) * expf(-t * 8 / D) * 0.9 + noise * snap * 0.25 * expf(-t * 90)
           alive = t <= 0.7 * D + 0.05
+        case 9: // tambourine: band-limited noise plus ringing jingle partials
+          let r = 0.70 - 0.25 * tone
+          let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
+          drums[i].xPrev = noise
+          drums[i].hpPrev = hp
+          let a = 0.22 + 0.45 * tone
+          drums[i].lp += a * (hp - drums[i].lp)
+          var jingle: Float = 0
+          jingle += sinf(2 * Float.pi * 3900 * f * t + 3900) * 0.6
+          jingle += sinf(2 * Float.pi * 4700 * f * t + 4700) * 1.0
+          jingle += sinf(2 * Float.pi * 6100 * f * t + 6100) * 0.8
+          jingle += sinf(2 * Float.pi * 7900 * f * t + 7900) * 0.6
+          jingle += sinf(2 * Float.pi * 9300 * f * t + 9300) * 0.4
+          let attack = max(0.002, 0.012 - 0.01 * snap)
+          let env = 1 - expf(-t / attack)
+          s = (drums[i].lp * 1.58 * expf(-t * 26 / D) + jingle * 0.158 * expf(-t * 14 / D)) * env
+          alive = t <= 0.45 * D + 0.05
+        case 10, 11, 12: // low, mid and high tom
+          var b: Float = 62
+          var sweep: Float = 95
+          var rate: Float = 14
+          var dec: Float = 6
+          if drums[i].kind == 11 { b = 98; sweep = 130; rate = 16; dec = 7.5 }
+          if drums[i].kind == 12 { b = 150; sweep = 200; rate = 20; dec = 9.5 }
+          let freq = (b + sweep * expf(-t * rate)) * f
+          drums[i].phase += freq * dt
+          if drums[i].phase >= 1 { drums[i].phase -= 1 }
+          s = sinf(2 * Float.pi * drums[i].phase) * expf(-t * dec / D) * 0.9 + noise * snap * 0.25 * expf(-t * 90)
+          alive = t <= 0.9 * D + 0.05
         default: // wood block
           s = sinf(2 * Float.pi * 820 * f * t) * expf(-t * 45 / D) * 0.7
           alive = t <= 0.25 * D + 0.02
