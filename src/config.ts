@@ -34,6 +34,17 @@ export type DrumState = {
   velocity: number;
   probability: number; // percent 0-100
   humanize: number; // percent 0-100
+  /** A second, quieter Euclidean layer on the steps the main pattern leaves free: ghost notes. 0 = none. */
+  ghostHits: number;
+  ghostRotation: number;
+  ghostVelocity: number; // 1-127
+  /** Every Nth hit of the main pattern is louder (0 = off, else 2-8), by accentBoost percent. */
+  accentEvery: number;
+  accentBoost: number; // percent 0-100
+  /** The first hit of the pattern always plays, whatever the chance says. */
+  keepFirst: boolean;
+  /** Each hit lands up to this many milliseconds late, at random (0 = exactly on the grid). */
+  looseMs: number;
   /** Built-in sound only (see drumvoice.ts): sound type and its controls. Global, not saved in a scene. */
   voice: number;
   tune: number;
@@ -42,6 +53,21 @@ export type DrumState = {
   snap: number;
   level: number;
 };
+
+/** Patterns that change by themselves (scene-owned; the kick is never changed). */
+export type EvolveState = {
+  /** Change every N bars from the scene start; 0 = off. */
+  everyBars: number;
+  /** Chance (percent) that a given drum changes at each interval. */
+  chance: number;
+  /** After this many changes a drum returns to its own pattern. */
+  returnAfter: number;
+};
+
+export const defaultEvolve: EvolveState = { everyBars: 0, chance: 50, returnAfter: 4 };
+
+/** The pattern extras every drum starts with: all off, so existing sounds do not change. */
+const drumExtras = { ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, accentEvery: 0, accentBoost: 30, keepFirst: false, looseMs: 0 };
 
 export type DroneState = {
   enabled: boolean;
@@ -179,6 +205,8 @@ export type BedState = {
   outputs: OutputsState;
   /** Drum fills (see fill.ts). Saved per scene. */
   fill: FillState;
+  /** Patterns that evolve by themselves. Saved per scene. */
+  evolve: EvolveState;
   /** A MIDI controller (foot pedal) running the same actions as the keyboard shortcuts. Global. */
   midiControl: MidiControlState;
   /** The built-in bass voice (see bassvoice.ts). Global. */
@@ -275,6 +303,8 @@ export const MAX_JOURNEYS = 12;
  */
 export type SceneData = {
   fill: FillState;
+  /** Patterns that evolve by themselves. Saved per scene. */
+  evolve: EvolveState;
   dancer: Omit<DancerState, 'channel'>;
   /** Semitones above the journey key; the scene's home note (see keyRoot). */
   keyOffset: number;
@@ -293,13 +323,14 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'fill' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
   const { channel: _dancerChannel, ...dancer } = s.dancer;
   return {
     fill: { ...s.fill },
+    evolve: { ...s.evolve },
     dancer: { ...dancer },
     keyOffset: s.keyOffset,
     swing: s.swing,
@@ -325,6 +356,13 @@ export function captureScene(s: SceneSource): SceneData {
       velocity: d.velocity,
       probability: d.probability,
       humanize: d.humanize,
+      ghostHits: d.ghostHits,
+      ghostRotation: d.ghostRotation,
+      ghostVelocity: d.ghostVelocity,
+      accentEvery: d.accentEvery,
+      accentBoost: d.accentBoost,
+      keepFirst: d.keepFirst,
+      looseMs: d.looseMs,
     })),
     wanderers: s.wanderers.map((w) => ({
       enabled: w.enabled,
@@ -352,6 +390,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
   return {
     ...s,
     fill: { ...sc.fill },
+    evolve: { ...defaultEvolve, ...sc.evolve },
     dancer: { ...s.dancer, ...sc.dancer },
     keyOffset: sc.keyOffset,
     swing: sc.swing,
@@ -507,6 +546,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     loops: { midi: true, synth: true },
   },
   fill: defaultFill,
+  evolve: defaultEvolve,
   midiControl: { enabled: true, channel: -1, map: '{}' },
   bassVoice: defaultBassVoice,
   fx: defaultFx,
@@ -540,7 +580,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     ownPort: false,
     favorites: '',
   },
-  drums: [
+  drums: ([
     { name: 'Kick', enabled: true, note: 36, channel: 9, steps: 16, hits: 4, rotation: 0, velocity: 100, probability: 100, humanize: 20, voice: 0, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
     { name: 'Snare', enabled: true, note: 38, channel: 9, steps: 16, hits: 2, rotation: 4, velocity: 90, probability: 100, humanize: 25, voice: 1, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
     { name: 'Hat', enabled: true, note: 42, channel: 9, steps: 16, hits: 11, rotation: 0, velocity: 70, probability: 90, humanize: 50, voice: 4, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
@@ -550,7 +590,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     { name: 'Low tom', enabled: false, note: 45, channel: 9, steps: 16, hits: 3, rotation: 6, velocity: 80, probability: 70, humanize: 30, voice: 10, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
     { name: 'Mid tom', enabled: false, note: 47, channel: 9, steps: 16, hits: 3, rotation: 3, velocity: 78, probability: 70, humanize: 30, voice: 11, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
     { name: 'High tom', enabled: false, note: 50, channel: 9, steps: 16, hits: 2, rotation: 10, velocity: 76, probability: 70, humanize: 30, voice: 12, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
-  ],
+  ] as Omit<DrumState, keyof typeof drumExtras>[]).map((d) => ({ ...d, ...drumExtras })),
   drone: {
     enabled: true,
     channel: 0,
@@ -909,7 +949,19 @@ export function toEngineJson(s: BedState): string {
       velocity: d.velocity,
       probability: d.probability / 100,
       humanize: d.humanize / 100,
+      ghostHits: Math.min(d.ghostHits, d.steps),
+      ghostRotation: d.ghostRotation,
+      ghostVelocity: d.ghostVelocity,
+      accentEvery: d.accentEvery,
+      accentBoost: d.accentBoost / 100,
+      keepFirst: d.keepFirst,
+      looseMs: d.looseMs,
     })),
+    evolve: {
+      everyBars: s.evolve.everyBars,
+      chance: s.evolve.chance / 100,
+      returnAfter: Math.max(1, s.evolve.returnAfter),
+    },
     drone: {
       enabled: s.solo ? s.solo === 'bass' : s.drone.enabled,
       channel: s.drone.channel,

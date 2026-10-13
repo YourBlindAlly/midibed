@@ -15,6 +15,20 @@ struct MidiBedDrumConfig: Decodable {
   var velocity: Int
   var probability: Double   // 0...1 chance each scheduled hit actually plays
   var humanize: Double      // 0...1 random velocity wobble
+  var ghostHits: Int        // a second, quiet Euclidean layer on the free steps (0 = none)
+  var ghostRotation: Int
+  var ghostVelocity: Int
+  var accentEvery: Int      // every Nth hit of the main pattern is louder (0 = off)
+  var accentBoost: Double   // 0...1 extra velocity for accents
+  var keepFirst: Bool       // the pattern's first hit ignores the chance
+  var looseMs: Double       // each hit up to this many ms late, at random
+}
+
+/// Patterns that change by themselves (kick excluded).
+struct MidiBedEvolveConfig: Decodable {
+  var everyBars: Int        // 0 = off
+  var chance: Double        // 0...1 per drum per interval
+  var returnAfter: Int      // changes before a drum goes back to its own pattern
 }
 
 struct MidiBedDroneConfig: Decodable {
@@ -244,6 +258,7 @@ struct MidiBedConfig: Decodable {
   var fill: MidiBedFillConfig
   var ports: MidiBedPortsConfig
   var outputs: MidiBedOutputsConfig
+  var evolve: MidiBedEvolveConfig
   var motion: MidiBedMotionConfig
   var transitions: MidiBedTransitionConfig
   var pad: MidiBedPadConfig
@@ -353,6 +368,10 @@ final class MidiBedEngine {
 
   // Drum fills: the normal pattern is silent from fillStartTick up to (not including) fillEndTick.
   private var fillStartTick = 0
+  // Evolving patterns: per drum, how far the hit count and rotation have been nudged, and how many nudges so far.
+  private var evoHits: [Int] = []
+  private var evoRot: [Int] = []
+  private var evoCount: [Int] = []
   private var fillEndTick = 0
   private var fillRequested = false
 
@@ -889,6 +908,7 @@ final class MidiBedEngine {
     if sceneTick > 0, sceneTick % barTicks == 0, !cfg.frozen {
       stepMotion(at: time, cfg: cfg)
       stepRecurring(time: time, bar: sceneTick / barTicks, cfg: cfg)
+      stepEvolve(bar: sceneTick / barTicks, cfg: cfg)
     }
 
     // MidiDancer: a call on a bar line, then a response space. Freeze does not pause it.
@@ -934,12 +954,32 @@ final class MidiBedEngine {
 
     for (i, drum) in cfg.drums.enumerated() where drum.enabled || (i < drumLevels.count && drumLevels[i] > 0.001) {
       let steps = max(1, min(64, drum.steps))
-      let hits = max(0, min(steps, drum.hits))
-      let pos = ((step % steps) - drum.rotation % steps + steps) % steps
-      guard euclidHit(position: pos, hits: hits, steps: steps) else { continue }
-      if drum.probability < 1, Double.random(in: 0..<1, using: &rng) > drum.probability { continue }
+      var hits = max(0, min(steps, drum.hits))
+      var rotation = drum.rotation
+      if i < evoHits.count {
+        if hits > 0 { hits = max(1, min(steps, hits + evoHits[i])) }
+        rotation += evoRot[i]
+      }
+      let local = step % steps
+      let pos = ((local - rotation % steps) % steps + steps) % steps
+      let mainHit = euclidHit(position: pos, hits: hits, steps: steps)
+      // Ghost notes: a second, quiet pattern, only on steps the main pattern leaves free.
+      var ghost = false
+      if !mainHit, drum.ghostHits > 0 {
+        let gpos = ((local - drum.ghostRotation % steps) % steps + steps) % steps
+        ghost = euclidHit(position: gpos, hits: min(steps, drum.ghostHits), steps: steps)
+      }
+      guard mainHit || ghost else { continue }
+      let sure = mainHit && drum.keepFirst && pos == 0
+      if !sure, drum.probability < 1, Double.random(in: 0..<1, using: &rng) > drum.probability { continue }
 
-      var vel = Double(drum.velocity)
+      var vel = Double(ghost ? drum.ghostVelocity : drum.velocity)
+      if mainHit, drum.accentEvery > 1 {
+        // Which hit of the pattern this is (0 for the first); every Nth one is the accent.
+        var rank = 0
+        for j in 0..<pos where euclidHit(position: j, hits: hits, steps: steps) { rank += 1 }
+        if rank % drum.accentEvery == 0 { vel *= 1 + max(0, min(1, drum.accentBoost)) }
+      }
       if drum.humanize > 0 {
         vel *= 1 - drum.humanize * 0.4 * Double.random(in: 0..<1, using: &rng)
       }
@@ -947,9 +987,39 @@ final class MidiBedEngine {
       guard vel >= 1 else { continue }
       let v = UInt8(max(1, min(127, Int(vel))))
       let ch = UInt8(max(0, min(15, drum.channel)))
-      let start = time + swingDelay
+      let loose = drum.looseMs > 0 ? Double.random(in: 0..<1, using: &rng) * drum.looseMs / 1000 : 0
+      let start = time + swingDelay + loose
       pending.append(Pending(time: start, status: 0x90 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: v))
       pending.append(Pending(time: start + 0.09, status: 0x80 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: 0))
+    }
+  }
+
+  /// Evolving patterns: every `everyBars` bars each drum (except the kick) has a chance to be nudged: one hit
+  /// more or fewer, or its rotation moved a step, never more than two away from its own pattern. After
+  /// `returnAfter` changes it goes back to the original. Freeze pauses it (the caller checks).
+  private func stepEvolve(bar: Int, cfg: MidiBedConfig) {
+    let e = cfg.evolve
+    guard e.everyBars > 0, bar % e.everyBars == 0 else { return }
+    if evoHits.count != cfg.drums.count {
+      evoHits = [Int](repeating: 0, count: cfg.drums.count)
+      evoRot = [Int](repeating: 0, count: cfg.drums.count)
+      evoCount = [Int](repeating: 0, count: cfg.drums.count)
+    }
+    for (i, d) in cfg.drums.enumerated() where d.enabled && d.role != "kick" && d.hits > 0 {
+      guard Double.random(in: 0..<1, using: &rng) < e.chance else { continue }
+      evoCount[i] += 1
+      if evoCount[i] > max(1, e.returnAfter) {
+        evoHits[i] = 0
+        evoRot[i] = 0
+        evoCount[i] = 0
+        continue
+      }
+      let step = Bool.random(using: &rng) ? 1 : -1
+      if Bool.random(using: &rng) {
+        evoRot[i] = max(-2, min(2, evoRot[i] + step))
+      } else {
+        evoHits[i] = max(-2, min(2, evoHits[i] + step))
+      }
     }
   }
 
@@ -1339,6 +1409,9 @@ final class MidiBedEngine {
     }
     advanceBarsLeft = cfg.advance.mode > 0 ? max(0, cfg.advance.bars) : 0
     advanceTarget = pickAdvanceTarget(cfg)
+    evoHits = [Int](repeating: 0, count: cfg.drums.count)
+    evoRot = [Int](repeating: 0, count: cfg.drums.count)
+    evoCount = [Int](repeating: 0, count: cfg.drums.count)
     advanceEntranceScheduled = false
     emitMotion("reset")
     emitScene(index: cfg.sceneIndex, reason: "tick")

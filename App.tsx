@@ -1461,6 +1461,65 @@ export default function App() {
               <Stepper label={`${d.name} velocity`} value={d.velocity} onChange={(v) => patchDrum(i, { velocity: v })} min={1} max={127} step={5} />
               <Stepper label={`${d.name} chance`} value={d.probability} onChange={(v) => patchDrum(i, { probability: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
               <Stepper label={`${d.name} humanize`} value={d.humanize} onChange={(v) => patchDrum(i, { humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+              <Toggle
+                label={`${d.name} always plays its first hit`}
+                value={d.keepFirst}
+                onChange={(v) => patchDrum(i, { keepFirst: v })}
+                hint="The first hit of the pattern ignores the chance, so the downbeat is always there"
+              />
+              <Stepper
+                label={`${d.name} accent every`}
+                value={d.accentEvery}
+                onChange={(v) => patchDrum(i, { accentEvery: v })}
+                min={0}
+                max={8}
+                format={(v) => (v < 2 ? 'off' : `every ${v} hits`)}
+                hint="Every Nth hit of the pattern is louder"
+              />
+              <Stepper
+                label={`${d.name} accent boost`}
+                value={d.accentBoost}
+                onChange={(v) => patchDrum(i, { accentBoost: v })}
+                min={0}
+                max={100}
+                step={5}
+                format={(v) => `${v} percent louder`}
+              />
+              <Stepper
+                label={`${d.name} ghost notes`}
+                value={d.ghostHits}
+                onChange={(v) => patchDrum(i, { ghostHits: v })}
+                min={0}
+                max={d.steps}
+                format={(v) => (v === 0 ? 'off' : `${v} hits`)}
+                hint="A second, quiet pattern, spread evenly over the steps the main pattern leaves free"
+              />
+              <Stepper
+                label={`${d.name} ghost rotation`}
+                value={d.ghostRotation}
+                onChange={(v) => patchDrum(i, { ghostRotation: v })}
+                min={0}
+                max={Math.max(0, d.steps - 1)}
+              />
+              <Stepper
+                label={`${d.name} ghost velocity`}
+                value={d.ghostVelocity}
+                onChange={(v) => patchDrum(i, { ghostVelocity: v })}
+                min={1}
+                max={127}
+                step={5}
+              />
+              <Stepper
+                label={`${d.name} timing looseness`}
+                value={d.looseMs}
+                onChange={(v) => patchDrum(i, { looseMs: v })}
+                min={0}
+                max={40}
+                step={2}
+                bigStep={10}
+                format={(v) => (v === 0 ? 'exact' : `up to ${v} milliseconds late`)}
+                hint="Each hit lands a little late, at random, so the pattern feels played instead of clocked"
+              />
               <View accessible accessibilityLabel={`${d.name} pattern`} accessibilityValue={{ text: describePattern(d.hits, d.steps, d.rotation) }}>
                 <Text style={styles.pattern}>{patternText(d.hits, d.steps, d.rotation)}</Text>
               </View>
@@ -1807,6 +1866,36 @@ export default function App() {
                 <Stepper label="Breakdown style" value={state.motion.drums.style} onChange={(v) => patchBreakdown({ style: v })} min={0} max={BREAKDOWN_NAMES.length - 1} format={(v) => BREAKDOWN_NAMES[v]} hint="Full takes every drum out. Light takes out the kick and snare. Kick only leaves just the kick. They ease out with the drum fade time and come back right on the beat at full strength." />
               </>
             )}
+          </Section>
+
+          <Section title="Evolving patterns">
+            <Stepper
+              label="Patterns change every"
+              value={state.evolve.everyBars}
+              onChange={(v) => patch({ evolve: { ...state.evolve, everyBars: v } })}
+              min={0}
+              max={32}
+              format={(v) => (v === 0 ? 'off' : `${v} bars`)}
+              hint="Each drum except the kick may gain or lose a hit, or move one step. Saved in each scene. Freeze pauses it"
+            />
+            <Stepper
+              label="Chance of a change"
+              value={state.evolve.chance}
+              onChange={(v) => patch({ evolve: { ...state.evolve, chance: v } })}
+              min={0}
+              max={100}
+              step={5}
+              format={(v) => `${v} percent`}
+            />
+            <Stepper
+              label="Back to the original after"
+              value={state.evolve.returnAfter}
+              onChange={(v) => patch({ evolve: { ...state.evolve, returnAfter: v } })}
+              min={1}
+              max={16}
+              format={(v) => `${v} changes`}
+              hint="Each drum returns to its own pattern after this many changes. A new scene always starts from the originals"
+            />
           </Section>
 
           <Section title="Drum fills">
