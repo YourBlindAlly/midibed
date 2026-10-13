@@ -707,14 +707,14 @@ final class MidiBedTestSynth {
           let env = 1 - expf(-t / attack)
           s = (drums[i].lp * 1.58 * expf(-t * 26 / D) + jingle * 0.158 * expf(-t * 14 / D)) * env
           alive = t <= 0.45 * D + 0.05
-        case 7, 10, 11, 12: // toms: a small pitch drop, membrane overtones and a stick attack (designed in scratchpad tom_check.py)
+        case 7, 10, 11, 12: // toms: a quick pitch drop, membrane overtones, a bright stick attack and a little shell noise (scratchpad tom3.py)
           var b: Float = 105
-          var drop: Float = 0.30
-          var rate: Float = 40
+          var drop: Float = 0.55
+          var rate: Float = 32
           var dec: Float = 7.0
-          if drums[i].kind == 10 { b = 82; rate = 38; dec = 6.2 }
-          if drums[i].kind == 11 { b = 118; rate = 40; dec = 7.5 }
-          if drums[i].kind == 12 { b = 168; drop = 0.28; rate = 42; dec = 9.0 }
+          if drums[i].kind == 10 { b = 82; rate = 30; dec = 6.2 }
+          if drums[i].kind == 11 { b = 118; rate = 32; dec = 7.5 }
+          if drums[i].kind == 12 { b = 168; rate = 34; dec = 9.0 }
           // Phase in closed form (the integral of the falling pitch), NOT wrapped: the overtones are multiples
           // of it, and wrapping it once per cycle would put a click into them every cycle (a buzz).
           let ph = b * f * (t + drop * (1 - expf(-t * rate)) / rate)
@@ -724,9 +724,14 @@ final class MidiBedTestSynth {
           body += sinf(2 * Float.pi * 2.14 * ph) * 0.32 * over * expf(-t * dec * 2.2 / D)
           body += sinf(2 * Float.pi * 2.65 * ph) * 0.18 * over * expf(-t * dec * 2.8 / D)
           body += sinf(2 * Float.pi * 2.92 * ph) * 0.10 * over * expf(-t * dec * 3.4 / D)
-          drums[i].lp += 0.45 * (noise - drums[i].lp)
-          let stick = drums[i].lp * snap * 0.8 * expf(-t * 260)
-          s = (body * 0.55 + stick) * 0.91
+          // Stick attack: lightly filtered noise (bright), snap sets its level.
+          drums[i].lp += 0.8 * (noise - drums[i].lp)
+          let stick = drums[i].lp * snap * 0.5 * expf(-t * 170)
+          // Shell noise: a band of noise that rings a little with the head; tone brings it up.
+          drums[i].lp2 += 0.35 * (noise - drums[i].lp2)
+          drums[i].hpPrev += 0.08 * (drums[i].lp2 - drums[i].hpPrev)
+          let shell = (drums[i].lp2 - drums[i].hpPrev) * 0.4 * (0.5 + tone) * expf(-t * 28 / D)
+          s = (body * 0.55 + stick + shell) * 0.91
           alive = t <= 0.9 * D + 0.05
         default: // wood block
           s = sinf(2 * Float.pi * 820 * f * t) * expf(-t * 45 / D) * 0.7
