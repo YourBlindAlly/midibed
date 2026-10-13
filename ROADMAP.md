@@ -280,3 +280,14 @@ generator, and only if Rusty wants it on an AUM strip with effects.
 
 ### Sound scout (SHELVED by Rusty, 2026-10-09)
 - Idea: a Sounds-tab mode that plays a test note on every program step, with Keep/Next/Back, remembered rejects per app and bank, optional auto-step, and category tags (bass, pad, lead) on favorites to filter the favorites list. Rusty prefers to scroll sounds while MidiBed is playing. Not planned. (Only favorites with names exist; category tags could be added later if the lists grow unwieldy.)
+
+### Loop player (Rusty, 2026-10-13): four lanes of percussion loops, built into MidiBed
+- Percussion only for now; his purchased loops mostly have the BPM in the file name. Constant tempo, one key, changing the flavour by bringing loops in and out (like a live-looping session). Wants them stretched to fit the tempo within reason, four lanes to start, a set to choose from per journey, the ability to swap a lane's loop, and room to grow (filters and effects later, maybe in another app).
+- Plan: a 'Loop player' part (name it differently from the DrumJam 'Loops' part). Lane = file, bars, level, pan, Ugly FX send, on/off with bar-line quantised start and fade. Files come in through the Files app picker first (copied into the app's own storage), Dropbox later. Speed change first (varispeed), real time-stretch later; 'play at original speed' option. Scene-owned lane choices; joins the orchestrated stop. Loops are never committed to the (public) repo.
+- Shares the import and playback plumbing with the ambient player (4f), which streams long files.
+- Waiting on: a file search of his machine (OneDrive, D: and C: program folders) to see what he has.
+
+### Keys that play along (Rusty, 2026-10-13: a FUTURE module, not now)
+- A part that follows the key, the rhythm and the chords and plays along in time, with percussive keyboard sounds such as a Rhodes piano. Different from the pad (which stays pure sustain, no rhythm) and from MidiDancer (single notes, call and response): this one comps the chords rhythmically.
+- Likely shape: a new MIDI part like MidiDancer (own channel, own Ugly FX, per-scene), reusing the Euclidean pattern engine (steps/hits/rotation, ghost notes, accents, looseness, evolving) for its comping rhythm, voicings from the harmony loop (voice-led, taking the pad's chord lists), optional built-in Rhodes-like voice (tine + tone bar, tremolo) so it works with no routing.
+- Open questions for later: chord voicing style (shell voicings, rootless, spread), rhythm presets (offbeat stabs, anticipations, Charleston), whether it ducks around MidiDancer's phrases, and how it relates to the 'no rhythmic pad' rule (answer: it is its own part, the pad stays sustained).
