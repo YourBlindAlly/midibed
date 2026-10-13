@@ -170,7 +170,12 @@ export type LoopsState = {
 
 export type PortsState = { bass: boolean; pad: boolean; dancer: boolean; drums: boolean };
 
+export type PartOutput = { midi: boolean; synth: boolean };
+export type OutputsState = { bass: PartOutput; pad: PartOutput; dancer: PartOutput; drums: PartOutput; loops: PartOutput };
+
 export type BedState = {
+  /** Per part: send it out as MIDI, and/or play it in the built-in sound. Global routing. */
+  outputs: OutputsState;
   /** Drum fills (see fill.ts). Saved per scene. */
   fill: FillState;
   /** A MIDI controller (foot pedal) running the same actions as the keyboard shortcuts. Global. */
@@ -491,6 +496,13 @@ function nextJourneyNumber(list: Journey[]): number {
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
   keyOffset: 0,
+  outputs: {
+    bass: { midi: true, synth: true },
+    pad: { midi: true, synth: true },
+    dancer: { midi: true, synth: true },
+    drums: { midi: true, synth: true },
+    loops: { midi: true, synth: true },
+  },
   fill: defaultFill,
   midiControl: { enabled: true, channel: -1, map: '{}' },
   bassVoice: defaultBassVoice,
@@ -943,6 +955,7 @@ export function toEngineJson(s: BedState): string {
       palette: fillPalette(s.drums),
     },
     ports: s.ports,
+    outputs: s.outputs,
     dancer: (() => {
       const on = s.solo ? s.solo === 'dancer' : s.dancer.enabled;
       return {

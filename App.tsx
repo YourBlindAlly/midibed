@@ -645,6 +645,12 @@ export default function App() {
     else if (p === 'drums') patch({ percussion: on });
     else patchLoops({ enabled: on });
   };
+  // Switching a part's output off or on: a short pause for the new setting to reach the engine, then all notes off, so
+  // nothing hangs on one side and the bass and pad start again on the other.
+  const setPartOutput = (p: (typeof PARTS)[number], change: Partial<{ midi: boolean; synth: boolean }>) => {
+    setState((s) => ({ ...s, outputs: { ...s.outputs, [p]: { ...s.outputs[p], ...change } } }));
+    setTimeout(() => engine.panic(), 200);
+  };
   const setSolo = (layer: Layer | null) => {
     setState((s) => ({ ...s, solo: layer }));
     announceLater(layer ? `Solo ${LAYER_NAMES[layer]}` : 'Solo cleared', 150);
@@ -1034,6 +1040,20 @@ export default function App() {
             )}
             {part === 'drums' && (
               <Text style={styles.note}>Each drum has its own note and channel, in its own section under what it plays, below.</Text>
+            )}
+            <Toggle
+              label={`${partName}: send to other apps`}
+              value={state.outputs[part].midi}
+              onChange={(v) => setPartOutput(part, { midi: v })}
+              hint="Off: this part is not sent out as MIDI, so other apps do not hear it"
+            />
+            {part !== 'loops' && (
+              <Toggle
+                label={`${partName}: play in the built-in sound`}
+                value={state.outputs[part].synth}
+                onChange={(v) => setPartOutput(part, { synth: v })}
+                hint="Off: MidiBed's own sound does not play this part. The Built-in test sound switch on the Setup tab silences all of it"
+              />
             )}
             {part !== 'loops' && (
               <Toggle

@@ -203,6 +203,20 @@ struct MidiBedFillConfig: Decodable {
   var palette: [MidiBedFillVoice]
 }
 
+/// Where one part's sound goes: out as MIDI to other apps, and/or into MidiBed's own built-in sound.
+struct MidiBedPartOutput: Decodable {
+  var midi: Bool
+  var synth: Bool
+}
+
+struct MidiBedOutputsConfig: Decodable {
+  var bass: MidiBedPartOutput
+  var pad: MidiBedPartOutput
+  var dancer: MidiBedPartOutput
+  var drums: MidiBedPartOutput
+  var loops: MidiBedPartOutput
+}
+
 /// Which parts have their own MIDI source ("MidiBed Bass", "MidiBed Pad", "MidiBed Dancer", "MidiBed Drums").
 /// A part without one goes out the main "MidiBed" source. Messages are routed by MIDI channel.
 struct MidiBedPortsConfig: Decodable {
@@ -229,6 +243,7 @@ struct MidiBedConfig: Decodable {
   var dancer: MidiBedDancerConfig
   var fill: MidiBedFillConfig
   var ports: MidiBedPortsConfig
+  var outputs: MidiBedOutputsConfig
   var motion: MidiBedMotionConfig
   var transitions: MidiBedTransitionConfig
   var pad: MidiBedPadConfig
@@ -260,6 +275,10 @@ final class MidiBedEngine {
   private var portSources = [MIDIEndpointRef](repeating: MIDIEndpointRef(), count: 6)
   /// For each MIDI channel, which ports its messages go out (rebuilt whenever the settings change).
   private var channelPorts: [[Int]] = Array(repeating: [0], count: 16)
+  /// For each MIDI channel: may its messages go out as MIDI, and may they play the built-in sound? (Per part, see
+  /// MidiBedOutputsConfig; a channel nobody uses is open, and a channel shared by parts is open if any of them is.)
+  private var channelMidi = [Bool](repeating: true, count: 16)
+  private var channelSynth = [Bool](repeating: true, count: 16)
   let synth = MidiBedTestSynth()
 
   /// Called on the main queue once per beat with (bar, beat), both 1-based.
@@ -454,16 +473,24 @@ final class MidiBedEngine {
   /// everything else the main one. (If two parts share a channel they may both apply.)
   private func rebuildChannelPorts(_ c: MidiBedConfig) {
     var map = [[Int]](repeating: [], count: 16)
-    func add(_ channel: Int, _ own: Bool, _ port: Int) {
+    var used = [Bool](repeating: false, count: 16)
+    var midi = [Bool](repeating: false, count: 16)
+    var synthOn = [Bool](repeating: false, count: 16)
+    func add(_ channel: Int, _ own: Bool, _ port: Int, _ out: MidiBedPartOutput) {
       let ch = max(0, min(15, channel))
       let p = own ? port : 0
       if !map[ch].contains(p) { map[ch].append(p) }
+      used[ch] = true
+      if out.midi { midi[ch] = true }
+      if out.synth { synthOn[ch] = true }
     }
-    add(c.drone.channel, c.ports.bass, 2)
-    add(c.pad.channel, c.ports.pad, 3)
-    add(c.dancer.channel, c.ports.dancer, 4)
-    for d in c.drums { add(d.channel, c.ports.drums, 5) }
+    add(c.drone.channel, c.ports.bass, 2, c.outputs.bass)
+    add(c.pad.channel, c.ports.pad, 3, c.outputs.pad)
+    add(c.dancer.channel, c.ports.dancer, 4, c.outputs.dancer)
+    for d in c.drums { add(d.channel, c.ports.drums, 5, c.outputs.drums) }
     channelPorts = map.map { $0.isEmpty ? [0] : $0 }
+    channelMidi = (0..<16).map { used[$0] ? midi[$0] : true }
+    channelSynth = (0..<16).map { used[$0] ? synthOn[$0] : true }
   }
 
   private func install(_ decoded: MidiBedConfig, atBar: Bool) {
@@ -1880,11 +1907,17 @@ final class MidiBedEngine {
       return
     }
     // Loop messages go out the loops source when it has one; everything else by its MIDI channel.
-    let targets = port == 1 ? (loopsOwn ? [1] : [0]) : channelPorts[Int(status & 0x0F)]
-    if config?.midiOut ?? true { sendMIDI(status, d1, d2, to: targets) }
+    let ch = Int(status & 0x0F)
+    let targets = port == 1 ? (loopsOwn ? [1] : [0]) : channelPorts[ch]
+    // A part switched off for MIDI (or for the built-in sound) is not sent there. Note-offs and all-notes-off
+    // always go through, so switching something off never leaves a note hanging.
+    let kind = status & 0xF0
+    let release = kind == 0x80 || (kind == 0x90 && d2 == 0) || (kind == 0xB0 && (d1 == 123 || d1 == 120))
+    let allowMIDI = port == 1 ? (config?.outputs.loops.midi ?? true) : channelMidi[ch]
+    if (config?.midiOut ?? true) && (allowMIDI || release) { sendMIDI(status, d1, d2, to: targets) }
     // Loop messages are for the loops app, not the built-in sound.
     if port == 1 { return }
-    if config?.synthOut ?? true { synth.post(status: status, d1: d1, d2: d2) }
+    if (config?.synthOut ?? true) && (channelSynth[ch] || release) { synth.post(status: status, d1: d1, d2: d2) }
     // Note-offs and all-notes-off must always reach the synth even if the
     // switch was just turned off, or a pad could hang. It ignores them harmlessly.
     else if (status & 0xF0) == 0x80 || ((status & 0xF0) == 0xB0 && d1 == 123) {
