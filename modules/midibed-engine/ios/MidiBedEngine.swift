@@ -180,6 +180,26 @@ struct MidiBedDancerConfig: Decodable {
   var phrases: [MidiBedDancerPhrase]
 }
 
+/// One drum a fill can use: its note and channel, a role (0 snare, 1 high tom, 2 mid tom, 3 low tom) and base velocity.
+struct MidiBedFillVoice: Decodable {
+  var note: Int
+  var channel: Int
+  var role: Int
+  var velocity: Int
+}
+
+/// Drum fills (the reference is src/fill.ts): when to play one, how full, and which drums take part.
+struct MidiBedFillConfig: Decodable {
+  var enabled: Bool
+  var everyBars: Int        // 0 = not on a count
+  var beforeScene: Bool
+  var afterBreakdown: Bool
+  var density: Double       // 0...1
+  var chance: Double        // 0...1
+  var maxBeats: Int         // 1 or 2
+  var palette: [MidiBedFillVoice]
+}
+
 /// Which parts have their own MIDI source ("MidiBed Bass", "MidiBed Pad", "MidiBed Dancer", "MidiBed Drums").
 /// A part without one goes out the main "MidiBed" source. Messages are routed by MIDI channel.
 struct MidiBedPortsConfig: Decodable {
@@ -204,6 +224,7 @@ struct MidiBedConfig: Decodable {
   var drone: MidiBedDroneConfig
   var harmony: MidiBedHarmonyConfig
   var dancer: MidiBedDancerConfig
+  var fill: MidiBedFillConfig
   var ports: MidiBedPortsConfig
   var motion: MidiBedMotionConfig
   var transitions: MidiBedTransitionConfig
@@ -307,6 +328,11 @@ final class MidiBedEngine {
   private var recurColor = 0
   private var recurScheduled = true
   private var recurTurn = 0
+
+  // Drum fills: the normal pattern is silent from fillStartTick up to (not including) fillEndTick.
+  private var fillStartTick = 0
+  private var fillEndTick = 0
+  private var fillRequested = false
 
   // MidiDancer: bars left until the next call, and which phrase is next when going in turn.
   private var dancerWait = 0
@@ -617,6 +643,9 @@ final class MidiBedEngine {
       self.pending.removeAll()
       self.pendingNoise.removeAll()
       self.pendingIsAuto = false
+      self.fillStartTick = 0
+      self.fillEndTick = 0
+      self.fillRequested = false
       self.advanceBarsLeft = 0
       self.advanceTarget = -1
       // A scene switch that was still waiting for its bar line takes effect now.
@@ -730,6 +759,11 @@ final class MidiBedEngine {
         }
       }
     }
+  }
+
+  /// A drum fill at the next opportunity: the last beats of this bar, or of the next one.
+  func playFill() {
+    queue.async { self.fillRequested = true }
   }
 
   func status() -> [String: Any] {
@@ -847,6 +881,10 @@ final class MidiBedEngine {
     let step = tick / ticksPerStep
     let stepDur = tickDur * Double(ticksPerStep)
 
+    // Fills: plan one if one is due, and keep the normal pattern silent while it plays.
+    planFillIfDue(tick: tick, time: time, tickDur: tickDur, cfg: cfg)
+    if tick >= fillStartTick && tick < fillEndTick { return }
+
     // Swing: push every second 16th later, up to half a step.
     let swingDelay = (step % 2 == 1) ? max(0, min(1, cfg.swing)) * stepDur * 0.5 : 0
 
@@ -869,6 +907,99 @@ final class MidiBedEngine {
       pending.append(Pending(time: start, status: 0x90 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: v))
       pending.append(Pending(time: start + 0.09, status: 0x80 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: 0))
     }
+  }
+
+  // MARK: Drum fills
+
+  /// Is a fill due at this tick (a sixteenth-note step)? If so, schedule its hits as ordinary drum notes and
+  /// silence the normal pattern until the downbeat. The shape of a fill is src/fill.ts (planFill).
+  private func planFillIfDue(tick: Int, time: Double, tickDur: Double, cfg: MidiBedConfig) {
+    let f = cfg.fill
+    guard f.enabled, !f.palette.isEmpty, tick >= fillEndTick else { return }
+    let barTicks = ticksPerBeat * beatsPerBar
+    let pos = tick % barTicks
+    let remaining = barTicks - pos
+    let maxTicks = ticksPerBeat * max(1, min(2, f.maxBeats))
+    var play = false
+
+    if pos == barTicks - maxTicks {
+      // The moment to decide for this bar: the start of the longest fill that could happen.
+      let barIndex = (tick - padStartTick) / barTicks
+      var due = f.everyBars > 0 && (barIndex + 1) % f.everyBars == 0
+      if !due, f.beforeScene {
+        if pendingConfig != nil { due = true }                                     // a switch lands on the next bar line
+        else if cfg.advance.mode > 0, advanceBarsLeft == 1, !cfg.frozen { due = true } // auto-advance is next
+      }
+      if !due, f.afterBreakdown, cfg.motion.drums.baseBars > 0, drumRT.alt, drumRT.barsLeft == 1,
+        let r = drumRT.roll, r * 100 < cfg.motion.drums.chance
+      {
+        due = true // the drums come back at the next bar line
+      }
+      if due, Double.random(in: 0..<1, using: &rng) < f.chance { play = true }
+      if fillRequested {
+        play = true
+        fillRequested = false
+      }
+    } else if fillRequested, pos > barTicks - maxTicks, remaining >= ticksPerStep * 2 {
+      // Asked for after the usual start: fit what is left of the bar.
+      play = true
+      fillRequested = false
+    }
+    guard play else { return }
+
+    // A length of 1, 1.5 or 2 beats, within the maximum and within what is left of the bar.
+    let options = f.maxBeats >= 2 ? [4, 6, 8] : [4]
+    var steps = options[Int.random(in: 0..<options.count, using: &rng)]
+    steps = max(2, min(steps, remaining / ticksPerStep))
+    let lenTicks = steps * ticksPerStep
+    let barEndTick = tick + remaining
+    let startTick = barEndTick - lenTicks
+    let stepDur = tickDur * Double(ticksPerStep)
+    let startTime = time + Double(startTick - tick) * tickDur
+    let endTime = time + Double(remaining) * tickDur
+
+    // Which sixteenths: always the last, then random others, at the density.
+    let k = max(2, min(steps, Int((1 + f.density * Double(steps - 1)).rounded())))
+    var pool = Array(0..<(steps - 1))
+    pool.shuffle(using: &rng)
+    var slots = [steps - 1] + Array(pool.prefix(k - 1))
+    slots.sort()
+
+    var snares: [Int] = []
+    var toms: [Int] = []
+    for (i, v) in f.palette.enumerated() { if v.role == 0 { snares.append(i) } else { toms.append(i) } }
+    toms.sort { f.palette[$0].role < f.palette[$1].role } // high to low
+    guard !snares.isEmpty || !toms.isEmpty else { return }
+
+    var tomPos = 0
+    func hit(at when: Double, voice: Int, velocity: Int) {
+      let v = f.palette[voice]
+      let ch = UInt8(max(0, min(15, v.channel)))
+      let note = UInt8(max(0, min(127, v.note)))
+      pending.append(Pending(time: when, status: 0x90 | ch, d1: note, d2: UInt8(max(1, min(127, velocity)))))
+      pending.append(Pending(time: when + 0.09, status: 0x80 | ch, d1: note, d2: 0))
+    }
+    for (i, s) in slots.enumerated() {
+      let p = slots.count > 1 ? Double(i) / Double(slots.count - 1) : 1
+      var voice: Int
+      if toms.isEmpty {
+        voice = snares[Int.random(in: 0..<snares.count, using: &rng)]
+      } else if snares.isEmpty {
+        voice = toms[tomPos]
+      } else {
+        voice = Double.random(in: 0..<1, using: &rng) < 0.35 + 0.2 * p ? snares[Int.random(in: 0..<snares.count, using: &rng)] : toms[tomPos]
+      }
+      if !toms.isEmpty, Double.random(in: 0..<1, using: &rng) < 0.6 { tomPos = min(toms.count - 1, tomPos + 1) }
+      let base = Double(f.palette[voice].velocity)
+      let vel = Int((base * (0.7 + 0.4 * p) * (0.92 + 0.16 * Double.random(in: 0..<1, using: &rng))).rounded())
+      hit(at: startTime + Double(s) * stepDur, voice: voice, velocity: vel)
+    }
+    // The last hit lands on the downbeat of the next bar, where the normal pattern comes back.
+    let finalVoice = toms.isEmpty ? snares[0] : toms[toms.count - 1]
+    hit(at: endTime, voice: finalVoice, velocity: Int((Double(f.palette[finalVoice].velocity) * 1.15).rounded()))
+
+    fillStartTick = startTick
+    fillEndTick = barEndTick
   }
 
   /// Standard Euclidean spread: hit when (pos * hits) mod steps < hits.

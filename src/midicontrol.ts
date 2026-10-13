@@ -42,6 +42,7 @@ export const MIDI_ACTIONS: MidiActionDef[] = [
   ...LAYERS.map(([layer, name]) => ({ id: `layer:${layer}`, label: `${name} on or off`, action: { type: 'layer', layer } as ShortcutAction })),
   ...LAYERS.map(([layer, name]) => ({ id: `solo:${layer}`, label: `Solo ${name}`, action: { type: 'solo', layer } as ShortcutAction })),
   { id: 'clearSolo', label: 'Clear solo', action: { type: 'clearSolo' } },
+  { id: 'fill', label: 'Drum fill now', action: { type: 'fill' } },
 ];
 
 export function triggerKey(m: Pick<MidiMessage, 'kind' | 'channel' | 'number'>): string {

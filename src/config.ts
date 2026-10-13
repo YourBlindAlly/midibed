@@ -17,6 +17,7 @@ import {
 import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice, getProfile } from './profiles';
 import { BassVoiceState, defaultBassVoice } from './bassvoice';
+import { FillState, defaultFill, fillPalette } from './fill';
 import type { MidiControlState } from './midicontrol';
 import { MixerState, defaultMixer } from './mixer';
 import { Favorite, addFav, favsFromPrograms, parseFavMap, stringifyFavMap } from './soundFavs';
@@ -170,6 +171,8 @@ export type LoopsState = {
 export type PortsState = { bass: boolean; pad: boolean; dancer: boolean; drums: boolean };
 
 export type BedState = {
+  /** Drum fills (see fill.ts). Saved per scene. */
+  fill: FillState;
   /** A MIDI controller (foot pedal) running the same actions as the keyboard shortcuts. Global. */
   midiControl: MidiControlState;
   /** The built-in bass voice (see bassvoice.ts). Global. */
@@ -263,6 +266,7 @@ export const MAX_JOURNEYS = 12;
  * drum note numbers), so switching scenes never changes the key, speed or wiring.
  */
 export type SceneData = {
+  fill: FillState;
   dancer: Omit<DancerState, 'channel'>;
   /** Semitones above the journey key; the scene's home note (see keyRoot). */
   keyOffset: number;
@@ -281,12 +285,13 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'fill' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
   const { channel: _dancerChannel, ...dancer } = s.dancer;
   return {
+    fill: { ...s.fill },
     dancer: { ...dancer },
     keyOffset: s.keyOffset,
     swing: s.swing,
@@ -338,6 +343,7 @@ export function captureScene(s: SceneSource): SceneData {
 export function applyScene(s: BedState, sc: SceneData): BedState {
   return {
     ...s,
+    fill: { ...sc.fill },
     dancer: { ...s.dancer, ...sc.dancer },
     keyOffset: sc.keyOffset,
     swing: sc.swing,
@@ -485,6 +491,7 @@ function nextJourneyNumber(list: Journey[]): number {
 
 const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJourney'> = {
   keyOffset: 0,
+  fill: defaultFill,
   midiControl: { enabled: true, channel: -1, map: '{}' },
   bassVoice: defaultBassVoice,
   solo: null,
@@ -925,6 +932,16 @@ export function toEngineJson(s: BedState): string {
       },
     },
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
+    fill: {
+      enabled: s.fill.enabled,
+      everyBars: s.fill.everyBars,
+      beforeScene: s.fill.beforeScene,
+      afterBreakdown: s.fill.afterBreakdown,
+      density: s.fill.density / 100,
+      chance: s.fill.chance / 100,
+      maxBeats: s.fill.maxBeats,
+      palette: fillPalette(s.drums),
+    },
     ports: s.ports,
     dancer: (() => {
       const on = s.solo ? s.solo === 'dancer' : s.dancer.enabled;

@@ -55,6 +55,10 @@ public class MidiBedEngineModule: Module {
       self.engine.panic()
     }
 
+    Function("playFill") { () in
+      self.engine.playFill()
+    }
+
     // Give keyboard focus back to the key-catching view after a text field has had it.
     Function("reclaimKeyFocus") { () in
       DispatchQueue.main.async { MidiBedPagerView.current?.reclaimFirstResponder() }

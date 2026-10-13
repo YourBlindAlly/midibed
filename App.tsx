@@ -42,6 +42,7 @@ import {
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
 import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
+import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { MIDI_ACTIONS, actionForMidi, assignTrigger, clearTrigger, describeMidi, describeTrigger, parseMidiMap } from './src/midicontrol';
 import { levelText, mixerMessages } from './src/mixer';
@@ -397,6 +398,7 @@ export default function App() {
       const pr = motionPreset(idx);
       return pr ? { ...s, motion: pr } : { ...s, motion: { ...s.motion, preset: 0 } };
     });
+  const patchFill = (p: Partial<FillState>) => setState((s) => ({ ...s, fill: { ...s.fill, ...p } }));
   const patchDancer = (p: Partial<DancerState>) => setState((s) => ({ ...s, dancer: { ...s.dancer, ...p } }));
   const patchHarmony = (p: Partial<HarmonyState>) => setState((s) => ({ ...s, harmony: { ...s.harmony, ...p } }));
   // Editing the chords by hand turns the preset label into "Custom".
@@ -566,6 +568,10 @@ export default function App() {
       case 'panic':
         engine.panic();
         announceLater('All notes off', 150);
+        break;
+      case 'fill':
+        engine.playFill();
+        announceLater('Fill', 100);
         break;
       case 'layer': {
         const name = LAYER_NAMES[action.layer];
@@ -1711,6 +1717,24 @@ export default function App() {
                 <Stepper label="Drums: then break down for" value={state.motion.drums.breakBars} onChange={(v) => patchBreakdown({ breakBars: v })} min={1} max={32} format={barsText} />
                 <Stepper label="Drums: chance of breaking down" value={state.motion.drums.chance} onChange={(v) => patchBreakdown({ chance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} />
                 <Stepper label="Breakdown style" value={state.motion.drums.style} onChange={(v) => patchBreakdown({ style: v })} min={0} max={BREAKDOWN_NAMES.length - 1} format={(v) => BREAKDOWN_NAMES[v]} hint="Full takes every drum out. Light takes out the kick and snare. Kick only leaves just the kick. They ease out with the drum fade time and come back right on the beat at full strength." />
+              </>
+            )}
+          </Section>
+
+          <Section title="Drum fills">
+            <Toggle label="Drum fills" value={state.fill.enabled} onChange={(v) => patchFill({ enabled: v })} hint="Short bursts of snare and toms in the last beats of a bar, landing on the downbeat. The normal drums drop out for the fill. Saved in each scene" />
+            {state.fill.enabled && (
+              <>
+                <Stepper label="Fill every" value={state.fill.everyBars} onChange={(v) => patchFill({ everyBars: v })} min={0} max={32} bigStep={4} format={(v) => (v === 0 ? 'not on a count' : `${v} bars`)} hint="Counted in bars from the start of the scene" />
+                <Toggle label="Fill before a scene change" value={state.fill.beforeScene} onChange={(v) => patchFill({ beforeScene: v })} hint="In the bar before a scene you switched to, or one that moves on by itself" />
+                <Toggle label="Fill as the drums come back" value={state.fill.afterBreakdown} onChange={(v) => patchFill({ afterBreakdown: v })} hint="In the bar before the drums return from a breakdown" />
+                <Stepper label="Fill length" value={state.fill.maxBeats} onChange={(v) => patchFill({ maxBeats: v })} min={1} max={2} format={(v) => (v === 1 ? 'up to 1 beat' : 'up to 2 beats')} hint="Each fill is a different length within this" />
+                <Stepper label="Fill density" value={state.fill.density} onChange={(v) => patchFill({ density: v })} min={0} max={100} step={10} format={(v) => `${v} percent`} hint="How many of the sixteenth notes are played" />
+                <Stepper label="Fill chance" value={state.fill.chance} onChange={(v) => patchFill({ chance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} hint="How often a due fill actually plays. A fill you ask for with a key or pedal always plays" />
+                <ActionButton label="Play a fill now" hint="Plays a fill in the last beats of this bar, or of the next one" onPress={() => engine.playFill()} />
+                <View accessible accessibilityLabel="Fills" accessibilityValue={{ text: describeFill(state.fill, fillPalette(state.drums).length) }}>
+                  <Text style={styles.note}>{describeFill(state.fill, fillPalette(state.drums).length)}</Text>
+                </View>
               </>
             )}
           </Section>
