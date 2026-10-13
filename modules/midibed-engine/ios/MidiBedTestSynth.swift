@@ -38,7 +38,7 @@ final class MidiBedTestSynth {
   }
 
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 shaker, 7 tom,
-  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
+  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
   private struct DrumVoice {
     var active = false
@@ -126,7 +126,7 @@ final class MidiBedTestSynth {
   func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float)]) {
     for i in 0..<128 { drumPatches[i] = DrumPatch() }
     for d in list where d.note >= 0 && d.note < 128 {
-      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(12, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
+      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(13, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
     }
   }
 
@@ -381,16 +381,25 @@ final class MidiBedTestSynth {
     var slot = -1
     for i in 0..<padCount where !pads[i].active { slot = i; break }
     if slot < 0 {
-      var oldest = 0
-      for i in 0..<padCount where pads[i].age < pads[oldest].age { oldest = i }
-      slot = oldest
+      // Steal a voice that is already dying away (quietest first); only if every voice is held, the oldest.
+      var quiet = -1
+      for i in 0..<padCount where !pads[i].gate && (quiet < 0 || pads[i].env < pads[quiet].env) { quiet = i }
+      if quiet >= 0 {
+        slot = quiet
+      } else {
+        var oldest = 0
+        for i in 0..<padCount where pads[i].age < pads[oldest].age { oldest = i }
+        slot = oldest
+      }
     }
     pads[slot] = PadVoice(active: true, gate: true, note: note, phaseA: 0, phaseB: 0.37, env: 0, velocity: velocity, ic1: 0, ic2: 0, age: padAgeCounter, channel: channel)
   }
 
   private func noteOff(channel: UInt8, note: Int) {
     if channel == 9 { return }
-    for i in 0..<padCount where pads[i].active && pads[i].gate && pads[i].note == note {
+    // The CHANNEL must match too: the same pitch can be playing on two channels at once (a pad's fifth and a
+    // MidiDancer or bass note), and a note-off for one must not release the other.
+    for i in 0..<padCount where pads[i].active && pads[i].gate && pads[i].note == note && pads[i].channel == channel {
       pads[i].gate = false
     }
   }
@@ -707,6 +716,27 @@ final class MidiBedTestSynth {
           let env = 1 - expf(-t / attack)
           s = (drums[i].lp * 1.58 * expf(-t * 26 / D) + jingle * 0.158 * expf(-t * 14 / D)) * env
           alive = t <= 0.45 * D + 0.05
+        case 13: // jingle tambourine: six ringing jingles that rattle, three quick re-strikes and a soft skin thump (scratchpad jingle.py)
+          let jscale = (0.75 + 0.5 * tone) * f
+          var ex: Float = 0
+          if t >= 0 { ex += expf(-t * 70) }
+          if t >= 0.017 { ex += 0.7 * expf(-(t - 0.017) * 70) }
+          if t >= 0.038 { ex += 0.45 * expf(-(t - 0.038) * 70) }
+          ex += 0.55 * expf(-t * 9 / D) * (1 - expf(-t / 0.004))
+          var jg: Float = 0
+          jg += sinf(2 * Float.pi * 3150 * jscale * t + 3150) * 0.8 * (0.65 + 0.35 * fabsf(sinf(2 * Float.pi * 11.5 * t + 0.0))) * expf(-t * 6.0 / D)
+          jg += sinf(2 * Float.pi * 4020 * jscale * t + 4020) * 1.0 * (0.65 + 0.35 * fabsf(sinf(2 * Float.pi * 14.5 * t + 1.3))) * expf(-t * 7.2 / D)
+          jg += sinf(2 * Float.pi * 4870 * jscale * t + 4870) * 0.9 * (0.65 + 0.35 * fabsf(sinf(2 * Float.pi * 9.5 * t + 2.6))) * expf(-t * 8.4 / D)
+          jg += sinf(2 * Float.pi * 5930 * jscale * t + 5930) * 0.7 * (0.65 + 0.35 * fabsf(sinf(2 * Float.pi * 16.5 * t + 3.9))) * expf(-t * 9.6 / D)
+          jg += sinf(2 * Float.pi * 7140 * jscale * t + 7140) * 0.55 * (0.65 + 0.35 * fabsf(sinf(2 * Float.pi * 13.5 * t + 5.2))) * expf(-t * 10.8 / D)
+          jg += sinf(2 * Float.pi * 8600 * jscale * t + 8600) * 0.4 * (0.65 + 0.35 * fabsf(sinf(2 * Float.pi * 18.5 * t + 6.5))) * expf(-t * 12.0 / D)
+          let jing = jg * ex * 0.12 * (0.5 + tone)
+          let thump = sinf(2 * Float.pi * (150 + 70 * expf(-t * 60)) * f * t) * expf(-t * 38) * 0.40 * (0.4 + snap)
+          drums[i].lp += 0.30 * (noise - drums[i].lp)
+          drums[i].lp2 += 0.06 * (drums[i].lp - drums[i].lp2)
+          let nz = (drums[i].lp - drums[i].lp2) * 0.9 * expf(-t * 22 / D)
+          s = (jing + thump + nz) * 0.46
+          alive = t <= 0.4 * D + 0.05
         case 7, 10, 11, 12: // toms: a quick pitch drop, membrane overtones, a bright stick attack and a little shell noise (scratchpad tom3.py)
           var b: Float = 105
           var drop: Float = 0.55

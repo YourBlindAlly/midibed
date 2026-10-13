@@ -27,3 +27,11 @@ describe('per-part outputs', () => {
     expect(kept.outputs.bass).toEqual({ midi: true, synth: true });
   });
 });
+
+describe('pad voices in the built-in sound', () => {
+  it('release a note only on its own channel (a note-off for the same pitch elsewhere must not drop a held fifth)', () => {
+    const swift: string = require('fs').readFileSync(require('path').join(__dirname, '..', 'modules', 'midibed-engine', 'ios', 'MidiBedTestSynth.swift'), 'utf8');
+    const block = swift.slice(swift.indexOf('private func noteOff'), swift.indexOf('private func allNotesOff'));
+    expect(block).toContain('pads[i].channel == channel');
+  });
+});
