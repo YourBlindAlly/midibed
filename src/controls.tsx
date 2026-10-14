@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SectionUi, defaultSectionUi, isCollapsed } from './sectionui';
 
 export const colors = {
   bg: '#000000',
@@ -147,18 +148,63 @@ export function ActionButton({ label, onPress, hint }: { label: string; onPress:
   );
 }
 
-export function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/** The screen's open/closed sections and the way to flip one (provided by App.tsx). */
+export const SectionUiContext = createContext<{ ui: SectionUi; toggle: (id: string) => void }>({
+  ui: defaultSectionUi,
+  toggle: () => {},
+});
+
+/**
+ * A group of controls under a heading. The heading is a button too: double tap to close or open the group.
+ * A closed group is not drawn at all, so VoiceOver goes from one heading to the next. `fixed` groups
+ * cannot be closed (the module chooser). `inner` is a smaller group inside a card (no card of its own).
+ * The id is the title unless one is given.
+ */
+export function Section({
+  title,
+  children,
+  id,
+  fixed,
+  inner,
+}: {
+  title: string;
+  children: React.ReactNode;
+  id?: string;
+  fixed?: boolean;
+  inner?: boolean;
+}) {
+  const { ui, toggle } = useContext(SectionUiContext);
+  const key = id ?? title;
+  const closed = !fixed && isCollapsed(ui, key);
+  const head = fixed ? (
+    <Text style={inner ? styles.innerTitle : styles.sectionTitle} accessibilityRole="header">
+      {title}
+    </Text>
+  ) : (
+    <Pressable
+      hitSlop={SLOP}
+      accessibilityRole="header"
+      accessibilityLabel={title}
+      accessibilityState={{ expanded: !closed }}
+      accessibilityHint={closed ? 'Double tap to open' : 'Double tap to close'}
+      onPress={() => toggle(key)}
+      style={styles.sectionHead}
+    >
+      <Text style={inner ? styles.innerTitle : styles.sectionTitle}>{`${title}  ${closed ? '(closed)' : ''}`.trim()}</Text>
+    </Pressable>
+  );
   return (
-    <View style={styles.card}>
-      <Text style={styles.sectionTitle} accessibilityRole="header">
-        {title}
-      </Text>
-      {children}
+    <View style={inner ? styles.inner : styles.card}>
+      {head}
+      {closed ? null : children}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  sectionHead: { minHeight: 44, justifyContent: 'center' },
+  inner: { marginTop: 6, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: colors.line },
+  innerTitle: { color: colors.accent, fontSize: 16, fontWeight: '600', paddingVertical: 4 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -46,6 +46,11 @@ describe('whole screen smoke test', () => {
       await act(async () => t.props.onPress());
     };
 
+    // Some sections start closed; open everything so every control can be checked on its tab.
+    const expand = tree.root.findAll((n: any) => n.props && n.props.accessibilityLabel === 'Expand all sections' && typeof n.props.onPress === 'function')[0];
+    expect(expand).toBeDefined();
+    await act(async () => expand.props.onPress());
+
     // The strip is always there: Play and the scene buttons.
     expect(labels(tree)).toEqual(expect.arrayContaining(['Play', 'Scene 1', 'Scene 4']));
 
@@ -114,5 +119,31 @@ describe('whole screen smoke test', () => {
     expect(labels(tree)).toContain('Stop');
     await act(async () => holder.props.onMagicTap());
     expect(labels(tree)).toContain('Play');
+  });
+});
+
+describe('sections that open and close', () => {
+  it('start with the rarely needed groups closed, and the Collapse all and Expand all buttons work', async () => {
+    let tree: any;
+    await act(async () => {
+      tree = renderer.create(<App />);
+    });
+    const press = async (label: string) => {
+      const n = tree.root.findAll((x: any) => x.props && x.props.accessibilityLabel === label && typeof x.props.onPress === 'function')[0];
+      expect(n).toBeDefined();
+      await act(async () => n.props.onPress());
+    };
+    const has = (label: string) => labels(tree).includes(label);
+    // Live: the Ending group is open by default; the Layers group cannot be closed.
+    expect(has('Stop style')).toBe(true);
+    await press('Collapse all sections');
+    expect(has('Stop style')).toBe(false);
+    expect(has('Bass drone layer')).toBe(true); // fixed
+    await press('Ending');
+    expect(has('Stop style')).toBe(true);
+    await press('Ending');
+    expect(has('Stop style')).toBe(false);
+    await press('Expand all sections');
+    expect(has('Stop style')).toBe(true);
   });
 });

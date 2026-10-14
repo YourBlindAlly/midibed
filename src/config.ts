@@ -1,5 +1,6 @@
 import { FxState, defaultFx } from './uglyfx';
 import { EndingState, defaultEnding } from './ending';
+import { defaultSectionUi } from './sectionui';
 import { buildBassChords, buildPadChords, clampMode } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
@@ -216,6 +217,8 @@ export type BedState = {
   fx: FxState;
   /** How Stop ends the music (src/ending.ts): global. */
   ending: EndingState;
+  /** Which screen sections are open or closed, as JSON (src/sectionui.ts): global. */
+  sectionUi: string;
   /** Hear only this part. Never saved as on (like Freeze): it silences the others by the normal fades. */
   solo: Layer | null;
   /** Per-part levels sent as volume control changes (see mixer.ts). Global. */
@@ -554,6 +557,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   bassVoice: defaultBassVoice,
   fx: defaultFx,
   ending: defaultEnding,
+  sectionUi: JSON.stringify(defaultSectionUi),
   solo: null,
   mixer: defaultMixer,
   shortcuts: true,

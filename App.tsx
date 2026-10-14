@@ -40,6 +40,7 @@ import {
   toEngineJson,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
+import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
 import { ENDING_FADE_NAMES, STOP_STYLE_NAMES, barsLeftText, endingJson, endingSentence, nextStopStyle } from './src/ending';
 import { DELAY_NOTES, FxPart, FxPartState, panText, uglyFxJson } from './src/uglyfx';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
@@ -49,7 +50,7 @@ import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from 
 import { MIDI_ACTIONS, actionForMidi, assignTrigger, clearTrigger, describeMidi, describeTrigger, parseMidiMap } from './src/midicontrol';
 import { levelText, mixerMessages } from './src/mixer';
 import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
-import { ActionButton, Section, Stepper, Toggle, colors } from './src/controls';
+import { ActionButton, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion, onScene, testSweep } from './src/engine';
 import {
@@ -678,6 +679,13 @@ export default function App() {
   // ---- Parts tab helpers
   const PARTS = ['bass', 'pad', 'dancer', 'drums', 'loops'] as const;
   const [partIdx, setPartIdx] = useState(0);
+  // Which drum's settings the Drums module shows (one at a time).
+  const [drumIdx, setDrumIdx] = useState(0);
+  const sectionUi = parseSectionUi(state.sectionUi);
+  const sectionUiValue = {
+    ui: sectionUi,
+    toggle: (id: string) => setState((s) => ({ ...s, sectionUi: JSON.stringify(toggleSection(parseSectionUi(s.sectionUi), id)) })),
+  };
   const part = PARTS[partIdx];
   const partName = LAYER_NAMES[part];
   const partRole: ProfileRole | null = part === 'bass' ? 'drone' : part === 'pad' ? 'pad' : part === 'drums' ? 'drums' : part === 'loops' ? 'loops' : null;
@@ -975,7 +983,10 @@ export default function App() {
               <Text style={styles.note}>{advanceSentence}</Text>
             </View>
             </View>
+            <SectionUiContext.Provider value={sectionUiValue}>
             <ScrollView key={tab} style={styles.fill} contentContainerStyle={styles.scroll}>
+          <ActionButton label="Collapse all sections" hint="Closes every group on this screen, so you can open just the ones you want" onPress={() => patch({ sectionUi: JSON.stringify(collapseAll) })} />
+          <ActionButton label="Expand all sections" onPress={() => patch({ sectionUi: JSON.stringify(expandAll) })} />
           {tab === 'live' && (
             <>
           <Section title="Journey">
@@ -1010,7 +1021,7 @@ export default function App() {
             <ActionButton label="Delete this journey" onPress={removeJourney} hint="Asks first. You always keep at least one" />
           </Section>
 
-          <Section title="Layers">
+          <Section title="Layers" fixed>
             <ActionButton
               label="All notes off"
               hint="Ends every sounding note on every MIDI port, for a stuck note. If it is playing, the bass and pad start again straight away"
@@ -1095,7 +1106,7 @@ export default function App() {
           )}
           {tab === 'parts' && (
             <>
-          <Section title="Part">
+          <Section title="Part" fixed>
             <Text style={styles.note}>
               Choose a part. Every part shows the same headings in the same order: where it goes, sound, level and fade, what it plays, how it moves. Breathing, the chords and the key are on the Scene tab.
             </Text>
@@ -1519,8 +1530,19 @@ export default function App() {
 
           {part === 'drums' && (
             <>
-          {state.drums.map((d, i) => (
-            <Section key={d.name} title={d.name}>
+          <Section title="Drum" fixed>
+            <Stepper
+              label="Drum"
+              value={Math.min(drumIdx, state.drums.length - 1)}
+              onChange={(v) => setDrumIdx(Math.max(0, Math.min(state.drums.length - 1, v)))}
+              min={0}
+              max={state.drums.length - 1}
+              format={(v) => `${state.drums[v].name}${state.drums[v].enabled ? '' : ', off'}`}
+              hint="Swipe up or down to choose which drum's settings are shown below"
+            />
+          </Section>
+          {state.drums.map((d, i) => i !== Math.min(drumIdx, state.drums.length - 1) ? null : (
+            <Section key={d.name} title={d.name} fixed>
               <Toggle label={`${d.name} on`} value={d.enabled} onChange={(v) => patchDrum(i, { enabled: v })} />
               <Stepper
                 label={`${d.name} note`}
@@ -1536,12 +1558,6 @@ export default function App() {
               />
               <Stepper label={`${d.name} MIDI channel`} value={d.channel} onChange={(v) => patchDrum(i, { channel: v })} min={0} max={15} format={channelText} hint="Channel 10 is General MIDI drums." />
               <ActionButton label={`Play ${d.name} test hit`} hint="Sends this note on this channel once, to check what the other app does with it" onPress={() => engine.sendNote(d.channel, d.note, d.velocity, 200)} />
-              <Stepper label={`${d.name} built-in sound`} value={d.voice} onChange={(v) => patchDrum(i, { voice: v })} min={0} max={DRUM_TYPES.length - 1} format={(v) => DRUM_TYPES[v]} hint="Which sound the built-in drum plays for this drum, whatever its note. Another app ignores this" />
-              <Stepper label={`${d.name} tune`} value={d.tune} onChange={(v) => patchDrum(i, { tune: v })} min={-12} max={12} format={drumTuneText} />
-              <Stepper label={`${d.name} decay`} value={d.decay} onChange={(v) => patchDrum(i, { decay: v })} min={25} max={300} step={5} bigStep={25} format={(v) => `${v} percent`} hint="How long the sound rings" />
-              <Stepper label={`${d.name} tone`} value={d.tone} onChange={(v) => patchDrum(i, { tone: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="Darker or brighter" />
-              <Stepper label={`${d.name} snap`} value={d.snap} onChange={(v) => patchDrum(i, { snap: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How much click, noise or attack the sound has" />
-              <Stepper label={`${d.name} sound level`} value={d.level} onChange={(v) => patchDrum(i, { level: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
               <Stepper label={`${d.name} hits`} value={d.hits} onChange={(v) => patchDrum(i, { hits: v })} min={0} max={d.steps} />
               <Stepper
                 label={`${d.name} steps`}
@@ -1554,6 +1570,18 @@ export default function App() {
               <Stepper label={`${d.name} rotation`} value={d.rotation} onChange={(v) => patchDrum(i, { rotation: v })} min={0} max={Math.max(0, d.steps - 1)} />
               <Stepper label={`${d.name} velocity`} value={d.velocity} onChange={(v) => patchDrum(i, { velocity: v })} min={1} max={127} step={5} />
               <Stepper label={`${d.name} chance`} value={d.probability} onChange={(v) => patchDrum(i, { probability: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+              <View accessible accessibilityLabel={`${d.name} pattern`} accessibilityValue={{ text: describePattern(d.hits, d.steps, d.rotation) }}>
+                <Text style={styles.pattern}>{patternText(d.hits, d.steps, d.rotation)}</Text>
+              </View>
+              <Section title={`${d.name}: sound of the built-in drum`} id={`${d.name}: Sound of the built-in drum`} inner>
+              <Stepper label={`${d.name} built-in sound`} value={d.voice} onChange={(v) => patchDrum(i, { voice: v })} min={0} max={DRUM_TYPES.length - 1} format={(v) => DRUM_TYPES[v]} hint="Which sound the built-in drum plays for this drum, whatever its note. Another app ignores this" />
+              <Stepper label={`${d.name} tune`} value={d.tune} onChange={(v) => patchDrum(i, { tune: v })} min={-12} max={12} format={drumTuneText} />
+              <Stepper label={`${d.name} decay`} value={d.decay} onChange={(v) => patchDrum(i, { decay: v })} min={25} max={300} step={5} bigStep={25} format={(v) => `${v} percent`} hint="How long the sound rings" />
+              <Stepper label={`${d.name} tone`} value={d.tone} onChange={(v) => patchDrum(i, { tone: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="Darker or brighter" />
+              <Stepper label={`${d.name} snap`} value={d.snap} onChange={(v) => patchDrum(i, { snap: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How much click, noise or attack the sound has" />
+              <Stepper label={`${d.name} sound level`} value={d.level} onChange={(v) => patchDrum(i, { level: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+              </Section>
+              <Section title={`${d.name}: more settings`} id={`${d.name}: More settings`} inner>
               <Stepper label={`${d.name} humanize`} value={d.humanize} onChange={(v) => patchDrum(i, { humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
               <Toggle
                 label={`${d.name} always plays its first hit`}
@@ -1614,9 +1642,8 @@ export default function App() {
                 format={(v) => (v === 0 ? 'exact' : `up to ${v} milliseconds late`)}
                 hint="Each hit lands a little late, at random, so the pattern feels played instead of clocked"
               />
-              <View accessible accessibilityLabel={`${d.name} pattern`} accessibilityValue={{ text: describePattern(d.hits, d.steps, d.rotation) }}>
-                <Text style={styles.pattern}>{patternText(d.hits, d.steps, d.rotation)}</Text>
-              </View>
+              <ActionButton label={`Play ${d.name} test hit`} hint="Sends this note on this channel once, to check what the other app does with it" onPress={() => engine.sendNote(d.channel, d.note, d.velocity, 200)} />
+              </Section>
             </Section>
           ))}
             </>
@@ -2336,6 +2363,7 @@ export default function App() {
             </>
           )}
             </ScrollView>
+            </SectionUiContext.Provider>
             <TabBar selected={tab} onSelect={(id) => selectTab(id)} />
           </View>
         </Pager>
