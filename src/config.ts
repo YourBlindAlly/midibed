@@ -209,6 +209,8 @@ export type BedState = {
   fill: FillState;
   /** Patterns that evolve by themselves. Saved per scene. */
   evolve: EvolveState;
+  /** The active scene's own name (optional, empty = none). Saved with the scene. */
+  sceneName: string;
   /** A MIDI controller (foot pedal) running the same actions as the keyboard shortcuts. Global. */
   midiControl: MidiControlState;
   /** The built-in bass voice (see bassvoice.ts). Global. */
@@ -311,6 +313,8 @@ export type SceneData = {
   fill: FillState;
   /** Patterns that evolve by themselves. Saved per scene. */
   evolve: EvolveState;
+  /** The scene's own name; empty when it has none. */
+  name: string;
   dancer: Omit<DancerState, 'channel'>;
   /** Semitones above the journey key; the scene's home note (see keyRoot). */
   keyOffset: number;
@@ -329,7 +333,7 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -337,6 +341,7 @@ export function captureScene(s: SceneSource): SceneData {
   return {
     fill: { ...s.fill },
     evolve: { ...s.evolve },
+    name: s.sceneName,
     dancer: { ...dancer },
     keyOffset: s.keyOffset,
     swing: s.swing,
@@ -397,6 +402,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     ...s,
     fill: { ...sc.fill },
     evolve: { ...defaultEvolve, ...sc.evolve },
+    sceneName: typeof sc.name === 'string' ? sc.name : '',
     dancer: { ...s.dancer, ...sc.dancer },
     keyOffset: sc.keyOffset,
     swing: sc.swing,
@@ -424,7 +430,60 @@ export function switchScene(s: BedState, to: number): BedState {
 export function copyScene(s: BedState, to: number): BedState {
   if (to < 0 || to >= s.scenes.length || to === s.activeScene) return s;
   const current = captureScene(s);
-  return { ...s, scenes: s.scenes.map((sc, i) => (i === s.activeScene || i === to ? current : sc)) };
+  // The copy keeps the target scene's own name: names say which scene is which.
+  return {
+    ...s,
+    scenes: s.scenes.map((sc, i) => (i === s.activeScene ? current : i === to ? { ...current, name: sc.name ?? '' } : sc)),
+  };
+}
+
+/** What can be copied from one scene to another (index 0 = everything). */
+export const SCENE_COPY_PARTS = [
+  'Everything',
+  'Drums, patterns, fills and swing',
+  'Bass drone',
+  'Chord pad',
+  'MidiDancer',
+  'Harmony and key change',
+  'Breathing and transitions',
+  'Filter movement',
+  'Loops',
+  'After this scene',
+];
+
+/** Copy one part of the current scene (including unsaved edits) into scene `to`; the rest of `to` stays. */
+export function copyScenePart(s: BedState, to: number, what: number): BedState {
+  if (to < 0 || to >= s.scenes.length || to === s.activeScene) return s;
+  if (what <= 0 || what >= SCENE_COPY_PARTS.length) return copyScene(s, to);
+  const cur = captureScene(s);
+  const parts: Partial<SceneData>[] = [
+    {},
+    { drums: cur.drums, percussion: cur.percussion, fill: cur.fill, evolve: cur.evolve, swing: cur.swing },
+    { drone: cur.drone },
+    { pad: cur.pad },
+    { dancer: cur.dancer },
+    { harmony: cur.harmony, keyOffset: cur.keyOffset },
+    { motion: cur.motion, transitionUse: cur.transitionUse },
+    { wanderers: cur.wanderers },
+    { loops: cur.loops },
+    { advance: cur.advance },
+  ];
+  const piece = JSON.parse(JSON.stringify(parts[what])) as Partial<SceneData>;
+  return {
+    ...s,
+    scenes: s.scenes.map((sc, i) => (i === s.activeScene ? cur : i === to ? { ...sc, ...piece } : sc)),
+  };
+}
+
+export function renameScene(s: BedState, name: string): BedState {
+  return { ...s, sceneName: name.slice(0, 30) };
+}
+
+/** "Scene 2" or "Scene 2, the lift". */
+export function sceneLabel(s: Pick<BedState, 'scenes' | 'activeScene' | 'sceneName'>, index: number): string {
+  const name = (index === s.activeScene ? s.sceneName : s.scenes[index]?.name) ?? '';
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  return trimmed ? `Scene ${index + 1}, ${trimmed}` : `Scene ${index + 1}`;
 }
 
 /** Which app (profile id) a sound slot talks to: the slot's role decides. */
@@ -553,6 +612,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   },
   fill: defaultFill,
   evolve: defaultEvolve,
+  sceneName: '',
   midiControl: { enabled: true, channel: -1, map: '{}' },
   bassVoice: defaultBassVoice,
   fx: defaultFx,

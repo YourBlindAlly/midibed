@@ -17,7 +17,6 @@ import {
   WandererState,
   addFavorite,
   applyFavorite,
-  copyScene,
   defaultState,
   deleteJourney,
   drumNoteLabel,
@@ -33,6 +32,10 @@ import {
   relativeKey,
   removeFavorite,
   renameJourney,
+  renameScene,
+  sceneLabel,
+  SCENE_COPY_PARTS,
+  copyScenePart,
   sceneConfigsJson,
   slotProfileId,
   switchJourney,
@@ -186,7 +189,7 @@ export default function App() {
       if (e.reason === 'auto' && latest.current.activeScene !== e.index) {
         // The engine has already moved to this scene: follow it, without asking it to switch again.
         setState((s) => switchScene(s, e.index));
-        if (latest.current.announce) announceLater(`Scene ${e.index + 1}`, 100);
+        if (latest.current.announce) announceLater(sceneLabel(latest.current, e.index), 100);
       }
     });
   }, []);
@@ -333,14 +336,16 @@ export default function App() {
     queueNextApply.current = queued;
     setState(next);
     setQueuedScene(queued ? to : null);
-    const msg = queued ? `Scene ${to + 1}, starts at the next bar` : `Scene ${to + 1}`;
+    const msg = queued ? `${sceneLabel(next, to)}, starts at the next bar` : sceneLabel(next, to);
     announceLater(msg, 500);
   };
 
+  const [copyWhat, setCopyWhat] = useState(0);
   const copySceneTo = (to: number) => {
     if (to === state.activeScene) return;
-    setState((s) => copyScene(s, to));
-    announceLater(`Copied scene ${state.activeScene + 1} to scene ${to + 1}`, 500);
+    setState((s) => copyScenePart(s, to, copyWhat));
+    const what = copyWhat === 0 ? 'scene' : SCENE_COPY_PARTS[copyWhat].toLowerCase();
+    announceLater(`Copied ${what} from scene ${state.activeScene + 1} to scene ${to + 1}`, 500);
   };
 
   // Journeys. Switching is queued to the next bar line, like scenes; the new tempo and key
@@ -952,7 +957,7 @@ export default function App() {
                     hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                     style={[styles.sceneBtn, active && styles.sceneBtnOn]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Scene ${i + 1}`}
+                    accessibilityLabel={sceneLabel(state, i)}
                     accessibilityState={{ selected: active }}
                     accessibilityHint={active ? 'Current scene' : 'Switches at the next bar while playing'}
                     onPress={() => goToScene(i)}
@@ -970,8 +975,8 @@ export default function App() {
             />
             <Text style={styles.note}>
               {queuedScene !== null
-                ? `Scene ${state.activeScene + 1} starts at the next bar`
-                : `Scene ${state.activeScene + 1} is playing`}
+                ? `${sceneLabel(state, state.activeScene)} starts at the next bar`
+                : `${sceneLabel(state, state.activeScene)} is playing`}
             </Text>
             <View
               accessible
@@ -1768,6 +1773,21 @@ export default function App() {
               Everything here belongs to the scene you are working on, which is the scene selected at the top. The scene buttons at the top change what is playing and what you are editing together. The part settings (bass, pad, drums, MidiDancer) are saved per scene too.
             </Text>
             <Stepper label="Swing" value={state.swing} onChange={(v) => patch({ swing: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+            <View accessible={false} style={styles.nameBox}>
+              <Text style={styles.note}>Scene name (optional)</Text>
+              <TextInput
+                style={styles.nameInput}
+                value={state.sceneName}
+                onChangeText={(v) => setState((s) => renameScene(s, v))}
+                accessibilityLabel="Scene name"
+                accessibilityHint="Double tap to give this scene a name, or leave it empty"
+                maxLength={30}
+                autoCorrect={false}
+                placeholder={`Scene ${state.activeScene + 1}`}
+                placeholderTextColor={colors.dim}
+                onBlur={() => engine.reclaimKeys()}
+              />
+            </View>
           </Section>
 
           <Section title="Harmony">
@@ -1856,15 +1876,25 @@ export default function App() {
               Each scene remembers its drums, bass drone on/off and voicing, chord pad, harmony, swing, and filter movement. Tempo, key, outputs, fades and MIDI routing stay the same in every scene. Changes you make are saved into the current scene.
             </Text>
             <Stepper
-              label="Copy this scene to scene"
+              label="What to copy"
+              value={copyWhat}
+              onChange={setCopyWhat}
+              min={0}
+              max={SCENE_COPY_PARTS.length - 1}
+              format={(v) => SCENE_COPY_PARTS[v]}
+              hint="The whole scene, or just one part of it. Only that part of the other scene is replaced"
+            />
+            <Stepper
+              label="Copy to scene"
               value={copyTarget}
               onChange={setCopyTarget}
               min={1}
               max={SCENE_COUNT}
-              hint="Pick where to copy, then press the copy button. It replaces that scene."
+              format={(v) => sceneLabel(state, v - 1)}
+              hint="Pick where to copy, then press the copy button"
             />
             <ActionButton
-              label={`Copy scene ${state.activeScene + 1} to scene ${copyTarget}`}
+              label={`Copy ${copyWhat === 0 ? 'scene' : SCENE_COPY_PARTS[copyWhat].toLowerCase()} from scene ${state.activeScene + 1} to scene ${copyTarget}`}
               onPress={() => copySceneTo(copyTarget - 1)}
             />
             <Stepper
