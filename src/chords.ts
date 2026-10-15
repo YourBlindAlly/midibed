@@ -83,21 +83,45 @@ export function scaleNote(root: number, mode: number, index: number): number {
   return root + 12 * oct + intervals[step];
 }
 
+/**
+ * A chord's COLOUR: 0 takes the third from the scale (as the mode makes it), 1 forces a major third, 2 a
+ * minor third, 3 and 4 swap the third for a second (sus 2) or a fourth (sus 4). A forced colour also gives
+ * the chord a perfect fifth, so a major or minor chord is a true major or minor chord even on a scale step
+ * whose own fifth is diminished. This is how a chord that the mode does not make (the E major of an E
+ * minor key, say) can be had without leaving the degree system. New colours go at the END.
+ */
+export const COLOR_NAMES = ['From the scale', 'Major', 'Minor', 'Sus 2', 'Sus 4'];
+const COLOR_THIRD = [0, 4, 3, 2, 5]; // semitones above the chord root, for colours 1-4
+
+export function clampColor(c: number): number {
+  return Math.max(0, Math.min(COLOR_NAMES.length - 1, Math.round(Number.isFinite(c) ? c : 0)));
+}
+
 /** Ascending chord tones for a degree (1-7), as absolute notes relative to `root`. */
-export function chordStack(root: number, mode: number, degree: number, style: number): number[] {
+export function chordStack(root: number, mode: number, degree: number, style: number, color = 0): number[] {
   const d = Math.max(1, Math.min(7, degree)) - 1;
-  const steps = STYLE_STEPS[Math.max(0, Math.min(STYLE_STEPS.length - 1, style))];
-  return steps.map((s) => scaleNote(root, mode, d + s));
+  const st = Math.max(0, Math.min(STYLE_STEPS.length - 1, style));
+  const stack = STYLE_STEPS[st].map((s) => scaleNote(root, mode, d + s));
+  const c = clampColor(color);
+  // Open fifth and fifth only have no third to colour; the sus styles take only a sus colour.
+  if (c === 0 || st === 5 || st === 6) return stack;
+  if ((st === 1 || st === 2) && c < 3) return stack;
+  const rootNote = stack[0];
+  const out = stack.slice();
+  out[1] = rootNote + COLOR_THIRD[c];
+  if (out.length > 2) out[2] = rootNote + 7;
+  return out;
 }
 
 /** Spoken name, e.g. "D minor", "C major", "B diminished", "G sus 4". */
-export function chordLabel(root: number, mode: number, degree: number, style: number): string {
-  const stack = chordStack(root, mode, degree, style);
+export function chordLabel(root: number, mode: number, degree: number, style: number, color = 0): string {
+  const stack = chordStack(root, mode, degree, style, color);
   const name = pitchClassName(stack[0]);
+  const c = clampColor(color);
   if (style === 5) return `${name} open fifth`;
   if (style === 6) return `${name} and ${pitchClassName(stack[1])}`;
-  if (style === 1) return `${name} sus 2`;
-  if (style === 2) return `${name} sus 4`;
+  if (style === 1 || (c === 3 && style !== 5 && style !== 6)) return `${name} sus 2`;
+  if (style === 2 || (c === 4 && style !== 5 && style !== 6)) return `${name} sus 4`;
   const t = stack[1] - stack[0];
   const f = stack[2] - stack[0];
   let quality: string;
@@ -180,6 +204,8 @@ export type PadChordParams = {
   mode: number;
   degrees: number[];
   count: number;
+  /** Colour of each chord (parallel to degrees; see COLOR_NAMES). Left out = from the scale. */
+  colors?: number[];
   style: number;
   register: number; // lowest note of the pad's range
   spread: boolean;
@@ -194,7 +220,7 @@ export type PadChordParams = {
 export function buildPadChords(p: PadChordParams): number[][] {
   const count = Math.max(1, Math.min(4, p.count));
   const high = p.register + 19;
-  const stacks = p.degrees.slice(0, count).map((d) => chordStack(p.root, p.mode, d, p.style));
+  const stacks = p.degrees.slice(0, count).map((d, i) => chordStack(p.root, p.mode, d, p.style, p.colors?.[i] ?? 0));
   const out: number[][] = [];
   stacks.forEach((stack, i) => {
     if (i === 0 || !p.voiceLead) {
@@ -212,6 +238,8 @@ export type BassChordParams = {
   mode: number;
   degrees: number[];
   count: number;
+  /** Colour of each chord (parallel to degrees). */
+  colors?: number[];
   follow: boolean; // false = stay on the key root; true = the root of each chord
   octave: boolean;
   fifth: boolean;
@@ -227,8 +255,8 @@ export type BassChordParams = {
 export function buildBassChords(p: BassChordParams): number[][] {
   const count = Math.max(1, Math.min(4, p.count));
   const degrees = p.follow ? p.degrees.slice(0, count) : [1];
-  return degrees.map((d) => {
-    const stack = chordStack(p.root, p.mode, d, 0);
+  return degrees.map((d, i) => {
+    const stack = chordStack(p.root, p.mode, d, 0, p.follow ? (p.colors?.[i] ?? 0) : 0);
     const folded = p.root + ((((stack[0] - p.root + 5) % 12) + 12) % 12) - 5;
     const base = p.follow ? folded : p.root;
     const notes = [base];

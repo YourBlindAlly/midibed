@@ -56,7 +56,7 @@ import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, holdArmed, idForMidi, isDoublePress, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
 import { levelText, mixerMessages } from './src/mixer';
-import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
+import { COLOR_NAMES, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion, onScene, testSweep } from './src/engine';
@@ -465,12 +465,17 @@ export default function App() {
       ...s,
       harmony: { ...s.harmony, preset: 0, degrees: s.harmony.degrees.map((d, k) => (k === i ? v : d)) },
     }));
+  const setColor = (i: number, v: number) =>
+    setState((s) => ({
+      ...s,
+      harmony: { ...s.harmony, preset: 0, colors: s.harmony.colors.map((c, k) => (k === i ? v : c)) },
+    }));
   const choosePreset = (idx: number) =>
     setState((s) => {
       const pr = PRESETS[idx];
       if (idx === 0 || !pr) return { ...s, harmony: { ...s.harmony, preset: 0 } };
       const degrees = [0, 1, 2, 3].map((k) => pr.degrees[k] ?? s.harmony.degrees[k]);
-      return { ...s, harmony: { ...s.harmony, preset: idx, degrees, count: pr.degrees.length } };
+      return { ...s, harmony: { ...s.harmony, preset: idx, degrees, colors: [0, 0, 0, 0], count: pr.degrees.length } };
     });
   // What happens next in this scene. While stopped, or before the engine has said, work out the
   // target here (a random one cannot be known yet).
@@ -504,7 +509,7 @@ export default function App() {
       .join('. ') || 'Nothing in this scene is set to change by itself';
   const harmonySummary = state.harmony.degrees
     .slice(0, state.harmony.count)
-    .map((d) => chordLabel(keyRoot(state), state.harmony.mode, d, 0))
+    .map((d, i) => chordLabel(keyRoot(state), state.harmony.mode, d, 0, state.harmony.colors[i] ?? 0))
     .join(', then ');
   const patchWanderer = (i: number, p: Partial<WandererState>) =>
     setState((s) => ({ ...s, wanderers: s.wanderers.map((w, k) => (k === i ? { ...w, ...p } : w)) }));
@@ -2256,15 +2261,25 @@ export default function App() {
             />
             <Stepper label="Chords in loop" value={state.harmony.count} onChange={(v) => patchHarmony({ count: v, preset: 0 })} min={1} max={4} />
             {state.harmony.degrees.slice(0, state.harmony.count).map((d, i) => (
-              <Stepper
-                key={i}
-                label={`Chord ${i + 1} scale degree`}
-                value={d}
-                onChange={(v) => setDegree(i, v)}
-                min={1}
-                max={7}
-                format={(v) => `${v}, ${chordLabel(keyRoot(state), state.harmony.mode, v, 0)}`}
-              />
+              <React.Fragment key={i}>
+                <Stepper
+                  label={`Chord ${i + 1} scale degree`}
+                  value={d}
+                  onChange={(v) => setDegree(i, v)}
+                  min={1}
+                  max={7}
+                  format={(v) => `${v}, ${chordLabel(keyRoot(state), state.harmony.mode, v, 0, state.harmony.colors[i] ?? 0)}`}
+                />
+                <Stepper
+                  label={`Chord ${i + 1} colour`}
+                  value={state.harmony.colors[i] ?? 0}
+                  onChange={(v) => setColor(i, v)}
+                  min={0}
+                  max={COLOR_NAMES.length - 1}
+                  format={(v) => `${COLOR_NAMES[v]}, ${chordLabel(keyRoot(state), state.harmony.mode, d, 0, v)}`}
+                  hint="Changes the third of this chord. Major or minor forces it, sus swaps it for a second or fourth. In E minor, degree 1 set to Major is E major, and degree 6 stays C major"
+                />
+              </React.Fragment>
             ))}
             <View accessible accessibilityLabel="Chord loop" accessibilityValue={{ text: `${harmonySummary}, ${state.harmony.barsPerChord} bars each` }}>
               <Text style={styles.note}>{harmonySummary}</Text>

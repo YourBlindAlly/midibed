@@ -4,7 +4,7 @@ import { defaultSectionUi } from './sectionui';
 import { presetOwnsChannel } from './filters';
 import { clampOutputMode } from './outputmode';
 import { LaneState, defaultLanes, lanesForEngine } from './looplib';
-import { buildBassChords, buildPadChords, clampMode } from './chords';
+import { buildBassChords, buildPadChords, clampColor, clampMode } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
 import type { Layer } from './shortcuts';
@@ -148,6 +148,8 @@ export type HarmonyState = {
   preset: number; // index into PRESETS (0 = custom)
   count: number; // chords in the loop, 1-4
   degrees: number[]; // 4 slots, scale degree 1-7 each; first `count` are used
+  /** 4 slots, parallel to degrees: the chord's colour (0 from the scale, 1 major, 2 minor, 3 sus 2, 4 sus 4). */
+  colors: number[];
   barsPerChord: number;
 };
 
@@ -381,7 +383,7 @@ export function captureScene(s: SceneSource): SceneData {
       retriggerBars: s.drone.retriggerBars,
       follow: s.drone.follow,
     },
-    harmony: { ...s.harmony, degrees: [...s.harmony.degrees] },
+    harmony: { ...s.harmony, degrees: [...s.harmony.degrees], colors: [...s.harmony.colors] },
     motion: { preset: s.motion.preset, bass: { ...s.motion.bass }, pad: { ...s.motion.pad }, drums: { ...s.motion.drums } },
     advance: { ...s.advance },
     transitionUse: { ...s.transitionUse },
@@ -438,7 +440,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     swing: sc.swing,
     percussion: sc.percussion,
     drone: { ...s.drone, ...sc.drone },
-    harmony: { ...sc.harmony, degrees: [...sc.harmony.degrees] },
+    harmony: { ...sc.harmony, degrees: [...sc.harmony.degrees], colors: [0, 1, 2, 3].map((k) => clampColor(sc.harmony.colors?.[k] ?? 0)) },
     motion: { preset: sc.motion.preset, bass: { ...sc.motion.bass }, pad: { ...sc.motion.pad }, drums: { ...sc.motion.drums } },
     advance: { ...sc.advance },
     transitionUse: { ...sc.transitionUse },
@@ -744,6 +746,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     preset: 5, // Folk turn
     count: 4,
     degrees: [1, 7, 4, 7],
+    colors: [0, 0, 0, 0],
     barsPerChord: 2,
   },
   sounds: [
@@ -812,6 +815,7 @@ export function padChords(s: BedState): number[][] {
     mode: s.harmony.mode,
     degrees: s.pad.follow ? s.harmony.degrees : [1],
     count: s.pad.follow ? s.harmony.count : 1,
+    colors: s.pad.follow ? s.harmony.colors : [0],
     style: s.pad.style,
     register: s.pad.register,
     spread: s.pad.spread,
@@ -826,6 +830,7 @@ export function droneChords(s: BedState): number[][] {
     mode: s.harmony.mode,
     degrees: s.harmony.degrees,
     count: s.harmony.count,
+    colors: s.harmony.colors,
     follow: s.drone.follow,
     octave: s.drone.octave,
     fifth: s.drone.fifth,
