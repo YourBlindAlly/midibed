@@ -46,6 +46,10 @@ public class MidiBedEngineModule: Module {
       return MidiBedEngine.probeLoop(path: path)
     }
 
+    Function("setOutputMode") { (mode: Int) in
+      self.engine.setOutputMode(mode: mode)
+    }
+
     Function("setFilter") { (json: String) in
       self.engine.setFilter(json: json)
     }

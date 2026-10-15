@@ -2,6 +2,7 @@ import { FxState, defaultFx } from './uglyfx';
 import { EndingState, defaultEnding } from './ending';
 import { defaultSectionUi } from './sectionui';
 import { presetOwnsChannel } from './filters';
+import { clampOutputMode } from './outputmode';
 import { LaneState, defaultLanes, lanesForEngine } from './looplib';
 import { buildBassChords, buildPadChords, clampMode } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
@@ -217,6 +218,8 @@ export type BedState = {
   lanes: LaneState[];
   /** The loop library, as JSON text (the audio files MidiBed has copied in). Global. */
   loopLib: string;
+  /** The built-in sound's output: 0 stereo, 1 mono both sides, 2 mono left only, 3 mono right only (src/outputmode.ts). Global. */
+  outputMode: number;
   /** The filter movement (wanderers) on or off. Saved with the scene. */
   filterMove: boolean;
   /** A static filter preset (src/filters.ts; 0 = the wanderers). Saved with the scene. */
@@ -644,6 +647,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   sceneName: '',
   lanes: defaultLanes(),
   loopLib: '[]',
+  outputMode: 0,
   filterMove: true,
   filterPreset: 0,
   filterFocus: 0,
@@ -978,6 +982,7 @@ export function migrateState(rawInput: unknown): BedState {
     keyOffset,
     frozen: false, // never come back frozen
     filterHold: false, // nor held
+    outputMode: clampOutputMode((merged as { outputMode?: number }).outputMode ?? 0),
     solo: null, // never come back soloed
     sounds,
     activeScene: active,

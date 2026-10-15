@@ -119,6 +119,8 @@ final class MidiBedTestSynth {
   let fx = UglyFX()
   /// The loop player (LoopPlayer.swift): four lanes of audio loops, started by the engine on bar lines.
   let loops = LoopPlayer()
+  /// How the built-in sound leaves: 0 stereo, 1 mono both sides, 2 mono left only, 3 mono right only.
+  var outputMode = 0
   private var partOfChannel = [Int](repeating: 1, count: 16)
 
   // Filter presets (see setFilterTargets): per part 0 bass, 1 pad, 2 MidiDancer, 3 drums.
@@ -918,9 +920,19 @@ final class MidiBedTestSynth {
       let loopL: Float = haveLoops ? loops.left[frame] : 0
       let loopR: Float = haveLoops ? loops.right[frame] : 0
       fx.process(partBass, partPad, partDancer, partDrums, loopL: loopL, loopR: loopR, left: &left, right: &right)
-      // gentle soft clip so stacked voices can't blast
-      left = tanhf(left + noiseOut)
-      right = tanhf(right + noiseOut)
+      // The output mode: mono sums both sides (3 dB down, so the level stays about the same) and puts the result
+      // on both sides, or on the left only, or on the right only. Then a gentle soft clip so stacked voices
+      // can't blast.
+      var mixL = left + noiseOut
+      var mixR = right + noiseOut
+      let mode = outputMode
+      if mode != 0 {
+        let mono = (mixL + mixR) * 0.7071
+        mixL = mode == 3 ? 0 : mono
+        mixR = mode == 2 ? 0 : mono
+      }
+      left = tanhf(mixL)
+      right = tanhf(mixR)
 
       var channelIndex = 0
       for buffer in abl {

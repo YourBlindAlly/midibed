@@ -43,6 +43,7 @@ import {
   toEngineJson,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
+import { OUTPUT_MODE_NAMES } from './src/outputmode';
 import { BAR_CHOICES, LANE_COUNT, LibraryLoop, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
@@ -587,6 +588,12 @@ export default function App() {
       timers.forEach(clearTimeout);
     };
   }, [filterJson, state.filterPreset, state.filterFocus, state.filterGlide, state.bpm, ready]);
+
+  // The built-in sound's output mode: stereo, or mono to both sides, or to one side only.
+  useEffect(() => {
+    if (!ready) return;
+    engine.setOutputMode(state.outputMode);
+  }, [state.outputMode, ready]);
 
   // Mixer: send every part's level as a volume control (only when 'Send levels' is on).
   const sendMixerLevels = () => {
@@ -2691,6 +2698,15 @@ export default function App() {
 
           <Section title="Output">
             <Toggle label="Announce breathing changes" value={state.announce} onChange={(v) => patch({ announce: v })} hint="Speaks a short message when a bass, pad or drum change happens by itself" />
+            <Stepper
+              label="Built-in sound output"
+              value={state.outputMode}
+              onChange={(v) => patch({ outputMode: v })}
+              min={0}
+              max={OUTPUT_MODE_NAMES.length - 1}
+              format={(v) => OUTPUT_MODE_NAMES[v]}
+              hint="Stereo, or mono in both ears, or mono on the left or right side only, for a set-up where one side goes to the PA and the other is your monitor. Only MidiBed's own sound: other apps are not changed"
+            />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
             <Text style={styles.note}>
               Each part can have its own MIDI source, set on the Parts tab under where it goes. The sources are called MidiBed, MidiBed Bass, MidiBed Pad, MidiBed Dancer, MidiBed Drums and MidiBed Loops.

@@ -684,6 +684,11 @@ final class MidiBedEngine {
     }
   }
 
+  /// The built-in sound's output: 0 stereo, 1 mono both sides, 2 mono left only, 3 mono right only.
+  func setOutputMode(mode: Int) {
+    synth.outputMode = max(0, min(3, mode))
+  }
+
   /// Filter presets for the built-in sound: per part (bass, pad, MidiDancer, drums) a mode (0 none, 1 low-pass,
   /// 2 high-pass, 3 band-pass), a frequency and a resonance, and the glide time. Kept out of the main
   /// configuration so changing a preset never re-queues a scene.

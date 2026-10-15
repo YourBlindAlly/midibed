@@ -17,6 +17,7 @@ type Native = {
   setBassVoice(json: string): void;
   setFX(json: string): void;
   setFilter(json: string): void;
+  setOutputMode(mode: number): void;
   probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number } | null>;
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;
@@ -159,6 +160,8 @@ export const engine = {
   setFX: (json: string) => native?.setFX(json),
   /** The built-in sound's filter presets (see src/filters.ts). */
   setFilter: (json: string) => native?.setFilter(json),
+  /** How the built-in sound leaves the phone (see src/outputmode.ts). */
+  setOutputMode: (mode: number) => native?.setOutputMode(mode),
   /** Length of an audio file for the loop library (null if unreadable or no native engine). */
   probeLoop: (path: string) => (native ? native.probeLoop(path) : Promise.resolve(null)),
   /** An orchestrated stop (see src/ending.ts). */
