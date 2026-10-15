@@ -41,6 +41,10 @@ public class MidiBedEngineModule: Module {
       self.engine.setDrumVoices(json: json)
     }
 
+    Function("setFilter") { (json: String) in
+      self.engine.setFilter(json: json)
+    }
+
     Function("requestEnd") { (json: String) in
       self.engine.requestEnd(json: json)
     }

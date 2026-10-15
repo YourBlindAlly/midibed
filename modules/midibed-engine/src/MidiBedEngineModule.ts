@@ -14,6 +14,8 @@ declare class MidiBedEngineModule extends NativeModule<MidiBedEngineEvents> {
   setBassVoice(json: string): void;
   /** The built-in effects: JSON {values[]} in the order of UglyFXParam (see src/uglyfx.ts). */
   setFX(json: string): void;
+  /** Filter presets for the built-in sound: JSON {glide (seconds), parts: [{mode, hz, res}] x4}. */
+  setFilter(json: string): void;
   /** An orchestrated stop: JSON {style 1 bar|2 progression|3 scene, fadeBars, finalHit, noise, noiseShape, noiseLevel}. */
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;

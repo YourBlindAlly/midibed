@@ -16,6 +16,7 @@ type Native = {
   setDrumVoices(json: string): void;
   setBassVoice(json: string): void;
   setFX(json: string): void;
+  setFilter(json: string): void;
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;
   applyConfig(json: string, queued: boolean): void;
@@ -155,6 +156,8 @@ export const engine = {
   /** The built-in bass voice on/off and its settings. */
   setBassVoice: (json: string) => native?.setBassVoice(json),
   setFX: (json: string) => native?.setFX(json),
+  /** The built-in sound's filter presets (see src/filters.ts). */
+  setFilter: (json: string) => native?.setFilter(json),
   /** An orchestrated stop (see src/ending.ts). */
   requestEnd: (json: string) => native?.requestEnd(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */

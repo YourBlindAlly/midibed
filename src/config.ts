@@ -1,6 +1,7 @@
 import { FxState, defaultFx } from './uglyfx';
 import { EndingState, defaultEnding } from './ending';
 import { defaultSectionUi } from './sectionui';
+import { presetOwnsChannel } from './filters';
 import { buildBassChords, buildPadChords, clampMode } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
@@ -211,6 +212,16 @@ export type BedState = {
   evolve: EvolveState;
   /** The active scene's own name (optional, empty = none). Saved with the scene. */
   sceneName: string;
+  /** The filter movement (wanderers) on or off. Saved with the scene. */
+  filterMove: boolean;
+  /** A static filter preset (src/filters.ts; 0 = the wanderers). Saved with the scene. */
+  filterPreset: number;
+  /** Which module the preset goes to (0 the whole mix). Global. */
+  filterFocus: number;
+  /** Beats a preset takes to arrive. Global. */
+  filterGlide: number;
+  /** Holds the filters where they are (never comes back on). */
+  filterHold: boolean;
   /** A MIDI controller (foot pedal) running the same actions as the keyboard shortcuts. Global. */
   midiControl: MidiControlState;
   /** The built-in bass voice (see bassvoice.ts). Global. */
@@ -315,6 +326,8 @@ export type SceneData = {
   evolve: EvolveState;
   /** The scene's own name; empty when it has none. */
   name: string;
+  filterMove: boolean;
+  filterPreset: number;
   dancer: Omit<DancerState, 'channel'>;
   /** Semitones above the journey key; the scene's home note (see keyRoot). */
   keyOffset: number;
@@ -333,7 +346,7 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'filterMove' | 'filterPreset' | 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -342,6 +355,8 @@ export function captureScene(s: SceneSource): SceneData {
     fill: { ...s.fill },
     evolve: { ...s.evolve },
     name: s.sceneName,
+    filterMove: s.filterMove,
+    filterPreset: s.filterPreset,
     dancer: { ...dancer },
     keyOffset: s.keyOffset,
     swing: s.swing,
@@ -403,6 +418,8 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     fill: { ...sc.fill },
     evolve: { ...defaultEvolve, ...sc.evolve },
     sceneName: typeof sc.name === 'string' ? sc.name : '',
+    filterMove: sc.filterMove !== false,
+    filterPreset: typeof sc.filterPreset === 'number' ? sc.filterPreset : 0,
     dancer: { ...s.dancer, ...sc.dancer },
     keyOffset: sc.keyOffset,
     swing: sc.swing,
@@ -613,6 +630,11 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   fill: defaultFill,
   evolve: defaultEvolve,
   sceneName: '',
+  filterMove: true,
+  filterPreset: 0,
+  filterFocus: 0,
+  filterGlide: 2,
+  filterHold: false,
   midiControl: { enabled: true, channel: -1, map: '{}' },
   bassVoice: defaultBassVoice,
   fx: defaultFx,
@@ -940,6 +962,7 @@ export function migrateState(rawInput: unknown): BedState {
     ...merged,
     keyOffset,
     frozen: false, // never come back frozen
+    filterHold: false, // nor held
     solo: null, // never come back soloed
     sounds,
     activeScene: active,
@@ -991,6 +1014,7 @@ export function toEngineJson(s: BedState): string {
     clockAlways: s.clockAlways,
     sceneIndex: s.activeScene,
     frozen: s.frozen,
+    filterHold: s.filterHold,
     advance: {
       mode: s.advance.mode,
       bars: advanceBars(s.advance, s.harmony),
@@ -1118,7 +1142,8 @@ export function toEngineJson(s: BedState): string {
       drumOut: s.fade.drumOut / 10,
     },
     wanderers: s.wanderers.map((w) => ({
-      enabled: w.enabled,
+      // Off with the filter movement switch, or while a preset owns this channel's filter.
+      enabled: w.enabled && s.filterMove && !presetOwnsChannel(s, w.channel),
       cc: w.cc,
       channel: w.channel,
       min: w.min,

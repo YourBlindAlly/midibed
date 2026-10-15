@@ -118,6 +118,24 @@ final class MidiBedTestSynth {
   /// (0 bass, 1 pad, 2 MidiDancer; drums are always part 3).
   let fx = UglyFX()
   private var partOfChannel = [Int](repeating: 1, count: 16)
+
+  // Filter presets (see setFilterTargets): per part 0 bass, 1 pad, 2 MidiDancer, 3 drums.
+  private let fMode = UnsafeMutablePointer<Int>.allocate(capacity: 4)        // wanted: 0 none, 1 LP, 2 HP, 3 BP
+  private let fTarget = UnsafeMutablePointer<Float>.allocate(capacity: 4)    // wanted Hz
+  private let fRes = UnsafeMutablePointer<Float>.allocate(capacity: 4)       // wanted resonance 0...1
+  private let fCur = UnsafeMutablePointer<Float>.allocate(capacity: 4)       // where the glide is (Hz)
+  private let fResCur = UnsafeMutablePointer<Float>.allocate(capacity: 4)
+  private let fActive = UnsafeMutablePointer<Bool>.allocate(capacity: 4)
+  private let fReturning = UnsafeMutablePointer<Bool>.allocate(capacity: 4)
+  private var fGlide: Float = 0.7
+  // The filter coefficients and mode in use for each part this buffer.
+  private let fcA1 = UnsafeMutablePointer<Float>.allocate(capacity: 4)
+  private let fcA2 = UnsafeMutablePointer<Float>.allocate(capacity: 4)
+  private let fcA3 = UnsafeMutablePointer<Float>.allocate(capacity: 4)
+  private let fcK = UnsafeMutablePointer<Float>.allocate(capacity: 4)
+  private let fcMode = UnsafeMutablePointer<Int>.allocate(capacity: 4)
+  private var bassIc1: Float = 0
+  private var bassIc2: Float = 0
   var bassOn = false
   var bassExclusive = false
   var bassChannel = -1
@@ -127,6 +145,21 @@ final class MidiBedTestSynth {
     for i in 0..<128 { drumPatches[i] = DrumPatch() }
     for d in list where d.note >= 0 && d.note < 128 {
       drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(13, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
+    }
+  }
+
+  /// Control side: filter presets per part (bass, pad, MidiDancer, drums). mode 0 puts a part back on its
+  /// normal filter (CC 74 and 71), gliding there. `glide` is the time to arrive, in seconds.
+  func setFilterTargets(glide: Float, parts: [(mode: Int, hz: Float, res: Float)]) {
+    fGlide = max(0, min(30, glide))
+    for i in 0..<4 {
+      if i < parts.count {
+        fMode[i] = max(0, min(3, parts[i].mode))
+        fTarget[i] = max(20, min(20000, parts[i].hz))
+        fRes[i] = max(0, min(1, parts[i].res))
+      } else {
+        fMode[i] = 0
+      }
     }
   }
 
@@ -165,6 +198,18 @@ final class MidiBedTestSynth {
     noiseRing.initialize(repeating: NoiseCommand(), count: noiseCapacity)
     noiseVoices = UnsafeMutablePointer<NoiseVoice>.allocate(capacity: noiseVoiceCount)
     noiseVoices.initialize(repeating: NoiseVoice(), count: noiseVoiceCount)
+    fMode.initialize(repeating: 0, count: 4)
+    fTarget.initialize(repeating: 1000, count: 4)
+    fRes.initialize(repeating: 0, count: 4)
+    fCur.initialize(repeating: 1000, count: 4)
+    fResCur.initialize(repeating: 0, count: 4)
+    fActive.initialize(repeating: false, count: 4)
+    fReturning.initialize(repeating: false, count: 4)
+    fcA1.initialize(repeating: 0, count: 4)
+    fcA2.initialize(repeating: 0, count: 4)
+    fcA3.initialize(repeating: 0, count: 4)
+    fcK.initialize(repeating: 1, count: 4)
+    fcMode.initialize(repeating: 0, count: 4)
   }
 
   deinit {
@@ -178,6 +223,18 @@ final class MidiBedTestSynth {
     expCurrent.deallocate()
     noiseRing.deallocate()
     noiseVoices.deallocate()
+    fMode.deallocate()
+    fTarget.deallocate()
+    fRes.deallocate()
+    fCur.deallocate()
+    fResCur.deallocate()
+    fActive.deallocate()
+    fReturning.deallocate()
+    fcA1.deallocate()
+    fcA2.deallocate()
+    fcA3.deallocate()
+    fcK.deallocate()
+    fcMode.deallocate()
   }
 
   func startEngine() {
@@ -558,6 +615,54 @@ final class MidiBedTestSynth {
     return (v2 * amp + tone) * noiseVoices[i].level * 0.5 * gain
   }
 
+  /// Work out this part's filter for the coming buffer: the normal CC-driven low-pass, or a preset gliding to
+  /// its frequency, or (just after a preset is switched off) gliding back to the CC position before handing over.
+  private func prepareFilter(_ p: Int, ccFc: Float, ccRes: Float, bufDur: Float, sr: Float) {
+    let wanted = fMode[p]
+    var modeEff = wanted
+    var hz = ccFc
+    var res = ccRes
+    let a: Float = fGlide <= 0.02 ? 1 : 1 - expf(-bufDur / (fGlide / 3))
+    if wanted != 0 {
+      if !fActive[p] {
+        fCur[p] = ccFc
+        fResCur[p] = ccRes
+        fActive[p] = true
+      }
+      fReturning[p] = false
+      let from = max(20, fCur[p])
+      let to = max(20, fTarget[p])
+      fCur[p] = expf(logf(from) + (logf(to) - logf(from)) * a)
+      fResCur[p] += (min(0.92, fRes[p] * 0.95) - fResCur[p]) * a
+      hz = fCur[p]
+      res = fResCur[p]
+    } else {
+      if fActive[p] {
+        fActive[p] = false
+        fReturning[p] = true
+      }
+      if fReturning[p] {
+        let from = max(20, fCur[p])
+        let to = max(20, ccFc)
+        fCur[p] = expf(logf(from) + (logf(to) - logf(from)) * a)
+        fResCur[p] += (ccRes - fResCur[p]) * a
+        hz = fCur[p]
+        res = fResCur[p]
+        modeEff = 1
+        if fabsf(logf(max(20, fCur[p]) / to)) < 0.03 { fReturning[p] = false }
+      }
+    }
+    let f = min(max(hz, 20), 0.45 * sr)
+    let g = tanf(Float.pi * f / sr)
+    let k = 2 - 2 * min(0.92, max(0, res))
+    let a1 = 1 / (1 + g * (g + k))
+    fcA1[p] = a1
+    fcA2[p] = g * a1
+    fcA3[p] = g * g * a1
+    fcK[p] = k
+    fcMode[p] = modeEff
+  }
+
   private func render(frameCount: Int, bufferList: UnsafeMutablePointer<AudioBufferList>) {
     drainEvents()
 
@@ -566,30 +671,22 @@ final class MidiBedTestSynth {
     let dt = 1 / sr
     let on = enabled
 
-    // 12 dB/oct resonant lowpass (TPT state-variable). Cutoff 60 Hz ... 3.6 kHz,
-    // exponential in CC 74; resonance from CC 71. Chosen so a sweep is clearly
-    // audible on a drone that sits low (checked offline: ~22 dB swing in the
-    // audible band across the CC range, versus ~8 dB for the old one-pole).
-    let fc = min(60 * powf(60, cutoffCC / 127), 0.45 * sr)
-    let res = min(0.92, max(0, resonanceCC / 127 * 0.95))
-    let g = tanf(Float.pi * fc / sr)
-    let k = 2 - 2 * res
-    let a1 = 1 / (1 + g * (g + k))
-    let a2 = g * a1
-    let a3 = g * a2
+    // 12 dB/oct resonant state-variable filter (TPT). Normal: a low-pass, cutoff 60 Hz ... 3.6 kHz exponential
+    // in CC 74, resonance from CC 71 (checked offline: ~22 dB swing in the audible band across the CC range).
+    // A filter PRESET (setFilterTargets) can give a part a low-pass, high-pass or band-pass at a chosen
+    // frequency instead, gliding there; the same filter makes all three.
+    let ccFc = min(60 * powf(60, cutoffCC / 127), 0.45 * sr)
+    let ccRes = min(0.92, max(0, resonanceCC / 127 * 0.95))
+    // Drum bus: a much wider range (150 Hz ... ~18 kHz) so the hats and snare are not dulled when open.
+    let drumCcFc = min(150 * powf(120, drumCutoffCC / 127), 0.45 * sr)
+    let drumCcRes = min(0.92, max(0, drumResonanceCC / 127 * 0.95))
+    let bufDur = Float(frameCount) / sr
+    for part in 0..<4 {
+      prepareFilter(part, ccFc: part == 3 ? drumCcFc : ccFc, ccRes: part == 3 ? drumCcRes : ccRes, bufDur: bufDur, sr: sr)
+    }
     let attack = 1 - expf(-dt / 0.9)
     let release = 1 - expf(-dt / 1.6)
     let expSmooth = 1 - expf(-dt / 0.03)
-
-    // Drum bus: same filter type, but a much wider range (150 Hz ... ~18 kHz) so
-    // the hats and snare are not dulled at the default fully-open setting.
-    let dfc = min(150 * powf(120, drumCutoffCC / 127), 0.45 * sr)
-    let dres = min(0.92, max(0, drumResonanceCC / 127 * 0.95))
-    let dg = tanf(Float.pi * dfc / sr)
-    let dk = 2 - 2 * dres
-    let da1 = 1 / (1 + dg * (dg + dk))
-    let da2 = dg * da1
-    let da3 = dg * da2
 
     for frame in 0..<frameCount {
       // Each part's mono signal, so the effects (UglyFX) can treat the parts separately.
@@ -609,18 +706,20 @@ final class MidiBedTestSynth {
         pads[i].phaseB += f * 1.003 * dt
         if pads[i].phaseB >= 1 { pads[i].phaseB -= 1 }
         let saw = (pads[i].phaseA * 2 - 1) + (pads[i].phaseB * 2 - 1)
+        let fp = min(2, max(0, partOfChannel[Int(pads[i].channel)]))
         let v3 = saw - pads[i].ic2
-        let v1 = a1 * pads[i].ic1 + a2 * v3
-        let v2 = pads[i].ic2 + a2 * pads[i].ic1 + a3 * v3
+        let v1 = fcA1[fp] * pads[i].ic1 + fcA2[fp] * v3
+        let v2 = pads[i].ic2 + fcA2[fp] * pads[i].ic1 + fcA3[fp] * v3
         pads[i].ic1 = 2 * v1 - pads[i].ic1
         pads[i].ic2 = 2 * v2 - pads[i].ic2
+        let padFiltered: Float = fcMode[fp] == 3 ? v1 * fcK[fp] : (fcMode[fp] == 2 ? saw - fcK[fp] * v1 - v2 : v2)
         if pads[i].gate {
           pads[i].env += (1 - pads[i].env) * attack
         } else {
           pads[i].env -= pads[i].env * release
           if pads[i].env < 0.0005 { pads[i].active = false }
         }
-        let padOut = v2 * pads[i].env * pads[i].velocity * 0.09 * expCurrent[Int(pads[i].channel)]
+        let padOut = padFiltered * pads[i].env * pads[i].velocity * 0.09 * expCurrent[Int(pads[i].channel)]
         switch partOfChannel[Int(pads[i].channel)] {
         case 0: partBass += padOut
         case 2: partDancer += padOut
@@ -773,13 +872,26 @@ final class MidiBedTestSynth {
       }
 
       let dv3 = drumSum - drumIc2
-      let dv1 = da1 * drumIc1 + da2 * dv3
-      let dv2 = drumIc2 + da2 * drumIc1 + da3 * dv3
+      let dv1 = fcA1[3] * drumIc1 + fcA2[3] * dv3
+      let dv2 = drumIc2 + fcA2[3] * drumIc1 + fcA3[3] * dv3
       drumIc1 = 2 * dv1 - drumIc1
       drumIc2 = 2 * dv2 - drumIc2
+      let drumFiltered: Float = fcMode[3] == 3 ? dv1 * fcK[3] : (fcMode[3] == 2 ? drumSum - fcK[3] * dv1 - dv2 : dv2)
 
       if bassOn, bassChannel >= 0, bassChannel < 16 {
-        partBass += bass.nextSample() * 0.85 * expCurrent[bassChannel]
+        var bassSample = bass.nextSample() * 0.85 * expCurrent[bassChannel]
+        if fcMode[0] != 0 {
+          let bv3 = bassSample - bassIc2
+          let bv1 = fcA1[0] * bassIc1 + fcA2[0] * bv3
+          let bv2 = bassIc2 + fcA2[0] * bassIc1 + fcA3[0] * bv3
+          bassIc1 = 2 * bv1 - bassIc1
+          bassIc2 = 2 * bv2 - bassIc2
+          bassSample = fcMode[0] == 3 ? bv1 * fcK[0] : (fcMode[0] == 2 ? bassSample - fcK[0] * bv1 - bv2 : bv2)
+        } else {
+          bassIc1 = 0
+          bassIc2 = 0
+        }
+        partBass += bassSample
       }
 
       // The built-in test sound switch silences the instruments, but NOT the
@@ -789,7 +901,7 @@ final class MidiBedTestSynth {
         partPad = 0
         partDancer = 0
       }
-      let partDrums: Float = on ? dv2 : 0
+      let partDrums: Float = on ? drumFiltered : 0
       var noiseOut: Float = 0
       for i in 0..<noiseVoiceCount where noiseVoices[i].active {
         noiseOut += renderNoise(i, dt: dt, sr: sr)

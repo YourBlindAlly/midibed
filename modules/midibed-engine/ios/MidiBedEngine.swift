@@ -260,6 +260,7 @@ struct MidiBedConfig: Decodable {
   var clockAlways: Bool     // keep sending the clock while stopped, so a follower stays locked
   var sceneIndex: Int       // which scene this configuration is
   var frozen: Bool          // stop the bed changing by itself (breathing, recurring sound, auto-advance)
+  var filterHold: Bool      // hold the filter wanderers where they are
   var advance: MidiBedAdvance
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
@@ -436,6 +437,8 @@ final class MidiBedEngine {
     var lastSent: Int
   }
   private var wanderers: [WandererState] = []
+  /// When the filter hold began (the clean cycle is shifted by the held time on release, so nothing jumps).
+  private var holdSince: Double?
   /// When the current scene began (a scene switch's bar line, or Play): the filters' cycles count from here.
   private var sceneStartTime: Double = 0
 
@@ -646,6 +649,23 @@ final class MidiBedEngine {
     queue.async {
       if let ch = self.config?.drone.channel { self.synth.bassChannel = ch }
       self.synth.configureBass(on: c.enabled, exclusive: c.exclusive, values: c.values.map { Float($0) })
+    }
+  }
+
+  /// Filter presets for the built-in sound: per part (bass, pad, MidiDancer, drums) a mode (0 none, 1 low-pass,
+  /// 2 high-pass, 3 band-pass), a frequency and a resonance, and the glide time. Kept out of the main
+  /// configuration so changing a preset never re-queues a scene.
+  func setFilter(json: String) {
+    struct FilterPart: Decodable { var mode: Int; var hz: Double; var res: Double }
+    struct FilterConfig: Decodable { var glide: Double; var parts: [FilterPart] }
+    guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(FilterConfig.self, from: data) else {
+      NSLog("MidiBedEngine: could not decode filter")
+      return
+    }
+    queue.async {
+      self.synth.setFilterTargets(
+        glide: Float(c.glide),
+        parts: c.parts.map { (mode: $0.mode, hz: Float($0.hz), res: Float($0.res)) })
     }
   }
 
@@ -2026,6 +2046,16 @@ final class MidiBedEngine {
     let dt = now - lastWandererTime
     guard dt >= 0.02 else { return }
     lastWandererTime = now
+
+    // Hold: nothing moves, nothing is sent; on release the cycle carries on from where it stopped.
+    if cfg.filterHold {
+      if holdSince == nil { holdSince = now }
+      return
+    }
+    if let h = holdSince {
+      sceneStartTime += now - h
+      holdSince = nil
+    }
 
     let beatDur = 60.0 / max(20.0, min(300.0, cfg.bpm))
     let barDur = beatDur * Double(beatsPerBar)

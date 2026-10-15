@@ -43,6 +43,7 @@ import {
   toEngineJson,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
+import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
 import { ENDING_FADE_NAMES, STOP_STYLE_NAMES, barsLeftText, endingJson, endingSentence, nextStopStyle } from './src/ending';
 import { DELAY_NOTES, FxPart, FxPartState, panText, uglyFxJson } from './src/uglyfx';
@@ -538,6 +539,42 @@ export default function App() {
     return () => clearTimeout(t);
   }, [fxJson, ready]);
 
+  // Filter presets: the built-in sound gets the full preset (low-pass, high-pass or band-pass). Another app can only
+  // be moved on its cutoff and resonance (CC 74 and 71), so only the low-pass presets reach it, in a few small steps
+  // over the glide time. (This is a control gesture, not musical timing: the engine does not depend on it.)
+  const filterJson = filterTargetsJson(state);
+  useEffect(() => {
+    if (!ready) return;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const t0 = setTimeout(() => {
+      engine.setFilter(filterJson);
+      const st = latest.current;
+      const preset = FILTER_PRESETS[Math.max(0, Math.min(FILTER_PRESETS.length - 1, st.filterPreset))];
+      if (preset.mode !== 1) return;
+      const cutoff = hzToCc(preset.hz);
+      const reso = Math.round(Math.max(0, Math.min(1, preset.res / 100)) * 127);
+      const steps = 8;
+      const glideMs = (Math.max(0, st.filterGlide) * 60000) / Math.max(30, st.bpm);
+      moduleChannels(st).forEach((chs, part) => {
+        if (!focusIncludes(st.filterFocus, part)) return;
+        chs.forEach((ch) => {
+          for (let i = 1; i <= steps; i++) {
+            timers.push(
+              setTimeout(() => {
+                engine.sendControlChange(ch, 74, Math.round(cutoff), false);
+                engine.sendControlChange(ch, 71, reso, false);
+              }, (glideMs * i) / steps),
+            );
+          }
+        });
+      });
+    }, 80);
+    return () => {
+      clearTimeout(t0);
+      timers.forEach(clearTimeout);
+    };
+  }, [filterJson, state.filterPreset, state.filterFocus, state.filterGlide, state.bpm, ready]);
+
   // Mixer: send every part's level as a volume control (only when 'Send levels' is on).
   const sendMixerLevels = () => {
     const s = latest.current;
@@ -624,6 +661,22 @@ export default function App() {
         engine.playFill();
         announceLater('Fill', 100);
         break;
+      case 'filterHold':
+        patch({ filterHold: !state.filterHold });
+        announceLater(state.filterHold ? 'Filters moving' : 'Filters held', 150);
+        break;
+      case 'filterPreset': {
+        const next = nextFilterPreset(state.filterPreset);
+        patch({ filterPreset: next });
+        announceLater(`Filter: ${FILTER_PRESETS[next].name}`, 150);
+        break;
+      }
+      case 'filterFocus': {
+        const next = nextFilterFocus(state.filterFocus);
+        patch({ filterFocus: next });
+        announceLater(`Filter goes to: ${FILTER_FOCUS_NAMES[next].toLowerCase()}`, 150);
+        break;
+      }
       case 'stopStyle': {
         const next = nextStopStyle(state.ending.style);
         patch({ ending: { ...state.ending, style: next } });
@@ -1053,6 +1106,49 @@ export default function App() {
             <Toggle label="Solo drums" value={state.solo === 'drums'} onChange={(v) => setSolo(v ? 'drums' : null)} />
             <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
             <Toggle label="Solo loops" value={state.solo === 'loops'} onChange={(v) => setSolo(v ? 'loops' : null)} />
+          </Section>
+
+          <Section title="Filters">
+            <Text style={styles.note}>{filterSummary(state)}{state.filterHold ? ', held' : ''}</Text>
+            <Toggle
+              label="Hold the filters"
+              value={state.filterHold}
+              onChange={(v) => patch({ filterHold: v })}
+              hint="The filters stay where they are. Switch off to let them move on from there. The W key does the same"
+            />
+            <Toggle
+              label="Filter movement"
+              value={state.filterMove}
+              onChange={(v) => patch({ filterMove: v })}
+              hint="Off: the filter wanderers do not move in this scene. Saved with the scene"
+            />
+            <Stepper
+              label="Filter preset"
+              value={state.filterPreset}
+              onChange={(v) => patch({ filterPreset: v })}
+              min={0}
+              max={FILTER_PRESETS.length - 1}
+              format={(v) => FILTER_PRESETS[v].name}
+              hint="Parks the filter in one place. Wandering is the normal moving filter. The V key goes to the next one. Saved with the scene"
+            />
+            <Stepper
+              label="Filter preset goes to"
+              value={state.filterFocus}
+              onChange={(v) => patch({ filterFocus: v })}
+              min={0}
+              max={FILTER_FOCUS_NAMES.length - 1}
+              format={(v) => FILTER_FOCUS_NAMES[v]}
+              hint="The whole mix, or just one module. The G key goes to the next one"
+            />
+            <Stepper
+              label="Filter glide"
+              value={state.filterGlide}
+              onChange={(v) => patch({ filterGlide: v })}
+              min={0}
+              max={16}
+              format={(v) => (v === 0 ? 'at once' : `${v} ${v === 1 ? 'beat' : 'beats'}`)}
+              hint="How long a preset takes to arrive"
+            />
           </Section>
 
           <Section title="Ending">

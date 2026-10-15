@@ -44,6 +44,9 @@ export const MIDI_ACTIONS: MidiActionDef[] = [
   { id: 'clearSolo', label: 'Clear solo', action: { type: 'clearSolo' } },
   { id: 'fill', label: 'Drum fill now', action: { type: 'fill' } },
   { id: 'stopStyle', label: 'Change the type of stop', action: { type: 'stopStyle' } },
+  { id: 'filterHold', label: 'Hold the filters or let them move', action: { type: 'filterHold' } },
+  { id: 'filterPreset', label: 'Next filter preset', action: { type: 'filterPreset' } },
+  { id: 'filterFocus', label: 'Which module the filter preset goes to', action: { type: 'filterFocus' } },
 ];
 
 export function triggerKey(m: Pick<MidiMessage, 'kind' | 'channel' | 'number'>): string {
