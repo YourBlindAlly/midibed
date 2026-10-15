@@ -20,3 +20,11 @@ npm-debug.*
 /Payload
 *.ipa
 builds/
+# audio loops live here for local use only (purchased packs: never commit)
+/loops/
+*.wav
+*.aif
+*.aiff
+*.rx2
+*.rex
+*.flac
