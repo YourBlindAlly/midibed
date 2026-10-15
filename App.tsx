@@ -33,6 +33,10 @@ import {
   removeFavorite,
   renameJourney,
   renameScene,
+  DrumPatternMemory,
+  rememberDrumPatterns,
+  restoreDrumPatterns,
+  silenceDrumPatterns,
   sceneLabel,
   SCENE_COPY_PARTS,
   copyScenePart,
@@ -356,6 +360,19 @@ export default function App() {
     announceLater(msg, 500);
   };
 
+  // Silence every drum pattern to build a groove up one part at a time; Undo brings the patterns back.
+  const [silencedMemory, setSilencedMemory] = useState<DrumPatternMemory | null>(null);
+  const silenceDrums = () => {
+    setSilencedMemory(rememberDrumPatterns(latest.current));
+    setState((s) => silenceDrumPatterns(s));
+    announceLater('All drum patterns silent', 150);
+  };
+  const unsilenceDrums = () => {
+    if (!silencedMemory) return;
+    setState((s) => restoreDrumPatterns(s, silencedMemory));
+    setSilencedMemory(null);
+    announceLater('Drum patterns back', 150);
+  };
   const [copyWhat, setCopyWhat] = useState(0);
   const copySceneTo = (to: number) => {
     if (to === state.activeScene) return;
@@ -1594,6 +1611,12 @@ export default function App() {
           {part === 'drums' && (
             <>
           <Section title="Drum" fixed>
+            <ActionButton
+              label="Silence all drum patterns"
+              hint="Sets every drum's hits to 0 in this scene, so you can build a groove up one drum at a time"
+              onPress={silenceDrums}
+            />
+            {silencedMemory !== null && <ActionButton label="Bring the drum patterns back" onPress={unsilenceDrums} />}
             <Stepper
               label="Drum"
               value={Math.min(drumIdx, state.drums.length - 1)}
@@ -2322,6 +2345,12 @@ export default function App() {
 
 
           <Section title="Scene tools">
+            <ActionButton
+              label="Silence all drum patterns"
+              hint="Sets every drum's hits to 0 in this scene, so you can build a groove up one drum at a time. Steps, sounds and switches stay as they are"
+              onPress={silenceDrums}
+            />
+            {silencedMemory !== null && <ActionButton label="Bring the drum patterns back" hint="Puts every drum pattern back as it was before it was silenced" onPress={unsilenceDrums} />}
             <Text style={styles.note}>
               Each scene remembers its drums, bass drone on/off and voicing, chord pad, harmony, swing, and filter movement. Tempo, key, outputs, fades and MIDI routing stay the same in every scene. Changes you make are saved into the current scene.
             </Text>

@@ -524,6 +524,30 @@ export function sceneLabel(s: Pick<BedState, 'scenes' | 'activeScene' | 'sceneNa
   return trimmed ? `Scene ${index + 1}, ${trimmed}` : `Scene ${index + 1}`;
 }
 
+/** What a silenced drum pattern remembers, so it can be brought back. */
+export type DrumPatternMemory = { hits: number; rhythm: number; ghostHits: number }[];
+
+/** Remember every drum's pattern settings (hits, library rhythm, ghost notes). */
+export function rememberDrumPatterns(s: Pick<BedState, 'drums'>): DrumPatternMemory {
+  return s.drums.map((d) => ({ hits: d.hits, rhythm: d.rhythm, ghostHits: d.ghostHits }));
+}
+
+/**
+ * Silence every drum's pattern (hits 0, no library rhythm, no ghost notes) so a groove can be built up part
+ * by part. Steps, rotation, velocity, sounds and the on/off switches stay as they are.
+ */
+export function silenceDrumPatterns(s: BedState): BedState {
+  return { ...s, drums: s.drums.map((d) => ({ ...d, hits: 0, rhythm: 0, ghostHits: 0 })) };
+}
+
+/** Put the remembered pattern settings back. */
+export function restoreDrumPatterns(s: BedState, memory: DrumPatternMemory): BedState {
+  return {
+    ...s,
+    drums: s.drums.map((d, i) => (memory[i] ? { ...d, hits: memory[i].hits, rhythm: memory[i].rhythm, ghostHits: memory[i].ghostHits } : d)),
+  };
+}
+
 /** Which app (profile id) a sound slot talks to: the slot's role decides. */
 export function slotProfileId(s: Pick<BedState, 'profiles'>, slotName: string): string {
   return slotName === 'Bass drone' ? s.profiles.drone : slotName === 'Percussion' ? s.profiles.drums : s.profiles.pad;
