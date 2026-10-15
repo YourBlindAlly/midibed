@@ -17,6 +17,7 @@ type Native = {
   setBassVoice(json: string): void;
   setFX(json: string): void;
   setFilter(json: string): void;
+  probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number } | null>;
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;
   applyConfig(json: string, queued: boolean): void;
@@ -158,6 +159,8 @@ export const engine = {
   setFX: (json: string) => native?.setFX(json),
   /** The built-in sound's filter presets (see src/filters.ts). */
   setFilter: (json: string) => native?.setFilter(json),
+  /** Length of an audio file for the loop library (null if unreadable or no native engine). */
+  probeLoop: (path: string) => (native ? native.probeLoop(path) : Promise.resolve(null)),
   /** An orchestrated stop (see src/ending.ts). */
   requestEnd: (json: string) => native?.requestEnd(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */

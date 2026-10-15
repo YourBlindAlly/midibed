@@ -43,6 +43,7 @@ import {
   toEngineJson,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
+import { BAR_CHOICES, LANE_COUNT, LibraryLoop, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -129,6 +130,17 @@ function announceLater(message: string, delay = 400) {
 const channelText = (v: number) => String(v + 1);
 const barsText = (v: number) => (v === 0 ? 'off' : v === 1 ? '1 bar' : `${v} bars`);
 const fxPercent = (v: number) => (v === 0 ? 'off' : `${v} percent`);
+// The file system is only there on a phone build (jest has no native module): look it up carefully.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let fsApi: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  fsApi = require('expo-file-system');
+  setLoopDir(new fsApi.Directory(fsApi.Paths.document, 'loops').uri);
+} catch {
+  fsApi = null;
+}
+
 const fadeText = (v: number) => (v === 0 ? 'none' : `${(v / 10).toFixed(1)} seconds`);
 
 export default function App() {
@@ -672,6 +684,12 @@ export default function App() {
         announceLater(`Filter: ${FILTER_PRESETS[next].name}`, 150);
         break;
       }
+      case 'lane': {
+        const on = !state.lanes[action.index]?.on;
+        patchLane(action.index, { on });
+        announceLater(`Lane ${action.index + 1} ${on ? 'on' : 'off'}`, 150);
+        break;
+      }
       case 'sceneChangeAt': {
         const next = nextSceneChangeAt(state.sceneChangeAt);
         patch({ sceneChangeAt: next });
@@ -791,6 +809,94 @@ export default function App() {
   const [partIdx, setPartIdx] = useState(0);
   // Which drum's settings the Drums module shows (one at a time).
   const [drumIdx, setDrumIdx] = useState(0);
+
+  // ---- Loop player
+  const loopLib = parseLibrary(state.loopLib);
+  const loopFolders = folderNames(loopLib);
+  const [laneBrowse, setLaneBrowse] = useState<number[]>([0, 0, 0, 0]);
+  const [importNote, setImportNote] = useState('');
+  const patchLane = (i: number, change: Partial<BedState['lanes'][number]>) =>
+    setState((s) => ({ ...s, lanes: s.lanes.map((l, k) => (k === i ? { ...l, ...change } : l)) }));
+  const laneFolder = (i: number): string => {
+    const cur = loopLib.find((l) => l.id === state.lanes[i].loop);
+    return cur ? cur.folder : loopFolders[Math.min(laneBrowse[i] ?? 0, Math.max(0, loopFolders.length - 1))] ?? '';
+  };
+  const importLoopFolder = async () => {
+    if (!fsApi) {
+      setImportNote('Adding loops works in the app on the phone');
+      return;
+    }
+    try {
+      const picked = await fsApi.Directory.pickDirectoryAsync();
+      const dest = new fsApi.Directory(fsApi.Paths.document, 'loops');
+      dest.create({ intermediates: true, idempotent: true });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const found: { file: any; folder: string }[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const walk = (d: any, folderName: string, depth: number) => {
+        if (depth > 6) return;
+        for (const item of d.list()) {
+          if (item instanceof fsApi.Directory) walk(item, item.name, depth + 1);
+          else if (isAudioFile(item.name)) found.push({ file: item, folder: folderName });
+        }
+      };
+      walk(picked, picked.name, 0);
+      if (found.length === 0) {
+        setImportNote('No audio files found in that folder');
+        announceLater('No audio files found', 100);
+        return;
+      }
+      announceLater(`Adding ${found.length} files`, 100);
+      const added: LibraryLoop[] = [];
+      for (let n = 0; n < found.length; n++) {
+        const { file, folder } = found[n];
+        const stored = `${folder}__${file.name}`.replace(/[\\/:*?"<>|]/g, '_');
+        const target = new fsApi.File(dest, stored);
+        if (!target.exists) await file.copy(target);
+        const info = await engine.probeLoop(loopPath(stored));
+        if (!info) continue;
+        const bpm = tempoFromName(file.name) ?? tempoFromName(folder);
+        const fit = barsFromLength(info.seconds, bpm);
+        added.push({
+          id: `${folder}/${file.name}`,
+          name: file.name.replace(/\.[A-Za-z0-9]+$/, ''),
+          folder,
+          file: stored,
+          seconds: info.seconds,
+          bpm,
+          bars: fit.bars,
+          repeats: fit.repeats,
+        });
+        if (n % 10 === 9) setImportNote(`Added ${n + 1} of ${found.length}`);
+      }
+      setState((s) => ({ ...s, loopLib: addToLibrary(s.loopLib, added) }));
+      setImportNote(`Added ${added.length} loops`);
+      announceLater(`Added ${added.length} loops`, 100);
+    } catch (e) {
+      setImportNote('Adding loops was cancelled or failed');
+    }
+  };
+  const clearLoopLibrary = () => {
+    Alert.alert('Clear the loop library', 'Remove every loop from the library and delete the copies MidiBed made? Your original files are not touched.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: () => {
+          try {
+            if (fsApi) {
+              const dir = new fsApi.Directory(fsApi.Paths.document, 'loops');
+              if (dir.exists) dir.delete();
+            }
+          } catch {
+            // the library is cleared either way
+          }
+          setState((s) => ({ ...s, loopLib: '[]', lanes: s.lanes.map((l) => ({ ...l, loop: '', on: false })) }));
+          setImportNote('The library is empty');
+        },
+      },
+    ]);
+  };
   const sectionUi = parseSectionUi(state.sectionUi);
   const sectionUiValue = {
     ui: sectionUi,
@@ -1933,6 +2039,133 @@ export default function App() {
 
           </Section>
 
+            </>
+          )}
+          {tab === 'player' && (
+            <>
+          <Section title="Loop library">
+            <Text style={styles.note}>
+              {`${loopLib.length} ${loopLib.length === 1 ? 'loop' : 'loops'} in the library. Loops are copied into MidiBed's own storage and play in time with the bed.`}
+            </Text>
+            <ActionButton
+              label="Add loops from a folder"
+              hint="Choose a folder in the Files app. Every audio file inside it, including sub-folders, is copied in"
+              onPress={importLoopFolder}
+            />
+            {importNote !== '' && (
+              <View accessible accessibilityLabel="Loop import" accessibilityValue={{ text: importNote }}>
+                <Text style={styles.note}>{importNote}</Text>
+              </View>
+            )}
+            {loopLib.length > 0 && <ActionButton label="Clear the loop library" onPress={clearLoopLibrary} />}
+          </Section>
+
+          {Array.from({ length: LANE_COUNT }, (_, i) => {
+            const lane = state.lanes[i];
+            const folder = laneFolder(i);
+            const inFolder = loopLib.filter((l) => l.folder === folder);
+            const current = loopLib.find((l) => l.id === lane.loop);
+            const loopIdx = Math.max(0, inFolder.findIndex((l) => l.id === lane.loop) + 1);
+            return (
+              <Section key={`lane${i}`} title={`Lane ${i + 1}`} id={`Loop lane ${i + 1}`}>
+                <Toggle
+                  label={`Lane ${i + 1} plays`}
+                  value={lane.on}
+                  onChange={(v) => patchLane(i, { on: v })}
+                  hint="Starts or stops on the next bar line. Saved with the scene"
+                />
+                <Stepper
+                  label={`Lane ${i + 1} folder`}
+                  value={Math.max(0, loopFolders.indexOf(folder))}
+                  onChange={(v) => {
+                    const f = loopFolders[Math.max(0, Math.min(loopFolders.length - 1, v))];
+                    setLaneBrowse((b) => b.map((x, k) => (k === i ? Math.max(0, Math.min(loopFolders.length - 1, v)) : x)));
+                    const first = loopLib.find((l) => l.folder === f);
+                    patchLane(i, { loop: first ? first.id : '' });
+                  }}
+                  min={0}
+                  max={Math.max(0, loopFolders.length - 1)}
+                  format={(v) => loopFolders[v] ?? 'no loops yet'}
+                  hint="The folder the loops came from. Choosing one picks its first loop"
+                />
+                <Stepper
+                  label={`Lane ${i + 1} loop`}
+                  value={loopIdx}
+                  onChange={(v) => {
+                    const n = Math.max(0, Math.min(inFolder.length, v));
+                    patchLane(i, { loop: n === 0 ? '' : inFolder[n - 1].id });
+                  }}
+                  min={0}
+                  max={inFolder.length}
+                  format={(v) => (v === 0 ? 'empty' : `${inFolder[v - 1].name}, ${inFolder[v - 1].bars} ${inFolder[v - 1].bars === 1 ? 'bar' : 'bars'}${inFolder[v - 1].bpm ? `, ${inFolder[v - 1].bpm} BPM` : ''}`)}
+                  hint="Which loop is in this lane"
+                />
+                <Stepper
+                  label={`Lane ${i + 1} length`}
+                  value={Math.max(0, BAR_CHOICES.indexOf(lane.bars))}
+                  onChange={(v) => patchLane(i, { bars: BAR_CHOICES[Math.max(0, Math.min(BAR_CHOICES.length - 1, v))] })}
+                  min={0}
+                  max={BAR_CHOICES.length - 1}
+                  format={(v) => (v === 0 ? `as the file says${current ? `: ${current.bars} bars` : ''}` : `${BAR_CHOICES[v]} ${BAR_CHOICES[v] === 1 ? 'bar' : 'bars'}`)}
+                  hint="How many bars the loop is stretched or squeezed to fill. Change it if a loop sounds the wrong speed"
+                />
+                <Stepper
+                  label={`Lane ${i + 1} level`}
+                  value={lane.level}
+                  onChange={(v) => patchLane(i, { level: v })}
+                  min={0}
+                  max={150}
+                  step={5}
+                  format={(v) => `${v} percent`}
+                />
+                <Stepper
+                  label={`Lane ${i + 1} balance`}
+                  value={lane.pan}
+                  onChange={(v) => patchLane(i, { pan: v })}
+                  min={-100}
+                  max={100}
+                  step={10}
+                  bigStep={50}
+                  format={panText}
+                />
+              </Section>
+            );
+          })}
+
+          <Section title="Loop player: Ugly FX">
+            <Stepper
+              label="Loop player balance"
+              value={state.fx.loops.pan}
+              onChange={(v) => patch({ fx: { ...state.fx, loops: { ...state.fx.loops, pan: v } } })}
+              min={-100}
+              max={100}
+              step={10}
+              bigStep={50}
+              format={panText}
+            />
+            <Stepper
+              label="Loop player reverb"
+              value={state.fx.loops.reverb}
+              onChange={(v) => patch({ fx: { ...state.fx, loops: { ...state.fx.loops, reverb: v } } })}
+              min={0}
+              max={100}
+              step={5}
+              bigStep={20}
+              format={fxPercent}
+              hint="How much of the loops goes into the shared reverb"
+            />
+            <Stepper
+              label="Loop player delay"
+              value={state.fx.loops.delay}
+              onChange={(v) => patch({ fx: { ...state.fx, loops: { ...state.fx.loops, delay: v } } })}
+              min={0}
+              max={100}
+              step={5}
+              bigStep={20}
+              format={fxPercent}
+              hint="How much of the loops goes into the shared delay"
+            />
+          </Section>
             </>
           )}
           {tab === 'scene' && (

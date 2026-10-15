@@ -2,6 +2,7 @@ import { FxState, defaultFx } from './uglyfx';
 import { EndingState, defaultEnding } from './ending';
 import { defaultSectionUi } from './sectionui';
 import { presetOwnsChannel } from './filters';
+import { LaneState, defaultLanes, lanesForEngine } from './looplib';
 import { buildBassChords, buildPadChords, clampMode } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
@@ -212,6 +213,10 @@ export type BedState = {
   evolve: EvolveState;
   /** The active scene's own name (optional, empty = none). Saved with the scene. */
   sceneName: string;
+  /** The loop player's four lanes (src/looplib.ts). Saved with the scene. */
+  lanes: LaneState[];
+  /** The loop library, as JSON text (the audio files MidiBed has copied in). Global. */
+  loopLib: string;
   /** The filter movement (wanderers) on or off. Saved with the scene. */
   filterMove: boolean;
   /** A static filter preset (src/filters.ts; 0 = the wanderers). Saved with the scene. */
@@ -328,6 +333,7 @@ export type SceneData = {
   evolve: EvolveState;
   /** The scene's own name; empty when it has none. */
   name: string;
+  lanes: LaneState[];
   filterMove: boolean;
   filterPreset: number;
   dancer: Omit<DancerState, 'channel'>;
@@ -348,7 +354,7 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'filterMove' | 'filterPreset' | 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'lanes' | 'filterMove' | 'filterPreset' | 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -357,6 +363,7 @@ export function captureScene(s: SceneSource): SceneData {
     fill: { ...s.fill },
     evolve: { ...s.evolve },
     name: s.sceneName,
+    lanes: s.lanes.map((l) => ({ ...l })),
     filterMove: s.filterMove,
     filterPreset: s.filterPreset,
     dancer: { ...dancer },
@@ -420,6 +427,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     fill: { ...sc.fill },
     evolve: { ...defaultEvolve, ...sc.evolve },
     sceneName: typeof sc.name === 'string' ? sc.name : '',
+    lanes: Array.isArray(sc.lanes) ? defaultLanes().map((d, i) => ({ ...d, ...(sc.lanes[i] ?? {}) })) : defaultLanes(),
     filterMove: sc.filterMove !== false,
     filterPreset: typeof sc.filterPreset === 'number' ? sc.filterPreset : 0,
     dancer: { ...s.dancer, ...sc.dancer },
@@ -468,6 +476,7 @@ export const SCENE_COPY_PARTS = [
   'Filter movement',
   'Loops',
   'After this scene',
+  'Loop player lanes',
 ];
 
 /** Copy one part of the current scene (including unsaved edits) into scene `to`; the rest of `to` stays. */
@@ -486,6 +495,7 @@ export function copyScenePart(s: BedState, to: number, what: number): BedState {
     { wanderers: cur.wanderers },
     { loops: cur.loops },
     { advance: cur.advance },
+    { lanes: cur.lanes },
   ];
   const piece = JSON.parse(JSON.stringify(parts[what])) as Partial<SceneData>;
   return {
@@ -632,6 +642,8 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   fill: defaultFill,
   evolve: defaultEvolve,
   sceneName: '',
+  lanes: defaultLanes(),
+  loopLib: '[]',
   filterMove: true,
   filterPreset: 0,
   filterFocus: 0,
@@ -1019,6 +1031,7 @@ export function toEngineJson(s: BedState): string {
     frozen: s.frozen,
     filterHold: s.filterHold,
     sceneChangeAt: s.sceneChangeAt,
+    lanes: lanesForEngine(s.lanes, s.loopLib),
     advance: {
       mode: s.advance.mode,
       bars: advanceBars(s.advance, s.harmony),

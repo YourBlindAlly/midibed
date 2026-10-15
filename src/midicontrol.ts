@@ -56,6 +56,7 @@ export const MIDI_ACTIONS: MidiActionDef[] = [
   { id: 'filterPreset', label: 'Next filter preset', action: { type: 'filterPreset' } },
   { id: 'filterFocus', label: 'Which module the filter preset goes to', action: { type: 'filterFocus' } },
   { id: 'sceneChangeAt', label: 'When scene changes land', action: { type: 'sceneChangeAt' } },
+  ...[0, 1, 2, 3].map((i) => ({ id: `lane${i + 1}`, label: `Loop lane ${i + 1} on or off`, action: { type: 'lane', index: i } as ShortcutAction })),
 ];
 
 export function triggerKey(m: Pick<MidiMessage, 'kind' | 'channel' | 'number'>): string {
@@ -101,7 +102,7 @@ export function isPress(m: MidiMessage): boolean {
 
 /** Which action ids are an on/off toggle, so a double press can put the first press back before doing its own thing. */
 export function isToggleAction(a: ShortcutAction): boolean {
-  return a.type === 'freeze' || a.type === 'layer' || a.type === 'solo' || a.type === 'filterHold';
+  return a.type === 'freeze' || a.type === 'layer' || a.type === 'solo' || a.type === 'filterHold' || a.type === 'lane';
 }
 
 export function parseDoubleMap(json: string): Record<string, string> {

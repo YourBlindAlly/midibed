@@ -30,7 +30,11 @@ enum UglyFXParam: Int {
   case reverbDamp       // 0...1, more = darker tail
   case delayMs          // 60...1500
   case delayFeedback    // 0...0.8
-  static let count = 20
+  case loopsPan         // the loop player (stereo in): balance -1...1
+  case loopsReverb
+  case loopsDelay
+  case loopsChorus      // reserved: the loops are not chorused yet
+  static let count = 24
 }
 
 private final class FXLine {
@@ -124,9 +128,10 @@ final class UglyFX {
     delayLen = max(1, params[UglyFXParam.delayMs.rawValue] * 0.001 * rate)
   }
 
-  /// One frame: the four parts' mono signals in (bass, pad, dancer, drums), stereo out.
+  /// One frame: the four parts' mono signals in (bass, pad, dancer, drums) and the loop player's stereo pair,
+  /// stereo out.
   @inline(__always)
-  func process(_ b0: Float, _ b1: Float, _ b2: Float, _ b3: Float, left: inout Float, right: inout Float) {
+  func process(_ b0: Float, _ b1: Float, _ b2: Float, _ b3: Float, loopL: Float, loopR: Float, left: inout Float, right: inout Float) {
     let p = params
     var outL: Float = 0
     var outR: Float = 0
@@ -166,6 +171,14 @@ final class UglyFX {
       outL += l
       outR += r
     }
+
+    // The loop player: stereo, balance, and sends into the shared reverb and delay.
+    let loopPan = max(-1, min(1, p[UglyFXParam.loopsPan.rawValue]))
+    outL += loopL * (loopPan > 0 ? 1 - loopPan : 1)
+    outR += loopR * (loopPan < 0 ? 1 + loopPan : 1)
+    let loopMono = (loopL + loopR) * 0.5
+    revIn += loopMono * max(0, min(1, p[UglyFXParam.loopsReverb.rawValue]))
+    delIn += loopMono * max(0, min(1, p[UglyFXParam.loopsDelay.rawValue]))
 
     // Reverb return.
     let size = max(0, min(1, p[UglyFXParam.reverbSize.rawValue]))

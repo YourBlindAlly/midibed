@@ -6,6 +6,7 @@ import { colors } from './controls';
 export const TABS = [
   { id: 'live', label: 'Live' },
   { id: 'parts', label: 'Parts' },
+  { id: 'player', label: 'Loop player' },
   { id: 'scene', label: 'Scene' },
   { id: 'setup', label: 'Setup' },
 ] as const;

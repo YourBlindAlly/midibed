@@ -16,6 +16,8 @@ declare class MidiBedEngineModule extends NativeModule<MidiBedEngineEvents> {
   setFX(json: string): void;
   /** Filter presets for the built-in sound: JSON {glide (seconds), parts: [{mode, hz, res}] x4}. */
   setFilter(json: string): void;
+  /** Length, sample rate and channels of an audio file, or null if it cannot be read (the loop library). */
+  probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number } | null>;
   /** An orchestrated stop: JSON {style 1 bar|2 progression|3 scene, fadeBars, finalHit, noise, noiseShape, noiseLevel}. */
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;

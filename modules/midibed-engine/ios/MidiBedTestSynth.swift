@@ -117,6 +117,8 @@ final class MidiBedTestSynth {
   /// The built-in effects (UglyFX.swift) and which part each MIDI channel belongs to
   /// (0 bass, 1 pad, 2 MidiDancer; drums are always part 3).
   let fx = UglyFX()
+  /// The loop player (LoopPlayer.swift): four lanes of audio loops, started by the engine on bar lines.
+  let loops = LoopPlayer()
   private var partOfChannel = [Int](repeating: 1, count: 16)
 
   // Filter presets (see setFilterTargets): per part 0 bass, 1 pad, 2 MidiDancer, 3 drums.
@@ -250,6 +252,7 @@ final class MidiBedTestSynth {
     let renderFormat = AVAudioFormat(standardFormatWithSampleRate: Double(sampleRate), channels: 2)
     bass.setSampleRate(sampleRate)
     fx.setSampleRate(sampleRate)
+    loops.setSampleRate(sampleRate)
 
     let node = AVAudioSourceNode(format: renderFormat ?? format) { [unowned self] _, _, frameCount, audioBufferList -> OSStatus in
       self.render(frameCount: Int(frameCount), bufferList: audioBufferList)
@@ -688,6 +691,9 @@ final class MidiBedTestSynth {
     let release = 1 - expf(-dt / 1.6)
     let expSmooth = 1 - expf(-dt / 0.03)
 
+    // The loop player renders a whole buffer at once (false: nothing is playing).
+    let haveLoops = loops.renderBlock(frames: frameCount)
+
     for frame in 0..<frameCount {
       // Each part's mono signal, so the effects (UglyFX) can treat the parts separately.
       var partBass: Float = 0
@@ -909,7 +915,9 @@ final class MidiBedTestSynth {
       // The parts go through the effects (stereo out); the transition noise stays dry and centred.
       var left: Float = 0
       var right: Float = 0
-      fx.process(partBass, partPad, partDancer, partDrums, left: &left, right: &right)
+      let loopL: Float = haveLoops ? loops.left[frame] : 0
+      let loopR: Float = haveLoops ? loops.right[frame] : 0
+      fx.process(partBass, partPad, partDancer, partDrums, loopL: loopL, loopR: loopR, left: &left, right: &right)
       // gentle soft clip so stacked voices can't blast
       left = tanhf(left + noiseOut)
       right = tanhf(right + noiseOut)

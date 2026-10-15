@@ -21,6 +21,7 @@ export type ShortcutAction =
   | { type: 'filterPreset' }
   | { type: 'filterFocus' }
   | { type: 'sceneChangeAt' }
+  | { type: 'lane'; index: number }
   | { type: 'layer'; layer: Layer }
   | { type: 'solo'; layer: Layer }
   | { type: 'armSolo' }

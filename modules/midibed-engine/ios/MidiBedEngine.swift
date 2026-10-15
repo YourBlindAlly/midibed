@@ -34,6 +34,16 @@ struct MidiBedEndRequest: Decodable {
   var noiseLevel: Double
 }
 
+/// One lane of the loop player: which file, how many bars it spans, its level and balance, and whether it plays.
+struct MidiBedLaneConfig: Decodable {
+  var path: String
+  var bars: Int
+  var repeats: Int          // a loop shorter than a bar plays this many times in it
+  var level: Double
+  var pan: Double
+  var on: Bool
+}
+
 /// Patterns that change by themselves (kick excluded).
 struct MidiBedEvolveConfig: Decodable {
   var everyBars: Int        // 0 = off
@@ -271,6 +281,7 @@ struct MidiBedConfig: Decodable {
   var ports: MidiBedPortsConfig
   var outputs: MidiBedOutputsConfig
   var evolve: MidiBedEvolveConfig
+  var lanes: [MidiBedLaneConfig]
   var motion: MidiBedMotionConfig
   var transitions: MidiBedTransitionConfig
   var pad: MidiBedPadConfig
@@ -364,6 +375,15 @@ final class MidiBedEngine {
   }
   private var pending: [Pending] = []
 
+  private struct PendingLoop {
+    var time: Double
+    var lane: Int
+    var start: Bool
+    var seconds: Double
+    var repeats: Int = 1
+  }
+  private var pendingLoop: [PendingLoop] = []
+
   private struct PendingNoise {
     var time: Double
     var tag: Int // 0 scene entrance, 1 drum return, 2 drum break, 3 recurring
@@ -387,6 +407,10 @@ final class MidiBedEngine {
 
   // Drum fills: the normal pattern is silent from fillStartTick up to (not including) fillEndTick.
   private var fillStartTick = 0
+  // Loop player: which lanes the engine has started, and the tick each one started on.
+  private var laneActive = [Bool](repeating: false, count: LoopPlayer.laneCount)
+  private var laneStart = [Int](repeating: 0, count: LoopPlayer.laneCount)
+  private var lanePath = [String](repeating: "", count: LoopPlayer.laneCount)
   // Orchestrated stop: the bar line (absolute tick) the music ends on, its plan, and the fade factor.
   private var endTick = -1
   private var endPlan: MidiBedEndRequest?
@@ -547,6 +571,7 @@ final class MidiBedEngine {
     rebuildChannelPorts(decoded)
     synth.bassChannel = decoded.drone.channel
     synth.setPartChannels(bass: decoded.drone.channel, pad: decoded.pad.channel, dancer: decoded.dancer.channel)
+    applyLanes(decoded)
     updateIdleClock()
     if running {
       reconcileDrone()
@@ -753,6 +778,9 @@ final class MidiBedEngine {
       self.endFade = 1
       self.ended = false
       self.running = false
+      self.pendingLoop.removeAll()
+      self.synth.loops.stopAll(fade: soft ? 0.25 : 0.03)
+      for i in 0..<LoopPlayer.laneCount { self.laneActive[i] = false }
       self.timer?.cancel()
       self.timer = nil
       // Hand the clock back to the idle timer on the next pulse boundary (every 4th tick).
@@ -935,6 +963,7 @@ final class MidiBedEngine {
     updateWanderers(now: now, cfg: live)
     updateFades(now: now, cfg: live)
     drainPending(now: now)
+    drainLoops(now: now)
     drainNoise(now: now)
   }
 
@@ -988,6 +1017,10 @@ final class MidiBedEngine {
       stepRecurring(time: time, bar: sceneTick / barTicks, cfg: cfg)
       stepEvolve(bar: sceneTick / barTicks, cfg: cfg)
     }
+
+    // Loop player: start, restart and stop lanes on bar lines (a loop restarts every `bars` bars, so the audio
+    // clock never drifts away from the bed).
+    if tick % barTicks == 0 { stepLanes(tick: tick, time: time, tickDur: tickDur, cfg: cfg) }
 
     // MidiDancer: a call on a bar line, then a response space. Freeze does not pause it.
     if sceneTick >= 0, sceneTick % barTicks == 0 {
@@ -1092,6 +1125,11 @@ final class MidiBedEngine {
       pendingNoise.append(
         PendingNoise(time: time, tag: 9, shape: plan.noiseShape, color: 2, pre: 0, post: max(secs.post, 1.5), offset: 0, level: plan.noiseLevel))
     }
+    // The loop lanes stop on the bar line too.
+    for i in 0..<LoopPlayer.laneCount where laneActive[i] {
+      pendingLoop.append(PendingLoop(time: time, lane: i, start: false, seconds: 0))
+      laneActive[i] = false
+    }
     // The held bass and pad notes end exactly on the bar line (not a lookahead early).
     for h in heldDrone + heldPad {
       pending.append(Pending(time: time, status: 0x80 | UInt8(h.channel), d1: UInt8(h.note), d2: 0))
@@ -1152,6 +1190,73 @@ final class MidiBedEngine {
       let cb = self.onEnding
       DispatchQueue.main.async { cb?(["barsLeft": left, "reason": "set"]) }
     }
+  }
+
+  // MARK: Loop player
+
+  private func loopSeconds(_ bars: Int, _ cfg: MidiBedConfig) -> Double {
+    let beat = 60.0 / max(20.0, min(300.0, cfg.bpm))
+    return Double(max(1, bars)) * Double(beatsPerBar) * beat
+  }
+
+  /// At a bar line: a lane that should play and is not yet playing starts here; one that has run its `bars`
+  /// bars starts over here; one that is switched off (or whose file is gone) stops here.
+  private func stepLanes(tick: Int, time: Double, tickDur: Double, cfg: MidiBedConfig) {
+    let barTicks = ticksPerBeat * beatsPerBar
+    for i in 0..<min(LoopPlayer.laneCount, cfg.lanes.count) {
+      let lane = cfg.lanes[i]
+      let ready = !lane.path.isEmpty && synth.loops.isReady(i)
+      if lane.on && ready {
+        let span = max(1, lane.bars) * barTicks
+        if !laneActive[i] || (tick - laneStart[i]) % span == 0 {
+          pendingLoop.append(PendingLoop(time: time, lane: i, start: true, seconds: loopSeconds(lane.bars, cfg), repeats: max(1, lane.repeats)))
+          laneActive[i] = true
+          laneStart[i] = tick
+        }
+      } else if laneActive[i] {
+        pendingLoop.append(PendingLoop(time: time, lane: i, start: false, seconds: 0))
+        laneActive[i] = false
+      }
+    }
+  }
+
+  /// The lanes of a configuration just installed: load the files, set the levels, and cut a lane whose file
+  /// changed (the new one starts on the next bar line when it has finished loading).
+  private func applyLanes(_ cfg: MidiBedConfig) {
+    for i in 0..<LoopPlayer.laneCount {
+      let lane = i < cfg.lanes.count ? cfg.lanes[i] : nil
+      let path = lane?.path ?? ""
+      if lanePath[i] != path {
+        lanePath[i] = path
+        if laneActive[i] {
+          synth.loops.stop(lane: i, fade: 0.02)
+          laneActive[i] = false
+        }
+      }
+      synth.loops.load(lane: i, path: path)
+      synth.loops.setMix(lane: i, level: Float(lane?.level ?? 1), pan: Float(lane?.pan ?? 0))
+      // A tempo change: the lane keeps its place at its new speed.
+      if let l = lane, laneActive[i] { synth.loops.retune(lane: i, seconds: loopSeconds(l.bars, cfg), repeats: max(1, l.repeats)) }
+    }
+  }
+
+  private func drainLoops(now: Double) {
+    guard !pendingLoop.isEmpty else { return }
+    var later: [PendingLoop] = []
+    for p in pendingLoop {
+      if p.time <= now {
+        if p.start { synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats) } else { synth.loops.stop(lane: p.lane) }
+      } else {
+        later.append(p)
+      }
+    }
+    pendingLoop = later
+  }
+
+  /// Length, sample rate and channels of an audio file, for the library.
+  static func probeLoop(path: String) -> [String: Any]? {
+    guard let p = LoopPlayer.probe(path: path) else { return nil }
+    return ["seconds": p.seconds, "sampleRate": p.sampleRate, "channels": p.channels]
   }
 
   /// Evolving patterns: every `everyBars` bars each drum (except the kick) has a chance to be nudged: one hit
