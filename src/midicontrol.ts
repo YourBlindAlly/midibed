@@ -18,6 +18,10 @@ export type MidiControlState = {
   double: string;
   /** How quickly the second press must follow, in milliseconds. */
   doubleMs: number;
+  /** JSON: action id -> the action holding the button down does (see parseHoldMap). */
+  hold: string;
+  /** How long a button must stay down to count as held, in milliseconds. */
+  holdMs: number;
 };
 
 export type MidiActionDef = { id: string; label: string; action: ShortcutAction };
@@ -114,6 +118,23 @@ export function parseDoubleMap(json: string): Record<string, string> {
   }
 }
 
+/** What holding the button down does (same shape as the double map). Needs a pedal that sends a release. */
+export const parseHoldMap = parseDoubleMap;
+
+/** Is this press the second of a quick double press? `last` is the previous press of a button with a double. */
+export function isDoublePress(last: { id: string; at: number } | null, id: string, now: number, windowMs: number): boolean {
+  return !!last && last.id === id && now - last.at >= 0 && now - last.at <= windowMs;
+}
+
+/**
+ * Should a hold be watched for? Only for a button that has a hold action AND has already been seen to send
+ * a release (Momentary mode on the pedal). A pedal in Single mode never sends one, and then every tap would
+ * look like a hold.
+ */
+export function holdArmed(hasHold: boolean, releaseSeen: boolean): boolean {
+  return hasHold && releaseSeen;
+}
+
 /** Set (or, with null, clear) what a quick double press of this action's button does. */
 export function setDouble(json: string, actionId: string, doubleId: string | null): string {
   const map = parseDoubleMap(json);
@@ -153,3 +174,6 @@ export function describeTrigger(key: string | undefined): string {
   if (kind !== 'cc' && kind !== 'note' && kind !== 'pc') return 'not set';
   return describeMidi({ kind, channel: Number(channel), number: Number(number) });
 }
+
+/** Same as setDouble, for what holding the button does. */
+export const setHold = setDouble;

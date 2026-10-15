@@ -73,7 +73,7 @@ describe('MIDI controller mapping', () => {
   });
 
   it('is saved with the other settings, on by default, any channel', () => {
-    expect(defaultState.midiControl).toEqual({ enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400 });
+    expect(defaultState.midiControl).toEqual({ enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400, hold: '{}', holdMs: 700 });
     const s = migrateState({ midiControl: { map: '{"freeze":"cc:0:20"}', channel: 3 } });
     expect(s.midiControl.channel).toBe(3);
     expect(parseMidiMap(s.midiControl.map)).toEqual({ freeze: 'cc:0:20' });
@@ -115,5 +115,38 @@ describe('double presses and when scenes change', () => {
     expect(sc.sceneChangeWhen(1)).toBe('starts at the end of the progression');
     expect(defaultState.sceneChangeAt).toBe(0);
     expect(JSON.parse(toEngineJson({ ...defaultState, sceneChangeAt: 2 })).sceneChangeAt).toBe(2);
+  });
+});
+
+describe('holding a button (a pedal in Momentary mode)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mc = require('../src/midicontrol');
+
+  it('shares the double-press map shape and keeps only real, different actions', () => {
+    const json = mc.setHold('{}', 'fill', 'filterPreset');
+    expect(mc.parseHoldMap(json)).toEqual({ fill: 'filterPreset' });
+    expect(mc.parseHoldMap(mc.setHold(json, 'fill', null))).toEqual({});
+    expect(mc.parseHoldMap(mc.setHold('{}', 'fill', 'fill'))).toEqual({});
+  });
+
+  it('only watches for a hold on a button that has been seen to send a release', () => {
+    expect(mc.holdArmed(true, false)).toBe(false); // Single mode: no release ever arrives, so a tap must not look like a hold
+    expect(mc.holdArmed(true, true)).toBe(true);
+    expect(mc.holdArmed(false, true)).toBe(false);
+  });
+
+  it('recognises a second press of the same button inside the window and nothing else', () => {
+    const last = { id: 'freeze', at: 1000 };
+    expect(mc.isDoublePress(last, 'freeze', 1300, 400)).toBe(true);
+    expect(mc.isDoublePress(last, 'freeze', 1500, 400)).toBe(false);
+    expect(mc.isDoublePress(last, 'fill', 1100, 400)).toBe(false);
+    expect(mc.isDoublePress(null, 'freeze', 1100, 400)).toBe(false);
+  });
+
+  it('is saved with the other settings', () => {
+    const s = migrateState({ midiControl: { hold: '{"fill":"freeze"}', holdMs: 900 } });
+    expect(s.midiControl.holdMs).toBe(900);
+    expect(mc.parseHoldMap(s.midiControl.hold)).toEqual({ fill: 'freeze' });
+    expect(migrateState({}).midiControl.holdMs).toBe(700);
   });
 });

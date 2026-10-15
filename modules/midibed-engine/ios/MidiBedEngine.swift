@@ -599,6 +599,7 @@ final class MidiBedEngine {
     var name: String
     switch kind {
     case 0x90 where d2 > 0: name = "note"
+    case 0x80, 0x90: name = "note"   // a note off (or a note on with velocity 0): the release of a button
     case 0xB0: name = "cc"
     case 0xC0: name = "pc"
     default: return
@@ -611,7 +612,8 @@ final class MidiBedEngine {
       if let last = lastControlTime[key], now - last < 0.04 { return }
       lastControlTime[key] = now
     }
-    let body: [String: Any?] = ["kind": name, "channel": channel, "number": d1, "value": name == "pc" ? 127 : d2]
+    let released = name == "note" && (kind == 0x80 || d2 == 0)
+    let body: [String: Any?] = ["kind": name, "channel": channel, "number": d1, "value": name == "pc" ? 127 : (released ? 0 : d2)]
     let cb = onMidiIn
     DispatchQueue.main.async { cb?(body) }
   }

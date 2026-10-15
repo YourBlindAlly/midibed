@@ -52,7 +52,7 @@ import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson
 import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
-import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, idForMidi, isToggleAction, parseDoubleMap, parseMidiMap, setDouble } from './src/midicontrol';
+import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, holdArmed, idForMidi, isDoublePress, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
 import { levelText, mixerMessages } from './src/mixer';
 import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
@@ -723,6 +723,9 @@ export default function App() {
   const runActionRef = useRef(runAction);
   runActionRef.current = runAction;
   const lastPressRef = useRef<{ id: string; at: number } | null>(null);
+  // Buttons that have sent a release (a pedal in Momentary mode), and the hold timers running now.
+  const releaseSeenRef = useRef<Set<string>>(new Set());
+  const holdTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => {
     return onMidiIn((m) => {
       setLastMidiText(describeMidi(m));
@@ -737,6 +740,18 @@ export default function App() {
         return;
       }
       if (!s.midiControl.enabled) return;
+      // A release (a button let go): remember that this pedal sends them, and stop any hold being timed.
+      if (m.kind !== 'pc' && m.value === 0) {
+        if (s.midiControl.channel < 0 || m.channel === s.midiControl.channel) {
+          const key = triggerKey(m);
+          releaseSeenRef.current.add(key);
+          if (holdTimersRef.current[key]) {
+            clearTimeout(holdTimersRef.current[key]);
+            delete holdTimersRef.current[key];
+          }
+        }
+        return;
+      }
       const id = idForMidi(s.midiControl.map, m, s.midiControl.channel);
       const def = id ? MIDI_ACTIONS.find((a) => a.id === id) : undefined;
       if (!id || !def) return;
@@ -746,7 +761,7 @@ export default function App() {
       const dbl = parseDoubleMap(s.midiControl.double)[id];
       const now = Date.now();
       const last = lastPressRef.current;
-      if (dbl && last && last.id === id && now - last.at <= s.midiControl.doubleMs) {
+      if (dbl && isDoublePress(last, id, now, s.midiControl.doubleMs)) {
         lastPressRef.current = null;
         const second = MIDI_ACTIONS.find((a) => a.id === dbl);
         if (isToggleAction(def.action)) runActionRef.current(def.action);
@@ -755,6 +770,19 @@ export default function App() {
       }
       lastPressRef.current = dbl ? { id, at: now } : null;
       runActionRef.current(def.action);
+      // Holding the button: if it is still down after the hold time, put a toggle back and do the hold action.
+      const holdId = parseHoldMap(s.midiControl.hold)[id];
+      const key = triggerKey(m);
+      if (holdId && holdArmed(true, releaseSeenRef.current.has(key))) {
+        if (holdTimersRef.current[key]) clearTimeout(holdTimersRef.current[key]);
+        holdTimersRef.current[key] = setTimeout(() => {
+          delete holdTimersRef.current[key];
+          const held = MIDI_ACTIONS.find((a) => a.id === holdId);
+          lastPressRef.current = null;
+          if (isToggleAction(def.action)) runActionRef.current(def.action);
+          if (held) runActionRef.current(held.action);
+        }, s.midiControl.holdMs);
+      }
     });
   }, []);
 
@@ -2390,6 +2418,29 @@ export default function App() {
               max={MIDI_ACTIONS.length}
               format={(v) => (v === 0 ? 'nothing extra' : MIDI_ACTIONS[v - 1].label)}
               hint="For the action chosen above. The first press runs at once; a quick second press does this instead of repeating it. If the first press was an on or off switch, it is put back first"
+            />
+            <Stepper
+              label="Holding the button does"
+              value={Math.max(0, MIDI_ACTIONS.findIndex((a) => a.id === parseHoldMap(state.midiControl.hold)[MIDI_ACTIONS[learnIdx].id]) + 1)}
+              onChange={(v) =>
+                setState((s) => ({
+                  ...s,
+                  midiControl: { ...s.midiControl, hold: setHold(s.midiControl.hold, MIDI_ACTIONS[learnIdx].id, v <= 0 ? null : MIDI_ACTIONS[v - 1].id) },
+                }))
+              }
+              min={0}
+              max={MIDI_ACTIONS.length}
+              format={(v) => (v === 0 ? 'nothing extra' : MIDI_ACTIONS[v - 1].label)}
+              hint="For the action chosen above. Needs the pedal's button in Momentary mode, so it sends a message when you let go. The press runs at once; if you keep holding, this is done as well, and an on or off switch is put back first"
+            />
+            <Stepper
+              label="Hold time"
+              value={state.midiControl.holdMs}
+              onChange={(v) => patch({ midiControl: { ...state.midiControl, holdMs: v } })}
+              min={300}
+              max={2500}
+              step={100}
+              format={(v) => `${v} milliseconds`}
             />
             <Stepper
               label="Double press speed"

@@ -638,7 +638,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   filterGlide: 2,
   filterHold: false,
   sceneChangeAt: 0,
-  midiControl: { enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400 },
+  midiControl: { enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400, hold: '{}', holdMs: 700 },
   bassVoice: defaultBassVoice,
   fx: defaultFx,
   ending: defaultEnding,
