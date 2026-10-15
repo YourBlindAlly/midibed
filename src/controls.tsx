@@ -184,13 +184,13 @@ export function Section({
     <Pressable
       hitSlop={SLOP}
       accessibilityRole="header"
-      accessibilityLabel={title}
-      accessibilityState={{ expanded: !closed }}
+      // The state is IN the label so it is always spoken (the expanded state alone was not read on the device).
+      accessibilityLabel={`${title}, ${closed ? 'collapsed' : 'expanded'}`}
       accessibilityHint={closed ? 'Double tap to open' : 'Double tap to close'}
       onPress={() => toggle(key)}
       style={styles.sectionHead}
     >
-      <Text style={inner ? styles.innerTitle : styles.sectionTitle}>{`${title}  ${closed ? '(closed)' : ''}`.trim()}</Text>
+      <Text style={inner ? styles.innerTitle : styles.sectionTitle}>{`${closed ? '▸' : '▾'} ${title}${closed ? ' (closed)' : ''}`}</Text>
     </Pressable>
   );
   return (

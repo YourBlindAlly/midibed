@@ -139,9 +139,9 @@ describe('sections that open and close', () => {
     await press('Collapse all sections');
     expect(has('Stop style')).toBe(false);
     expect(has('Bass drone layer')).toBe(true); // fixed
-    await press('Ending');
+    await press('Ending, collapsed');
     expect(has('Stop style')).toBe(true);
-    await press('Ending');
+    await press('Ending, expanded');
     expect(has('Stop style')).toBe(false);
     await press('Expand all sections');
     expect(has('Stop style')).toBe(true);

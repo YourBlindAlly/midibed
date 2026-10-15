@@ -1,3 +1,4 @@
+declare const __dirname: string;
 import { collapseAll, defaultSectionUi, expandAll, isCollapsed, parseSectionUi, toggleSection } from '../src/sectionui';
 import { defaultState, migrateState } from '../src/config';
 
@@ -36,5 +37,13 @@ describe('section open/closed state', () => {
     const s = { ...defaultState, sectionUi: JSON.stringify(toggleSection(defaultSectionUi, 'Drum fills')) };
     expect(parseSectionUi(migrateState(JSON.parse(JSON.stringify(s))).sectionUi).open['Drum fills']).toBe(true);
     expect(migrateState({}).sectionUi).toBe(defaultState.sectionUi);
+  });
+});
+
+describe('what a section heading says', () => {
+  it('says collapsed or expanded in its spoken label, and shows a marker for everyone who can see it', () => {
+    const src: string = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'controls.tsx'), 'utf8');
+    expect(src).toContain("${closed ? 'collapsed' : 'expanded'}");
+    expect(src).toContain('(closed)');
   });
 });
