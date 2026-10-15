@@ -16,7 +16,7 @@ export const defaultSectionUi: SectionUi = { mode: 'default', open: {}, closed: 
 
 /** Sections that start closed: settings you set once, or only when designing a sound. */
 export const COLLAPSED_BY_DEFAULT =
-  /Ugly FX|Evolving patterns|Drum fills|Transition|Recurring sound|Keyboard shortcuts|MIDI controller|My apps|Levels and fades|Bass voice:|Bass breathing|Pad breathing|Drum breathing|More settings|Sound of /i;
+  /^(?!MidiDancer: ).*: external synth|Ugly FX|Evolving patterns|Drum fills|Transition|Recurring sound|Keyboard shortcuts|MIDI controller|My apps|Levels and fades|Bass voice:|Bass breathing|Pad breathing|Drum breathing|More settings|Sound of /i;
 
 export function isCollapsed(ui: SectionUi, id: string): boolean {
   if (ui.closed[id]) return true;

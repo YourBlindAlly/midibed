@@ -47,3 +47,14 @@ describe('what a section heading says', () => {
     expect(src).toContain('(closed)');
   });
 });
+
+describe('internal and external synth groups', () => {
+  it('start with the external group closed (except MidiDancer, which goes to another app) and the internal group open', () => {
+    expect(isCollapsed(defaultSectionUi, 'Bass drone: external synth')).toBe(true);
+    expect(isCollapsed(defaultSectionUi, 'Chord pad: external synth')).toBe(true);
+    expect(isCollapsed(defaultSectionUi, 'Drums: external synth')).toBe(true);
+    expect(isCollapsed(defaultSectionUi, 'MidiDancer: external synth')).toBe(false);
+    expect(isCollapsed(defaultSectionUi, 'Bass drone: internal synth')).toBe(false);
+    expect(isCollapsed(defaultSectionUi, 'Chord pad: where it goes')).toBe(false);
+  });
+});

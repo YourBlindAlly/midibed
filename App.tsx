@@ -1134,20 +1134,6 @@ export default function App() {
           </Section>
 
           <Section title={`${partName}: where it goes`}>
-            {partRole && (
-              <View style={styles.group}>
-                <Stepper
-                  label={`${partName} app`}
-                  value={profileIndex(state.profiles[partRole])}
-                  onChange={(v) => patchProfile(partRole, allProfiles()[v].id)}
-                  min={0}
-                  max={allProfiles().length - 1}
-                  format={(v) => allProfiles()[v].name}
-                  hint="Which app this part is sent to. It then shows real names and keeps that app's own sound favorites. Add apps that are not listed on the Setup tab."
-                />
-                <Text style={styles.note}>{partProfile.about}</Text>
-              </View>
-            )}
             {part === 'bass' && (
               <Stepper label="Bass drone MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the bass drone plays on. Its sound changes go to the same channel" />
             )}
@@ -1177,214 +1163,7 @@ export default function App() {
                 hint="Off: MidiBed's own sound does not play this part. The Built-in test sound switch on the Setup tab silences all of it"
               />
             )}
-            {part !== 'loops' && (
-              <Toggle
-                label={`${partName} has its own MIDI port`}
-                value={state.ports[part]}
-                onChange={(v) => patch({ ports: { ...state.ports, [part]: v } })}
-                hint={`Makes a source called MidiBed ${part === 'bass' ? 'Bass' : part === 'pad' ? 'Pad' : part === 'dancer' ? 'Dancer' : 'Drums'}. The app you point at it hears only this part and can stay on Omni. In that app, choose this source and switch MidiBed off.`}
-              />
-            )}
-            {part === 'loops' && (
-              <Toggle
-                label="Loops use their own MIDI port"
-                value={state.loops.ownPort}
-                onChange={(v) => patchLoops({ ownPort: v })}
-                hint="Makes a second MIDI source called MidiBed Loops. The loop choice, loop start and stop, and the MIDI clock go only there, so program changes meant for your other sounds cannot change the loops. Then in the loops app, choose MidiBed Loops as its input and switch MidiBed off"
-              />
-            )}
-            {part === 'bass' && (
-              <ActionButton label="Play bass drone test note" hint="Plays the key note for a moment on the bass drone channel, to check routing" onPress={() => engine.sendNote(state.drone.channel, keyRoot(state), state.drone.velocity, 1500)} />
-            )}
-            {part === 'pad' && (
-              <ActionButton label="Play pad test chord" hint="Plays the first chord of the pad for a moment, to check routing" onPress={() => padChords(state)[0]?.forEach((n) => engine.sendNote(state.pad.channel, n, state.pad.velocity, 1500))} />
-            )}
-            {part === 'dancer' && (
-              <ActionButton label="Play MidiDancer test note" hint="Plays one note for a moment on the MidiDancer channel, to check routing" onPress={() => engine.sendNote(state.dancer.channel, state.dancer.register, state.dancer.velocity, 1000)} />
-            )}
-            {part === 'bass' && droneProfile.mono && (state.drone.octave || state.drone.fifth) && (
-              <ActionButton
-                label="Bass drone app plays one note: use a single bass note"
-                hint="Turns off the octave and the fifth"
-                onPress={() => patchDrone({ octave: false, fifth: false })}
-              />
-            )}
-            {part === 'loops' && loopsProfile.loopControls &&
-              (state.loops.startCC !== loopsProfile.loopControls.startCC || state.loops.stopCC !== loopsProfile.loopControls.stopCC) && (
-                <ActionButton
-                  label={`Use ${loopsProfile.name} loop controls, start CC ${loopsProfile.loopControls.startCC}, stop CC ${loopsProfile.loopControls.stopCC}`}
-                  onPress={() => patchLoops({ startCC: loopsProfile.loopControls?.startCC ?? 0, stopCC: loopsProfile.loopControls?.stopCC ?? 0 })}
-                />
-              )}
           </Section>
-
-          {part === 'bass' && (
-            <>
-              <Section title="Bass drone: built-in bass voice">
-                <Text style={styles.note}>
-                  A bass synth inside MidiBed, in the style of the Moog Taurus and the Cherry Audio Lowdown. Switch it on and the bass drone plays this sound through MidiBed's own audio, with no other app to start. Filter movement on the bass channel moves its cutoff and resonance. It needs the built-in test sound switched on, on the Setup tab.
-                </Text>
-                <Toggle label="Use the built-in bass voice" value={state.bassVoice.enabled} onChange={(v) => patch({ bassVoice: { ...state.bassVoice, enabled: v } })} />
-                <Toggle
-                  label="Built-in sound plays only the bass voice"
-                  value={state.bassVoice.exclusive}
-                  onChange={(v) => patch({ bassVoice: { ...state.bassVoice, exclusive: v } })}
-                  hint="Silences the built-in pad, drums and other channels, so only the bass drone is heard from MidiBed's own sound. Use it when other apps play the rest."
-                />
-                <Stepper
-                  label="Bass voice preset"
-                  value={state.bassVoice.preset}
-                  onChange={(v) => patch({ bassVoice: applyBassPreset(state.bassVoice, v) })}
-                  min={0}
-                  max={BASS_PRESETS.length - 1}
-                  format={(v) => BASS_PRESETS[v].name}
-                  hint="Sets every bass voice setting at once. Changing any setting yourself makes it Custom."
-                />
-              </Section>
-              {(
-                [
-                  ['oscillators', 'Bass voice: oscillators'],
-                  ['filter', 'Bass voice: filter'],
-                  ['envelopes', 'Bass voice: envelopes'],
-                  ['movement', 'Bass voice: movement and output'],
-                ] as const
-              ).map(([group, title]) => (
-                <Section key={group} title={title}>
-                  {BASS_PARAMS.filter((d) => d.group === group).map((d: BassParamDef) =>
-                    d.unit === 'toggle' ? (
-                      <Toggle
-                        key={d.key}
-                        label={d.label}
-                        value={state.bassVoice.v[d.key] >= 1}
-                        onChange={(v) => patch({ bassVoice: setBassParam(state.bassVoice, d.key, v ? 1 : 0) })}
-                        hint={d.hint}
-                      />
-                    ) : (
-                      <Stepper
-                        key={d.key}
-                        label={d.label}
-                        value={state.bassVoice.v[d.key]}
-                        onChange={(v) => patch({ bassVoice: setBassParam(state.bassVoice, d.key, v) })}
-                        min={d.min}
-                        max={d.max}
-                        step={d.step}
-                        bigStep={d.bigStep}
-                        format={(v) => paramText(d, v)}
-                        hint={d.hint}
-                      />
-                    ),
-                  )}
-                </Section>
-              ))}
-            </>
-          )}
-          {soundSlot !== undefined && (
-            <Section title={`${partName}: sound`}>
-              <Text style={styles.note}>
-                Sends Bank Select and Program Change to this part's channel so you can step through sounds from here. The receiving app must be set to respond to program changes.
-              </Text>
-              {renderSlot(state.sounds[soundSlot], soundSlot)}
-            </Section>
-          )}
-          {part === 'dancer' && (
-            <Section title="MidiDancer: sound">
-              <Text style={styles.note}>
-                MidiDancer plays whatever sound its channel has in the other app. Choose the sound there, for example a ThumbJam slot on this channel.
-              </Text>
-            </Section>
-          )}
-          {part === 'loops' && (
-            <Section title="Loops: sound">
-              <Text style={styles.note}>The loop choice (program, bank, favorites) is under what it plays, below.</Text>
-            </Section>
-          )}
-
-          <Section title={`${partName}: level and fade`}>
-            <Text style={styles.note}>
-              The level is sent to the other app as a volume control when "Send levels to the apps" is on, on the Setup tab. Fades apply when you switch this part on or off and when you press Play.
-            </Text>
-            <Stepper
-              label={`${partName} level`}
-              value={state.mixer[part]}
-              onChange={(v) => patch({ mixer: { ...state.mixer, [part]: v } })}
-              min={0}
-              max={127}
-              step={5}
-              bigStep={10}
-              format={levelText}
-              hint="Swipe up or down to change the level. Sent as you change it, when levels are switched on."
-            />
-            {part === 'bass' && (
-              <>
-                <Stepper label="Bass drone fade in" value={state.fade.droneIn} onChange={(v) => patchFade({ droneIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
-                <Stepper label="Bass drone fade out" value={state.fade.droneOut} onChange={(v) => patchFade({ droneOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
-              </>
-            )}
-            {part === 'pad' && (
-              <>
-                <Stepper label="Pad fade in" value={state.fade.padIn} onChange={(v) => patchFade({ padIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
-                <Stepper label="Pad fade out" value={state.fade.padOut} onChange={(v) => patchFade({ padOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
-              </>
-            )}
-            {part === 'drums' && (
-              <>
-                <Stepper label="Drums fade in" value={state.fade.drumIn} onChange={(v) => patchFade({ drumIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
-                <Stepper label="Drums fade out" value={state.fade.drumOut} onChange={(v) => patchFade({ drumOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
-              </>
-            )}
-            {(part === 'dancer' || part === 'loops') && (
-              <Text style={styles.note}>This part has no fade of its own: switching it on or off is immediate.</Text>
-            )}
-          </Section>
-
-          {part !== 'loops' && (
-            <Section title={`${partName}: Ugly FX`}>
-              <Stepper
-                label={`${partName} pan`}
-                value={state.fx[part as FxPart].pan}
-                onChange={(v) => patchFxPart(part as FxPart, { pan: v })}
-                min={-100}
-                max={100}
-                step={10}
-                bigStep={50}
-                format={panText}
-                hint="Where this part sits left to right in the built-in sound"
-              />
-              <Stepper
-                label={`${partName} reverb`}
-                value={state.fx[part as FxPart].reverb}
-                onChange={(v) => patchFxPart(part as FxPart, { reverb: v })}
-                min={0}
-                max={100}
-                step={5}
-                bigStep={20}
-                format={fxPercent}
-                hint="How much of this part goes into the shared reverb"
-              />
-              <Stepper
-                label={`${partName} delay`}
-                value={state.fx[part as FxPart].delay}
-                onChange={(v) => patchFxPart(part as FxPart, { delay: v })}
-                min={0}
-                max={100}
-                step={5}
-                bigStep={20}
-                format={fxPercent}
-                hint="How much of this part goes into the shared delay"
-              />
-              <Stepper
-                label={`${partName} chorus`}
-                value={state.fx[part as FxPart].chorus}
-                onChange={(v) => patchFxPart(part as FxPart, { chorus: v })}
-                min={0}
-                max={100}
-                step={5}
-                bigStep={20}
-                format={fxPercent}
-                hint="Thickens and widens this part"
-              />
-            </Section>
-          )}
 
           <Section title={`${partName}: what it plays`}>
             {part === 'bass' && (
@@ -1764,6 +1543,236 @@ export default function App() {
             )}
             {state.wanderers.map((w, i) => (!anyPartChannel(w.channel) ? renderWanderer(w, i) : null))}
           </Section>
+          <Section title={`${partName}: level and fade`}>
+            <Text style={styles.note}>
+              The level is sent to the other app as a volume control when "Send levels to the apps" is on, on the Setup tab. Fades apply when you switch this part on or off and when you press Play.
+            </Text>
+            <Stepper
+              label={`${partName} level`}
+              value={state.mixer[part]}
+              onChange={(v) => patch({ mixer: { ...state.mixer, [part]: v } })}
+              min={0}
+              max={127}
+              step={5}
+              bigStep={10}
+              format={levelText}
+              hint="Swipe up or down to change the level. Sent as you change it, when levels are switched on."
+            />
+            {part === 'bass' && (
+              <>
+                <Stepper label="Bass drone fade in" value={state.fade.droneIn} onChange={(v) => patchFade({ droneIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+                <Stepper label="Bass drone fade out" value={state.fade.droneOut} onChange={(v) => patchFade({ droneOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+              </>
+            )}
+            {part === 'pad' && (
+              <>
+                <Stepper label="Pad fade in" value={state.fade.padIn} onChange={(v) => patchFade({ padIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+                <Stepper label="Pad fade out" value={state.fade.padOut} onChange={(v) => patchFade({ padOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+              </>
+            )}
+            {part === 'drums' && (
+              <>
+                <Stepper label="Drums fade in" value={state.fade.drumIn} onChange={(v) => patchFade({ drumIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+                <Stepper label="Drums fade out" value={state.fade.drumOut} onChange={(v) => patchFade({ drumOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
+              </>
+            )}
+            {(part === 'dancer' || part === 'loops') && (
+              <Text style={styles.note}>This part has no fade of its own: switching it on or off is immediate.</Text>
+            )}
+          </Section>
+
+
+          {part !== 'loops' && (
+            <Section title={`${partName}: internal synth`}>
+              <Text style={styles.note}>MidiBed's own built-in sound for this part: its voice and the Ugly FX.</Text>
+          {part === 'bass' && (
+            <>
+              <Section inner title="Bass drone: built-in bass voice">
+                <Text style={styles.note}>
+                  A bass synth inside MidiBed, in the style of the Moog Taurus and the Cherry Audio Lowdown. Switch it on and the bass drone plays this sound through MidiBed's own audio, with no other app to start. Filter movement on the bass channel moves its cutoff and resonance. It needs the built-in test sound switched on, on the Setup tab.
+                </Text>
+                <Toggle label="Use the built-in bass voice" value={state.bassVoice.enabled} onChange={(v) => patch({ bassVoice: { ...state.bassVoice, enabled: v } })} />
+                <Toggle
+                  label="Built-in sound plays only the bass voice"
+                  value={state.bassVoice.exclusive}
+                  onChange={(v) => patch({ bassVoice: { ...state.bassVoice, exclusive: v } })}
+                  hint="Silences the built-in pad, drums and other channels, so only the bass drone is heard from MidiBed's own sound. Use it when other apps play the rest."
+                />
+                <Stepper
+                  label="Bass voice preset"
+                  value={state.bassVoice.preset}
+                  onChange={(v) => patch({ bassVoice: applyBassPreset(state.bassVoice, v) })}
+                  min={0}
+                  max={BASS_PRESETS.length - 1}
+                  format={(v) => BASS_PRESETS[v].name}
+                  hint="Sets every bass voice setting at once. Changing any setting yourself makes it Custom."
+                />
+              </Section>
+              {(
+                [
+                  ['oscillators', 'Bass voice: oscillators'],
+                  ['filter', 'Bass voice: filter'],
+                  ['envelopes', 'Bass voice: envelopes'],
+                  ['movement', 'Bass voice: movement and output'],
+                ] as const
+              ).map(([group, title]) => (
+                <Section inner key={group} title={title}>
+                  {BASS_PARAMS.filter((d) => d.group === group).map((d: BassParamDef) =>
+                    d.unit === 'toggle' ? (
+                      <Toggle
+                        key={d.key}
+                        label={d.label}
+                        value={state.bassVoice.v[d.key] >= 1}
+                        onChange={(v) => patch({ bassVoice: setBassParam(state.bassVoice, d.key, v ? 1 : 0) })}
+                        hint={d.hint}
+                      />
+                    ) : (
+                      <Stepper
+                        key={d.key}
+                        label={d.label}
+                        value={state.bassVoice.v[d.key]}
+                        onChange={(v) => patch({ bassVoice: setBassParam(state.bassVoice, d.key, v) })}
+                        min={d.min}
+                        max={d.max}
+                        step={d.step}
+                        bigStep={d.bigStep}
+                        format={(v) => paramText(d, v)}
+                        hint={d.hint}
+                      />
+                    ),
+                  )}
+                </Section>
+              ))}
+            </>
+          )}
+            <Section inner title={`${partName}: Ugly FX`}>
+              <Stepper
+                label={`${partName} pan`}
+                value={state.fx[part as FxPart].pan}
+                onChange={(v) => patchFxPart(part as FxPart, { pan: v })}
+                min={-100}
+                max={100}
+                step={10}
+                bigStep={50}
+                format={panText}
+                hint="Where this part sits left to right in the built-in sound"
+              />
+              <Stepper
+                label={`${partName} reverb`}
+                value={state.fx[part as FxPart].reverb}
+                onChange={(v) => patchFxPart(part as FxPart, { reverb: v })}
+                min={0}
+                max={100}
+                step={5}
+                bigStep={20}
+                format={fxPercent}
+                hint="How much of this part goes into the shared reverb"
+              />
+              <Stepper
+                label={`${partName} delay`}
+                value={state.fx[part as FxPart].delay}
+                onChange={(v) => patchFxPart(part as FxPart, { delay: v })}
+                min={0}
+                max={100}
+                step={5}
+                bigStep={20}
+                format={fxPercent}
+                hint="How much of this part goes into the shared delay"
+              />
+              <Stepper
+                label={`${partName} chorus`}
+                value={state.fx[part as FxPart].chorus}
+                onChange={(v) => patchFxPart(part as FxPart, { chorus: v })}
+                min={0}
+                max={100}
+                step={5}
+                bigStep={20}
+                format={fxPercent}
+                hint="Thickens and widens this part"
+              />
+            </Section>
+
+            </Section>
+          )}
+
+          <Section title={`${partName}: external synth`}>
+            <Text style={styles.note}>Everything that sends this part to another app: which app, its MIDI port, its sounds, and a test note.</Text>
+            {partRole && (
+              <View style={styles.group}>
+                <Stepper
+                  label={`${partName} app`}
+                  value={profileIndex(state.profiles[partRole])}
+                  onChange={(v) => patchProfile(partRole, allProfiles()[v].id)}
+                  min={0}
+                  max={allProfiles().length - 1}
+                  format={(v) => allProfiles()[v].name}
+                  hint="Which app this part is sent to. It then shows real names and keeps that app's own sound favorites. Add apps that are not listed on the Setup tab."
+                />
+                <Text style={styles.note}>{partProfile.about}</Text>
+              </View>
+            )}
+            {part !== 'loops' && (
+              <Toggle
+                label={`${partName} has its own MIDI port`}
+                value={state.ports[part]}
+                onChange={(v) => patch({ ports: { ...state.ports, [part]: v } })}
+                hint={`Makes a source called MidiBed ${part === 'bass' ? 'Bass' : part === 'pad' ? 'Pad' : part === 'dancer' ? 'Dancer' : 'Drums'}. The app you point at it hears only this part and can stay on Omni. In that app, choose this source and switch MidiBed off.`}
+              />
+            )}
+            {part === 'loops' && (
+              <Toggle
+                label="Loops use their own MIDI port"
+                value={state.loops.ownPort}
+                onChange={(v) => patchLoops({ ownPort: v })}
+                hint="Makes a second MIDI source called MidiBed Loops. The loop choice, loop start and stop, and the MIDI clock go only there, so program changes meant for your other sounds cannot change the loops. Then in the loops app, choose MidiBed Loops as its input and switch MidiBed off"
+              />
+            )}
+            {part === 'bass' && (
+              <ActionButton label="Play bass drone test note" hint="Plays the key note for a moment on the bass drone channel, to check routing" onPress={() => engine.sendNote(state.drone.channel, keyRoot(state), state.drone.velocity, 1500)} />
+            )}
+            {part === 'pad' && (
+              <ActionButton label="Play pad test chord" hint="Plays the first chord of the pad for a moment, to check routing" onPress={() => padChords(state)[0]?.forEach((n) => engine.sendNote(state.pad.channel, n, state.pad.velocity, 1500))} />
+            )}
+            {part === 'dancer' && (
+              <ActionButton label="Play MidiDancer test note" hint="Plays one note for a moment on the MidiDancer channel, to check routing" onPress={() => engine.sendNote(state.dancer.channel, state.dancer.register, state.dancer.velocity, 1000)} />
+            )}
+            {part === 'bass' && droneProfile.mono && (state.drone.octave || state.drone.fifth) && (
+              <ActionButton
+                label="Bass drone app plays one note: use a single bass note"
+                hint="Turns off the octave and the fifth"
+                onPress={() => patchDrone({ octave: false, fifth: false })}
+              />
+            )}
+            {part === 'loops' && loopsProfile.loopControls &&
+              (state.loops.startCC !== loopsProfile.loopControls.startCC || state.loops.stopCC !== loopsProfile.loopControls.stopCC) && (
+                <ActionButton
+                  label={`Use ${loopsProfile.name} loop controls, start CC ${loopsProfile.loopControls.startCC}, stop CC ${loopsProfile.loopControls.stopCC}`}
+                  onPress={() => patchLoops({ startCC: loopsProfile.loopControls?.startCC ?? 0, stopCC: loopsProfile.loopControls?.stopCC ?? 0 })}
+                />
+              )}
+          {soundSlot !== undefined && (
+            <Section inner title={`${partName}: sound`}>
+              <Text style={styles.note}>
+                Sends Bank Select and Program Change to this part's channel so you can step through sounds from here. The receiving app must be set to respond to program changes.
+              </Text>
+              {renderSlot(state.sounds[soundSlot], soundSlot)}
+            </Section>
+          )}
+          {part === 'dancer' && (
+            <Section inner title="MidiDancer: sound">
+              <Text style={styles.note}>
+                MidiDancer plays whatever sound its channel has in the other app. Choose the sound there, for example a ThumbJam slot on this channel.
+              </Text>
+            </Section>
+          )}
+          {part === 'loops' && (
+            <Section inner title="Loops: sound">
+              <Text style={styles.note}>The loop choice (program, bank, favorites) is under what it plays, above.</Text>
+            </Section>
+          )}
+
+          </Section>
+
             </>
           )}
           {tab === 'scene' && (
