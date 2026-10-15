@@ -14,6 +14,10 @@ export type MidiControlState = {
   channel: number;
   /** JSON: action id -> trigger key (see parseMidiMap). */
   map: string;
+  /** JSON: action id -> the action a quick double press of its button does (see parseDoubleMap). */
+  double: string;
+  /** How quickly the second press must follow, in milliseconds. */
+  doubleMs: number;
 };
 
 export type MidiActionDef = { id: string; label: string; action: ShortcutAction };
@@ -47,6 +51,7 @@ export const MIDI_ACTIONS: MidiActionDef[] = [
   { id: 'filterHold', label: 'Hold the filters or let them move', action: { type: 'filterHold' } },
   { id: 'filterPreset', label: 'Next filter preset', action: { type: 'filterPreset' } },
   { id: 'filterFocus', label: 'Which module the filter preset goes to', action: { type: 'filterFocus' } },
+  { id: 'sceneChangeAt', label: 'When scene changes land', action: { type: 'sceneChangeAt' } },
 ];
 
 export function triggerKey(m: Pick<MidiMessage, 'kind' | 'channel' | 'number'>): string {
@@ -88,6 +93,42 @@ export function clearTrigger(json: string, actionId: string): string {
 /** A button press: a note on, a program change, or a control change with a value above zero. */
 export function isPress(m: MidiMessage): boolean {
   return m.kind === 'pc' || m.value > 0;
+}
+
+/** Which action ids are an on/off toggle, so a double press can put the first press back before doing its own thing. */
+export function isToggleAction(a: ShortcutAction): boolean {
+  return a.type === 'freeze' || a.type === 'layer' || a.type === 'solo' || a.type === 'filterHold';
+}
+
+export function parseDoubleMap(json: string): Record<string, string> {
+  try {
+    const raw = JSON.parse(json);
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === 'string' && v !== k && MIDI_ACTIONS.some((a) => a.id === k) && MIDI_ACTIONS.some((a) => a.id === v)) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Set (or, with null, clear) what a quick double press of this action's button does. */
+export function setDouble(json: string, actionId: string, doubleId: string | null): string {
+  const map = parseDoubleMap(json);
+  if (doubleId && doubleId !== actionId && MIDI_ACTIONS.some((a) => a.id === doubleId) && MIDI_ACTIONS.some((a) => a.id === actionId)) map[actionId] = doubleId;
+  else delete map[actionId];
+  return JSON.stringify(map);
+}
+
+/** The id of the action a received message is mapped to, or null. */
+export function idForMidi(json: string, m: MidiMessage, channel = -1): string | null {
+  if (!isPress(m)) return null;
+  if (channel >= 0 && m.channel !== channel) return null;
+  const key = triggerKey(m);
+  const map = parseMidiMap(json);
+  return Object.keys(map).find((k) => map[k] === key) ?? null;
 }
 
 /** The action a received message runs, or null. `channel` is -1 for any channel, else 0-15. */

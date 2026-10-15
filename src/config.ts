@@ -222,6 +222,8 @@ export type BedState = {
   filterGlide: number;
   /** Holds the filters where they are (never comes back on). */
   filterHold: boolean;
+  /** When a scene or journey change lands: 0 next bar, 1 end of the progression, 2 end of the scene (src/sceneChange.ts). Global. */
+  sceneChangeAt: number;
   /** A MIDI controller (foot pedal) running the same actions as the keyboard shortcuts. Global. */
   midiControl: MidiControlState;
   /** The built-in bass voice (see bassvoice.ts). Global. */
@@ -635,7 +637,8 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   filterFocus: 0,
   filterGlide: 2,
   filterHold: false,
-  midiControl: { enabled: true, channel: -1, map: '{}' },
+  sceneChangeAt: 0,
+  midiControl: { enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400 },
   bassVoice: defaultBassVoice,
   fx: defaultFx,
   ending: defaultEnding,
@@ -1015,6 +1018,7 @@ export function toEngineJson(s: BedState): string {
     sceneIndex: s.activeScene,
     frozen: s.frozen,
     filterHold: s.filterHold,
+    sceneChangeAt: s.sceneChangeAt,
     advance: {
       mode: s.advance.mode,
       bars: advanceBars(s.advance, s.harmony),

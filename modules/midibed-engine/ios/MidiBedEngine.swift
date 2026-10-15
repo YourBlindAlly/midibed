@@ -261,6 +261,7 @@ struct MidiBedConfig: Decodable {
   var sceneIndex: Int       // which scene this configuration is
   var frozen: Bool          // stop the bed changing by itself (breathing, recurring sound, auto-advance)
   var filterHold: Bool      // hold the filter wanderers where they are
+  var sceneChangeAt: Int    // when a queued scene change lands: 0 next bar, 1 end of the progression, 2 end of the scene
   var advance: MidiBedAdvance
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
@@ -334,6 +335,8 @@ final class MidiBedEngine {
   /// A scene switch waiting for the next bar line. While set, further settings
   /// edits update this instead, so the whole new scene lands together.
   private var pendingConfig: MidiBedConfig?
+  /// The bar line (absolute tick) the waiting scene switch lands on.
+  private var pendingLandTick = 0
   /// The pending switch was started by auto-advance (not by the player).
   private var pendingIsAuto = false
   /// Every scene as a full configuration, so the engine can move between them by itself.
@@ -497,11 +500,13 @@ final class MidiBedEngine {
         self.pendingConfig = decoded
         if queued { self.pendingIsAuto = false }
         if queued {
-          // A scene switch was just requested: its entrance sound is timed to the next
-          // bar line. A newer request replaces an older one that has not started yet.
+          // A scene switch was just requested: it lands on the next bar line, or later (the end of the
+          // progression, the end of the scene), and its entrance sound is timed to that bar line. A newer
+          // request replaces an older one that has not started yet.
           self.pendingNoise.removeAll { $0.tag == 0 }
           if let cur = self.config {
-            self.scheduleTransition(decoded.transitions.entrance, tag: 0, barTime: self.nextBarTime(cur), cfg: decoded)
+            self.pendingLandTick = self.landingTick(cur)
+            self.scheduleTransition(decoded.transitions.entrance, tag: 0, barTime: self.timeOfTick(self.pendingLandTick, cur), cfg: decoded)
           }
         }
         return
@@ -904,7 +909,7 @@ final class MidiBedEngine {
       // A queued scene switch lands exactly on a bar line, and the pad's chord
       // loop restarts from its first chord there.
       if tickIndex % barTicks == 0 { stepAdvance(atTick: tickIndex) }
-      if tickIndex % barTicks == 0, let p = pendingConfig {
+      if tickIndex % barTicks == 0, tickIndex >= pendingLandTick, let p = pendingConfig {
         pendingConfig = nil
         // Restart the chord loop first, so installing the new settings starts the
         // drone on chord 1 straight away instead of on the old position.
@@ -1194,7 +1199,7 @@ final class MidiBedEngine {
       let barIndex = (tick - padStartTick) / barTicks
       var due = f.everyBars > 0 && (barIndex + 1) % f.everyBars == 0
       if !due, f.beforeScene {
-        if pendingConfig != nil { due = true }                                     // a switch lands on the next bar line
+        if pendingConfig != nil, tick - pos + barTicks >= pendingLandTick { due = true } // a switch lands on the next bar line
         else if cfg.advance.mode > 0, advanceBarsLeft == 1, !cfg.frozen { due = true } // auto-advance is next
       }
       if !due, f.afterBreakdown, cfg.motion.drums.baseBars > 0, drumRT.alt, drumRT.barsLeft == 1,
@@ -1279,6 +1284,37 @@ final class MidiBedEngine {
   }
 
   // MARK: Transitions
+
+  /// The bar line a scene switch asked for now lands on: the next bar line, the end of the progression
+  /// (the chord loop comes back to its first chord, counted from the scene start), or the end of the scene
+  /// (the auto-advance countdown when there is one, else the end of the progression).
+  private func landingTick(_ cfg: MidiBedConfig) -> Int {
+    let barTicks = ticksPerBeat * beatsPerBar
+    let toBar = (barTicks - (tickIndex % barTicks)) % barTicks
+    let first = tickIndex + toBar
+    func progression() -> Int {
+      let chordTicks = barTicks * max(1, cfg.harmony.barsPerChord)
+      let loop = chordTicks * max(1, cfg.harmony.count)
+      let rel = first - padStartTick
+      if rel <= 0 { return first }
+      return padStartTick + ((rel + loop - 1) / loop) * loop
+    }
+    switch cfg.sceneChangeAt {
+    case 1:
+      return progression()
+    case 2:
+      if cfg.advance.mode > 0, advanceBarsLeft > 0 { return first + (advanceBarsLeft - 1) * barTicks }
+      return progression()
+    default:
+      return first
+    }
+  }
+
+  /// The time (the engine's clock) a tick will be processed.
+  private func timeOfTick(_ tick: Int, _ cfg: MidiBedConfig) -> Double {
+    let tickDur = 60.0 / (max(20.0, min(300.0, cfg.bpm)) * Double(ticksPerBeat))
+    return nextTickTime + Double(tick - tickIndex) * tickDur
+  }
 
   /// When the next bar line falls, in the engine's clock.
   private func nextBarTime(_ cfg: MidiBedConfig) -> Double {
@@ -1401,6 +1437,7 @@ final class MidiBedEngine {
       advanceBarsLeft = 0
       if target >= 0, target < sceneConfigs.count {
         pendingConfig = sceneConfigs[target]
+        pendingLandTick = tick
         pendingIsAuto = true
       }
     } else {

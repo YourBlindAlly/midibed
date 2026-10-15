@@ -43,6 +43,7 @@ import {
   toEngineJson,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
+import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
 import { ENDING_FADE_NAMES, STOP_STYLE_NAMES, barsLeftText, endingJson, endingSentence, nextStopStyle } from './src/ending';
@@ -51,7 +52,7 @@ import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson
 import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
-import { MIDI_ACTIONS, actionForMidi, assignTrigger, clearTrigger, describeMidi, describeTrigger, parseMidiMap } from './src/midicontrol';
+import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, idForMidi, isToggleAction, parseDoubleMap, parseMidiMap, setDouble } from './src/midicontrol';
 import { levelText, mixerMessages } from './src/mixer';
 import { MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
@@ -337,7 +338,7 @@ export default function App() {
     queueNextApply.current = queued;
     setState(next);
     setQueuedScene(queued ? to : null);
-    const msg = queued ? `${sceneLabel(next, to)}, starts at the next bar` : sceneLabel(next, to);
+    const msg = queued ? `${sceneLabel(next, to)}, ${sceneChangeWhen(state.sceneChangeAt)}` : sceneLabel(next, to);
     announceLater(msg, 500);
   };
 
@@ -671,6 +672,12 @@ export default function App() {
         announceLater(`Filter: ${FILTER_PRESETS[next].name}`, 150);
         break;
       }
+      case 'sceneChangeAt': {
+        const next = nextSceneChangeAt(state.sceneChangeAt);
+        patch({ sceneChangeAt: next });
+        announceLater(`Scenes change at: ${SCENE_CHANGE_NAMES[next].toLowerCase()}`, 150);
+        break;
+      }
       case 'filterFocus': {
         const next = nextFilterFocus(state.filterFocus);
         patch({ filterFocus: next });
@@ -715,6 +722,7 @@ export default function App() {
   const [lastMidiText, setLastMidiText] = useState('none yet');
   const runActionRef = useRef(runAction);
   runActionRef.current = runAction;
+  const lastPressRef = useRef<{ id: string; at: number } | null>(null);
   useEffect(() => {
     return onMidiIn((m) => {
       setLastMidiText(describeMidi(m));
@@ -729,8 +737,24 @@ export default function App() {
         return;
       }
       if (!s.midiControl.enabled) return;
-      const action = actionForMidi(s.midiControl.map, m, s.midiControl.channel);
-      if (action) runActionRef.current(action);
+      const id = idForMidi(s.midiControl.map, m, s.midiControl.channel);
+      const def = id ? MIDI_ACTIONS.find((a) => a.id === id) : undefined;
+      if (!id || !def) return;
+      // A quick second press of a button that has a double press does that instead of repeating the press.
+      // The first press already ran at once (nothing waits to see whether a second one follows). If the
+      // first press was an on/off toggle, the second puts it back first, so the double press leaves no mark.
+      const dbl = parseDoubleMap(s.midiControl.double)[id];
+      const now = Date.now();
+      const last = lastPressRef.current;
+      if (dbl && last && last.id === id && now - last.at <= s.midiControl.doubleMs) {
+        lastPressRef.current = null;
+        const second = MIDI_ACTIONS.find((a) => a.id === dbl);
+        if (isToggleAction(def.action)) runActionRef.current(def.action);
+        if (second) runActionRef.current(second.action);
+        return;
+      }
+      lastPressRef.current = dbl ? { id, at: now } : null;
+      runActionRef.current(def.action);
     });
   }, []);
 
@@ -1028,7 +1052,7 @@ export default function App() {
             />
             <Text style={styles.note}>
               {queuedScene !== null
-                ? `${sceneLabel(state, state.activeScene)} starts at the next bar`
+                ? `${sceneLabel(state, state.activeScene)} ${sceneChangeWhen(state.sceneChangeAt)}`
                 : `${sceneLabel(state, state.activeScene)} is playing`}
             </Text>
             <View
@@ -1148,6 +1172,18 @@ export default function App() {
               max={16}
               format={(v) => (v === 0 ? 'at once' : `${v} ${v === 1 ? 'beat' : 'beats'}`)}
               hint="How long a preset takes to arrive"
+            />
+          </Section>
+
+          <Section title="Changing scenes">
+            <Stepper
+              label="Scenes change at"
+              value={state.sceneChangeAt}
+              onChange={(v) => patch({ sceneChangeAt: v })}
+              min={0}
+              max={SCENE_CHANGE_NAMES.length - 1}
+              format={(v) => SCENE_CHANGE_NAMES[v]}
+              hint="When a scene or journey you ask for while playing takes over. The end of the scene follows the scene's own length if it has one, otherwise the end of the progression. The Y key changes this"
             />
           </Section>
 
@@ -2340,6 +2376,29 @@ export default function App() {
                 setState((s) => ({ ...s, midiControl: { ...s.midiControl, map: clearTrigger(s.midiControl.map, MIDI_ACTIONS[learnIdx].id) } }));
                 announceLater('Cleared', 100);
               }}
+            />
+            <Stepper
+              label="A quick double press does"
+              value={Math.max(0, MIDI_ACTIONS.findIndex((a) => a.id === parseDoubleMap(state.midiControl.double)[MIDI_ACTIONS[learnIdx].id]) + 1)}
+              onChange={(v) =>
+                setState((s) => ({
+                  ...s,
+                  midiControl: { ...s.midiControl, double: setDouble(s.midiControl.double, MIDI_ACTIONS[learnIdx].id, v <= 0 ? null : MIDI_ACTIONS[v - 1].id) },
+                }))
+              }
+              min={0}
+              max={MIDI_ACTIONS.length}
+              format={(v) => (v === 0 ? 'nothing extra' : MIDI_ACTIONS[v - 1].label)}
+              hint="For the action chosen above. The first press runs at once; a quick second press does this instead of repeating it. If the first press was an on or off switch, it is put back first"
+            />
+            <Stepper
+              label="Double press speed"
+              value={state.midiControl.doubleMs}
+              onChange={(v) => patch({ midiControl: { ...state.midiControl, doubleMs: v } })}
+              min={200}
+              max={800}
+              step={50}
+              format={(v) => `within ${v} milliseconds`}
             />
             <View accessible accessibilityLabel="Last MIDI received" accessibilityValue={{ text: lastMidiText }}>
               <Text style={styles.note}>{`Last MIDI received: ${lastMidiText}`}</Text>

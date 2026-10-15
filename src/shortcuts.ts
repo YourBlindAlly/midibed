@@ -20,6 +20,7 @@ export type ShortcutAction =
   | { type: 'filterHold' }
   | { type: 'filterPreset' }
   | { type: 'filterFocus' }
+  | { type: 'sceneChangeAt' }
   | { type: 'layer'; layer: Layer }
   | { type: 'solo'; layer: Layer }
   | { type: 'armSolo' }
@@ -72,6 +73,8 @@ export function actionForKey(raw: string, shift = false): ShortcutAction | null 
       return { type: 'filterPreset' };
     case 'g':
       return { type: 'filterFocus' };
+    case 'y':
+      return { type: 'sceneChangeAt' };
     case 'o':
       return { type: 'armSolo' };
     case 'x':
@@ -94,6 +97,7 @@ export const SHORTCUT_HELP: string[] = [
   'W: hold the filters where they are, or let them move again',
   'V: next filter preset (wandering, open, warm, muffled, underwater, telephone, mid focus, thin, top)',
   'G: which module the filter preset goes to (the whole mix, or one module)',
+  'Y: when scene changes land (the next bar, the end of the progression, the end of the scene)',
   'D: drums on or off, C: chord pad, R: bass drone (root), M: MidiDancer, L: loops',
   'A capital letter (or Shift) solos that part: Shift D hears only the drums. Pressing it again clears the solo.',
   'No capitals? Press O, then the part letter, to solo it. X clears the solo.',
