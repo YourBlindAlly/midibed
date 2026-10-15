@@ -113,7 +113,7 @@ final class LoopPlayer {
   func setMix(lane: Int, level: Float, pan: Float) {
     guard lane >= 0, lane < LoopPlayer.laneCount else { return }
     os_unfair_lock_lock(lock)
-    lanes[lane].level = max(0, min(1.5, level))
+    lanes[lane].level = max(0, min(4, level))
     lanes[lane].pan = max(-1, min(1, pan))
     if lanes[lane].playing { lanes[lane].target = lanes[lane].level }
     os_unfair_lock_unlock(lock)
@@ -237,11 +237,39 @@ final class LoopPlayer {
     return buf
   }
 
-  /// Length, rate and channels of a file without keeping it (for the library).
-  static func probe(path: String) -> (seconds: Double, sampleRate: Double, channels: Int)? {
+  /// Length, rate, channels and loudness (the highest sample and the RMS over every channel) of a file,
+  /// read in blocks without keeping it, for the library.
+  static func probe(path: String) -> (seconds: Double, sampleRate: Double, channels: Int, peak: Double, rms: Double)? {
     guard let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { return nil }
-    let rate = file.processingFormat.sampleRate
+    let format = file.processingFormat
+    let rate = format.sampleRate
     guard rate > 0 else { return nil }
-    return (Double(file.length) / rate, rate, Int(file.processingFormat.channelCount))
+    let channels = Int(format.channelCount)
+    var peak: Float = 0
+    var sumSquares = 0.0
+    var samples = 0.0
+    let block: AVAudioFrameCount = 32768
+    if let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: block) {
+      while file.framePosition < file.length {
+        do { try file.read(into: buf, frameCount: block) } catch { break }
+        let n = Int(buf.frameLength)
+        if n == 0 { break }
+        guard let data = buf.floatChannelData else { break }
+        for c in 0..<channels {
+          let p = data[c]
+          var local: Double = 0
+          for i in 0..<n {
+            let v = p[i]
+            let a = abs(v)
+            if a > peak { peak = a }
+            local += Double(v) * Double(v)
+          }
+          sumSquares += local
+          samples += Double(n)
+        }
+      }
+    }
+    let rms = samples > 0 ? (sumSquares / samples).squareRoot() : 0
+    return (Double(file.length) / rate, rate, channels, Double(peak), rms)
   }
 }

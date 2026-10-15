@@ -19,7 +19,7 @@ declare class MidiBedEngineModule extends NativeModule<MidiBedEngineEvents> {
   /** The built-in sound's output: 0 stereo, 1 mono both sides, 2 mono left only, 3 mono right only. */
   setOutputMode(mode: number): void;
   /** Length, sample rate and channels of an audio file, or null if it cannot be read (the loop library). */
-  probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number } | null>;
+  probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number; peak: number; rms: number } | null>;
   /** An orchestrated stop: JSON {style 1 bar|2 progression|3 scene, fadeBars, finalHit, noise, noiseShape, noiseLevel}. */
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;

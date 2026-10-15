@@ -223,6 +223,10 @@ export type BedState = {
   lanes: LaneState[];
   /** The loop library, as JSON text (the audio files MidiBed has copied in). Global. */
   loopLib: string;
+  /** The Loop player's overall level, percent (loops are loudness-matched first). Global. */
+  loopMaster: number;
+  /** Marks that the lane levels were reset once when loudness matching arrived (see resetLaneLevels). */
+  loopMatchVersion: number;
   /** The built-in sound's output: 0 stereo, 1 mono both sides, 2 mono left only, 3 mono right only (src/outputmode.ts). Global. */
   outputMode: number;
   /** The filter movement (wanderers) on or off. Saved with the scene. */
@@ -677,6 +681,8 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   sceneName: '',
   lanes: defaultLanes(),
   loopLib: '[]',
+  loopMaster: 100,
+  loopMatchVersion: 1,
   outputMode: 0,
   filterMove: true,
   filterPreset: 0,
@@ -988,7 +994,36 @@ function upgradeNoiseLevels(raw: unknown): unknown {
   return r;
 }
 
-export function migrateState(rawInput: unknown): BedState {
+/**
+ * Loudness matching arrived (loops are now brought to the level of the bed when they are added), so lane
+ * levels that were turned down to compensate are put back to 100 percent, once (live, in every scene and in
+ * every journey's scenes). Marked by `loopMatchVersion`.
+ */
+export const LOOP_MATCH_VERSION = 1;
+function resetLaneLevels(raw: unknown): unknown {
+  if (raw === null || typeof raw !== 'object') return raw;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.loopMatchVersion === 'number' && r.loopMatchVersion >= LOOP_MATCH_VERSION) return raw;
+  const fixLanes = (lanes: unknown): unknown =>
+    Array.isArray(lanes) ? lanes.map((l) => (l && typeof l === 'object' ? { ...(l as object), level: 100 } : l)) : lanes;
+  const fixScene = (sc: unknown): unknown => {
+    if (sc === null || typeof sc !== 'object' || !('lanes' in (sc as object))) return sc;
+    return { ...(sc as Record<string, unknown>), lanes: fixLanes((sc as Record<string, unknown>).lanes) };
+  };
+  const out: Record<string, unknown> = { ...r, loopMatchVersion: LOOP_MATCH_VERSION };
+  if (r.lanes !== undefined) out.lanes = fixLanes(r.lanes);
+  if (Array.isArray(r.scenes)) out.scenes = r.scenes.map(fixScene);
+  if (Array.isArray(r.journeys)) {
+    out.journeys = r.journeys.map((j) => {
+      if (j === null || typeof j !== 'object' || !Array.isArray((j as Record<string, unknown>).scenes)) return j;
+      return { ...(j as Record<string, unknown>), scenes: ((j as Record<string, unknown>).scenes as unknown[]).map(fixScene) };
+    });
+  }
+  return out;
+}
+
+export function migrateState(rawInput0: unknown): BedState {
+  const rawInput = resetLaneLevels(rawInput0);
   const lifted = markCustomMotion(liftHarmony(upgradeNoiseLevels(convertWanderers(rawInput))));
   const raw =
     lifted !== null && typeof lifted === 'object' && Array.isArray((lifted as Record<string, unknown>).scenes)
@@ -1069,7 +1104,7 @@ export function toEngineJson(s: BedState): string {
     frozen: s.frozen,
     filterHold: s.filterHold,
     sceneChangeAt: s.sceneChangeAt,
-    lanes: lanesForEngine(s.lanes, s.loopLib),
+    lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster),
     advance: {
       mode: s.advance.mode,
       bars: advanceBars(s.advance, s.harmony),

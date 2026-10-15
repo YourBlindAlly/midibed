@@ -1,4 +1,4 @@
-import { BAR_CHOICES, LANE_COUNT, addToLibrary, barsFromLength, defaultLanes, folderNames, isAudioFile, lanesForEngine, loopPath, parseLibrary, setLoopDir, tempoFromName } from '../src/looplib';
+import { BAR_CHOICES, LANE_COUNT, MATCH_FALLBACK, addToLibrary, matchGain, barsFromLength, defaultLanes, folderNames, isAudioFile, lanesForEngine, loopPath, parseLibrary, setLoopDir, tempoFromName } from '../src/looplib';
 import { copyScenePart, defaultState, migrateState, switchScene, toEngineJson } from '../src/config';
 
 const entry = (over: Partial<ReturnType<typeof parseLibrary>[number]> = {}) => ({
@@ -63,7 +63,8 @@ describe('lanes', () => {
     lanes[2] = { loop: 'Set/short', on: true, level: 100, pan: 0, bars: 2 };
     lanes[3] = { loop: 'gone', on: true, level: 100, pan: 0, bars: 0 };
     const out = lanesForEngine(lanes, lib);
-    expect(out[0]).toEqual({ path: '/var/mobile/Documents/loops/Set__PL_Bongos_90.wav', bars: 4, repeats: 1, level: 0.8, pan: -0.5, on: true });
+    expect(out[0].level).toBeCloseTo(0.8 * MATCH_FALLBACK); // an unmeasured file gets the flat match
+    expect(out[0]).toMatchObject({ path: '/var/mobile/Documents/loops/Set__PL_Bongos_90.wav', bars: 4, repeats: 1, pan: -0.5, on: true });
     expect(out[1]).toMatchObject({ bars: 1, repeats: 2, on: true });
     expect(out[2]).toMatchObject({ bars: 2, repeats: 1 }); // a chosen length replaces the file's own
     expect(out[3]).toMatchObject({ path: '', on: false });
@@ -93,5 +94,48 @@ describe('lanes', () => {
     expect(migrated.lanes).toHaveLength(4);
     expect(migrated.scenes.every((sc) => sc.lanes.length === 4)).toBe(true);
     expect(migrated.loopLib).toBe('[]');
+  });
+});
+
+describe('loudness matching', () => {
+  it('aims the average loudness at the bed and caps the loudest hit', () => {
+    // a dense loop (RMS 0.158, peak 0.82): the RMS target decides
+    expect(matchGain(0.82, 0.158)).toBeCloseTo(0.04 / 0.158, 3);
+    // a sparse loop (RMS 0.047, peak 0.82): the peak cap decides
+    expect(matchGain(0.82, 0.047)).toBeCloseTo(0.3 / 0.82, 3);
+    // so a matched loop never peaks above the cap, whatever it is
+    for (const [peak, rms] of [[0.82, 0.158], [0.82, 0.029], [0.5, 0.2], [0.1, 0.01]]) {
+      expect(matchGain(peak, rms) * peak).toBeLessThanOrEqual(0.3 + 1e-9);
+    }
+    expect(matchGain(undefined, undefined)).toBe(MATCH_FALLBACK);
+    expect(matchGain(0, 0.1)).toBe(MATCH_FALLBACK);
+  });
+
+  it('applies the matching and the master level to each lane, and 100 percent is the matched level', () => {
+    setLoopDir('file:///x/loops/');
+    const lib = JSON.stringify([entry({ peak: 0.82, rms: 0.158 })]);
+    const lanes = defaultLanes();
+    lanes[0] = { loop: 'Set/PL_Bongos_90', on: true, level: 100, pan: 0, bars: 0 };
+    const g = matchGain(0.82, 0.158);
+    expect(lanesForEngine(lanes, lib)[0].level).toBeCloseTo(g);
+    expect(lanesForEngine(lanes, lib, 50)[0].level).toBeCloseTo(g * 0.5);
+    setLoopDir('');
+  });
+
+  it('puts lane levels back to 100 percent once, in the live lanes, every scene and every journey', () => {
+    const quiet = { loop: 'a', on: true, level: 30, pan: 0, bars: 0 };
+    const old = {
+      lanes: [quiet, quiet, quiet, quiet],
+      scenes: [{ lanes: [quiet, quiet, quiet, quiet] }],
+      journeys: [{ name: 'J', scenes: [{ lanes: [quiet, quiet, quiet, quiet] }] }],
+    };
+    const s = migrateState(old);
+    expect(s.lanes.every((l) => l.level === 100)).toBe(true);
+    expect(s.loopMatchVersion).toBe(1);
+    // already migrated: levels are left alone
+    const again = migrateState({ ...old, loopMatchVersion: 1 });
+    expect(again.lanes[0].level).toBe(30);
+    // a brand new install has nothing to reset
+    expect(migrateState(undefined).lanes.every((l) => l.level === 100)).toBe(true);
   });
 });

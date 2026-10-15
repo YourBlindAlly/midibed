@@ -888,6 +888,8 @@ export default function App() {
         const bpm = tempoFromName(file.name) ?? tempoFromName(folder);
         const fit = barsFromLength(info.seconds, bpm);
         added.push({
+          peak: info.peak,
+          rms: info.rms,
           id: `${folder}/${file.name}`,
           name: file.name.replace(/\.[A-Za-z0-9]+$/, ''),
           folder,
@@ -906,6 +908,25 @@ export default function App() {
       setImportNote('Adding loops was cancelled or failed');
     }
   };
+  // Loops added before loudness matching have no measurement: read them again from their copies.
+  const measureLibrary = async () => {
+    const todo = parseLibrary(latest.current.loopLib).filter((l) => !(l.peak && l.rms));
+    if (todo.length === 0) {
+      setImportNote('Every loop in the library is already measured');
+      return;
+    }
+    announceLater(`Measuring ${todo.length} loops`, 100);
+    const done: LibraryLoop[] = [];
+    for (let n = 0; n < todo.length; n++) {
+      const info = await engine.probeLoop(loopPath(todo[n].file));
+      if (info) done.push({ ...todo[n], peak: info.peak, rms: info.rms });
+      if (n % 10 === 9) setImportNote(`Measured ${n + 1} of ${todo.length}`);
+    }
+    setState((s) => ({ ...s, loopLib: addToLibrary(s.loopLib, done) }));
+    setImportNote(`Measured ${done.length} loops`);
+    announceLater(`Measured ${done.length} loops`, 100);
+  };
+  const unmeasuredLoops = loopLib.filter((l) => !(l.peak && l.rms)).length;
   const clearLoopLibrary = () => {
     Alert.alert('Clear the loop library', 'Remove every loop from the library and delete the copies MidiBed made? Your original files are not touched.', [
       { text: 'Cancel', style: 'cancel' },
@@ -2118,7 +2139,25 @@ export default function App() {
                 <Text style={styles.note}>{importNote}</Text>
               </View>
             )}
+            {unmeasuredLoops > 0 && (
+              <ActionButton
+                label={`Match the loudness of ${unmeasuredLoops} loops`}
+                hint="Measures loops added earlier, so they come in at the level of the rest of the bed"
+                onPress={measureLibrary}
+              />
+            )}
             {loopLib.length > 0 && <ActionButton label="Clear the loop library" onPress={clearLoopLibrary} />}
+            <Stepper
+              label="Loop player level"
+              value={state.loopMaster}
+              onChange={(v) => patch({ loopMaster: v })}
+              min={0}
+              max={150}
+              step={5}
+              bigStep={10}
+              format={(v) => `${v} percent`}
+              hint="All four lanes at once. Loops are brought to the level of the rest of the bed when they are added, so 100 percent sits with the synth drums"
+            />
           </Section>
 
           {Array.from({ length: LANE_COUNT }, (_, i) => {

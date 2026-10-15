@@ -1263,7 +1263,7 @@ final class MidiBedEngine {
   /// Length, sample rate and channels of an audio file, for the library.
   static func probeLoop(path: String) -> [String: Any]? {
     guard let p = LoopPlayer.probe(path: path) else { return nil }
-    return ["seconds": p.seconds, "sampleRate": p.sampleRate, "channels": p.channels]
+    return ["seconds": p.seconds, "sampleRate": p.sampleRate, "channels": p.channels, "peak": p.peak, "rms": p.rms]
   }
 
   /// Evolving patterns: every `everyBars` bars each drum (except the kick) has a chance to be nudged: one hit

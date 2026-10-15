@@ -24,6 +24,9 @@ export type LibraryLoop = {
   bars: number;
   /** A file shorter than a bar plays this many times in a bar. */
   repeats: number;
+  /** Loudness measured when it was added: the highest sample and the RMS (0-1). Missing in older entries. */
+  peak?: number;
+  rms?: number;
 };
 
 export type LaneState = {
@@ -94,6 +97,8 @@ export function parseLibrary(json: string): LibraryLoop[] {
           bpm: typeof e.bpm === 'number' ? e.bpm : null,
           bars: Math.max(1, Math.round(Number(e.bars) || 4)),
           repeats: Math.max(1, Math.round(Number(e.repeats) || 1)),
+          peak: Number(e.peak) > 0 ? Number(e.peak) : undefined,
+          rms: Number(e.rms) > 0 ? Number(e.rms) : undefined,
         }));
     }
   } catch {
@@ -136,8 +141,28 @@ export function loopPath(file: string): string {
   return base + file;
 }
 
-/** The lanes as the engine takes them. */
-export function lanesForEngine(lanes: LaneState[], libJson: string): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean }[] {
+/**
+ * Loudness matching. Loops are usually peak-normalized (every file's loudest hit at the same level), which
+ * is far hotter than MidiBed's own parts and very different from file to file. A loop's match gain aims its
+ * average loudness (RMS) at about -28 dBFS, and never lets its loudest hit pass about -10.5 dBFS. A lane at
+ * 100 percent is therefore "at the level of the bed". A file with no measurement gets a flat -10 dB.
+ */
+export const MATCH_TARGET_RMS = 0.04;
+export const MATCH_PEAK_CAP = 0.3;
+export const MATCH_FALLBACK = 0.3;
+
+export function matchGain(peak?: number, rms?: number): number {
+  if (!(peak && peak > 0) || !(rms && rms > 0)) return MATCH_FALLBACK;
+  const g = Math.min(MATCH_TARGET_RMS / rms, MATCH_PEAK_CAP / peak);
+  return Math.max(0.02, Math.min(4, g));
+}
+
+/** The lanes as the engine takes them. `master` is the Loop player level in percent. */
+export function lanesForEngine(
+  lanes: LaneState[],
+  libJson: string,
+  master = 100,
+): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean }[] {
   const lib = parseLibrary(libJson);
   return Array.from({ length: LANE_COUNT }, (_, i) => {
     const lane = lanes[i] ?? defaultLane;
@@ -145,7 +170,9 @@ export function lanesForEngine(lanes: LaneState[], libJson: string): { path: str
     const path = loop ? loopPath(loop.file) : '';
     const bars = lane.bars > 0 ? lane.bars : loop ? loop.bars : 4;
     const repeats = lane.bars > 0 ? 1 : loop ? loop.repeats : 1;
-    return { path, bars, repeats, level: Math.max(0, Math.min(150, lane.level)) / 100, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '' };
+    const gain = loop ? matchGain(loop.peak, loop.rms) : 1;
+    const level = (Math.max(0, Math.min(150, lane.level)) / 100) * (Math.max(0, Math.min(150, master)) / 100) * gain;
+    return { path, bars, repeats, level, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '' };
   });
 }
 

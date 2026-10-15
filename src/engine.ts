@@ -18,7 +18,7 @@ type Native = {
   setFX(json: string): void;
   setFilter(json: string): void;
   setOutputMode(mode: number): void;
-  probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number } | null>;
+  probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number; peak: number; rms: number } | null>;
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;
   applyConfig(json: string, queued: boolean): void;
