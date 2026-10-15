@@ -305,3 +305,11 @@ generator, and only if Rusty wants it on an AUM strip with effects.
 
 ### Loop pitch (Rusty, 2026-10-15)
 - The loops fit the tempo by a plain speed change, so a tempo away from the file's own also moves the pitch. Rusty likes it ('they still sound cool, we might want the pitch change as a feature'). Keep this as the default 'pitch follows tempo' behaviour. A later choice per lane could add 'keep pitch' (real time-stretch) and/or a pitch offset in semitones (which needs the stretch so the loop still fills its bars).
+
+### Loop stretching stays on the map (Rusty, 2026-10-15)
+- Real pitch-preserving time-stretch for the loop lanes remains planned, alongside the pitch-follows-tempo behaviour he likes. Per lane: 'pitch follows tempo' (now) / 'keep pitch' (stretch) and later a pitch offset in semitones.
+
+### Bass that follows the kick (Rusty, 2026-10-15: ON THE MAP)
+- A setting for the bass drone to play rhythmically, locked to the kick pattern. This RELAXES the 2026-10-07 rule 'no rhythmic elements in the harmonic instruments': it is opt-in and off by default, so a steady drone stays the default. The rhythmic keys module (above) is the other exception.
+- Ideas to choose from when we build it: (1) PLAY ON THE KICK: a bass note on every kick hit, length until the next hit or a set fraction (tight, dance-style); (2) BETWEEN THE KICKS: the offbeat bass (the classic house/techno gap); (3) KICK ACCENTS: the held drone is re-struck or its level/filter jumps on each kick, the drone otherwise sustains (a softer 'pumping' feel); (4) DUCKING: no notes of its own, the bass just dips for a moment on each kick (sidechain feel), which also works for the pad. Follows the current scene's kick (the drum whose role is kick, including a library rhythm and evolving rotation), with a few options: note length, a swing/offset, how much of the pattern (every kick, every other kick, kick + ghosts), and which chord note it plays (root, root and fifth, the octave on alternate hits).
+- Built-in bass voice and external synths both get it (it is just note on/off from the engine, like MidiDancer). Pairs naturally with 'bass follows chords'.
