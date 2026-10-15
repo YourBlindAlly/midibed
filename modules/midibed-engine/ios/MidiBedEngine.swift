@@ -12,6 +12,8 @@ struct MidiBedDrumConfig: Decodable {
   var steps: Int
   var hits: Int
   var rotation: Int
+  var mask: Int             // a library rhythm: bit n set = step n plays
+  var useMask: Bool         // true: the mask replaces the Euclidean spread
   var velocity: Int
   var probability: Double   // 0...1 chance each scheduled hit actually plays
   var humanize: Double      // 0...1 random velocity wobble
@@ -1073,12 +1075,12 @@ final class MidiBedEngine {
       var hits = max(0, min(steps, drum.hits))
       var rotation = drum.rotation
       if i < evoHits.count {
-        if hits > 0 { hits = max(1, min(steps, hits + evoHits[i])) }
+        if hits > 0, !drum.useMask { hits = max(1, min(steps, hits + evoHits[i])) }
         rotation += evoRot[i]
       }
       let local = step % steps
       let pos = ((local - rotation % steps) % steps + steps) % steps
-      let mainHit = euclidHit(position: pos, hits: hits, steps: steps)
+      let mainHit = drumHit(drum, position: pos, hits: hits, steps: steps)
       // Ghost notes: a second, quiet pattern, only on steps the main pattern leaves free.
       var ghost = false
       if !mainHit, drum.ghostHits > 0 {
@@ -1093,7 +1095,7 @@ final class MidiBedEngine {
       if mainHit, drum.accentEvery > 1 {
         // Which hit of the pattern this is (0 for the first); every Nth one is the accent.
         var rank = 0
-        for j in 0..<pos where euclidHit(position: j, hits: hits, steps: steps) { rank += 1 }
+        for j in 0..<pos where drumHit(drum, position: j, hits: hits, steps: steps) { rank += 1 }
         if rank % drum.accentEvery == 0 { vel *= 1 + max(0, min(1, drum.accentBoost)) }
       }
       if drum.humanize > 0 {
@@ -1390,6 +1392,13 @@ final class MidiBedEngine {
   }
 
   /// Standard Euclidean spread: hit when (pos * hits) mod steps < hits.
+  /// Does this drum play at `position` of its cycle? A library rhythm uses its fixed mask; otherwise the
+  /// Euclidean spread of `hits` over `steps`.
+  private func drumHit(_ drum: MidiBedDrumConfig, position: Int, hits: Int, steps: Int) -> Bool {
+    if drum.useMask { return position >= 0 && position < 62 && ((drum.mask >> position) & 1) == 1 }
+    return euclidHit(position: position, hits: hits, steps: steps)
+  }
+
   private func euclidHit(position: Int, hits: Int, steps: Int) -> Bool {
     if hits <= 0 { return false }
     return (position * hits) % steps < hits

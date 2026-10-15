@@ -59,6 +59,7 @@ import { levelText, mixerMessages } from './src/mixer';
 import { COLOR_NAMES, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
+import { RHYTHMS, rhythmDescribe, rhythmText } from './src/rhythms';
 import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion, onScene, testSweep } from './src/engine';
 import {
   CONTOUR_NAMES,
@@ -1620,20 +1621,45 @@ export default function App() {
               />
               <Stepper label={`${d.name} MIDI channel`} value={d.channel} onChange={(v) => patchDrum(i, { channel: v })} min={0} max={15} format={channelText} hint="Channel 10 is General MIDI drums." />
               <ActionButton label={`Play ${d.name} test hit`} hint="Sends this note on this channel once, to check what the other app does with it" onPress={() => engine.sendNote(d.channel, d.note, d.velocity, 200)} />
-              <Stepper label={`${d.name} hits`} value={d.hits} onChange={(v) => patchDrum(i, { hits: v })} min={0} max={d.steps} />
+              <Stepper
+                label={`${d.name} rhythm`}
+                value={d.rhythm}
+                onChange={(v) => patchDrum(i, { rhythm: Math.max(0, Math.min(RHYTHMS.length - 1, v)), rotation: 0 })}
+                min={0}
+                max={RHYTHMS.length - 1}
+                format={(v) => RHYTHMS[v].name}
+                hint="Euclidean spreads the hits evenly (hits, steps, rotation below). The others are real rhythms such as the claves and the 12 step bell. A rotation of half the steps turns a 3-2 clave into a 2-3. Changing hits or steps goes back to Euclidean"
+              />
+              <Stepper
+                label={`${d.name} hits`}
+                value={d.rhythm > 0 ? RHYTHMS[d.rhythm].hits.length : d.hits}
+                onChange={(v) => patchDrum(i, { hits: v, steps: d.rhythm > 0 ? RHYTHMS[d.rhythm].steps : d.steps, rhythm: 0 })}
+                min={0}
+                max={d.rhythm > 0 ? RHYTHMS[d.rhythm].steps : d.steps}
+              />
               <Stepper
                 label={`${d.name} steps`}
-                value={d.steps}
-                onChange={(v) => patchDrum(i, { steps: v, hits: Math.min(d.hits, v) })}
+                value={d.rhythm > 0 ? RHYTHMS[d.rhythm].steps : d.steps}
+                onChange={(v) => patchDrum(i, { steps: v, hits: Math.min(d.rhythm > 0 ? RHYTHMS[d.rhythm].hits.length : d.hits, v), rhythm: 0 })}
                 min={2}
                 max={32}
                 hint="Loop length in sixteenth notes. Different lengths drift against each other."
               />
-              <Stepper label={`${d.name} rotation`} value={d.rotation} onChange={(v) => patchDrum(i, { rotation: v })} min={0} max={Math.max(0, d.steps - 1)} />
+              <Stepper
+                label={`${d.name} rotation`}
+                value={d.rotation}
+                onChange={(v) => patchDrum(i, { rotation: v })}
+                min={0}
+                max={Math.max(0, (d.rhythm > 0 ? RHYTHMS[d.rhythm].steps : d.steps) - 1)}
+              />
               <Stepper label={`${d.name} velocity`} value={d.velocity} onChange={(v) => patchDrum(i, { velocity: v })} min={1} max={127} step={5} />
               <Stepper label={`${d.name} chance`} value={d.probability} onChange={(v) => patchDrum(i, { probability: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
-              <View accessible accessibilityLabel={`${d.name} pattern`} accessibilityValue={{ text: describePattern(d.hits, d.steps, d.rotation) }}>
-                <Text style={styles.pattern}>{patternText(d.hits, d.steps, d.rotation)}</Text>
+              <View
+                accessible
+                accessibilityLabel={`${d.name} pattern`}
+                accessibilityValue={{ text: d.rhythm > 0 ? rhythmDescribe(d.rhythm, d.rotation) : describePattern(d.hits, d.steps, d.rotation) }}
+              >
+                <Text style={styles.pattern}>{d.rhythm > 0 ? rhythmText(d.rhythm, d.rotation) : patternText(d.hits, d.steps, d.rotation)}</Text>
               </View>
               <Section title={`${d.name}: sound of the built-in drum`} id={`${d.name}: Sound of the built-in drum`} inner>
               <Stepper label={`${d.name} built-in sound`} value={d.voice} onChange={(v) => patchDrum(i, { voice: v })} min={0} max={DRUM_TYPES.length - 1} format={(v) => DRUM_TYPES[v]} hint="Which sound the built-in drum plays for this drum, whatever its note. Another app ignores this" />

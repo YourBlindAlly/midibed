@@ -3,6 +3,7 @@ import { EndingState, defaultEnding } from './ending';
 import { defaultSectionUi } from './sectionui';
 import { presetOwnsChannel } from './filters';
 import { clampOutputMode } from './outputmode';
+import { RHYTHMS, clampRhythm, rhythmMask } from './rhythms';
 import { LaneState, defaultLanes, lanesForEngine } from './looplib';
 import { buildBassChords, buildPadChords, clampColor, clampMode } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
@@ -39,6 +40,8 @@ export type DrumState = {
   velocity: number;
   probability: number; // percent 0-100
   humanize: number; // percent 0-100
+  /** A rhythm from the library (src/rhythms.ts) instead of the Euclidean spread; 0 = Euclidean. */
+  rhythm: number;
   /** A second, quieter Euclidean layer on the steps the main pattern leaves free: ghost notes. 0 = none. */
   ghostHits: number;
   ghostRotation: number;
@@ -72,7 +75,7 @@ export type EvolveState = {
 export const defaultEvolve: EvolveState = { everyBars: 0, chance: 50, returnAfter: 4 };
 
 /** The pattern extras every drum starts with: all off, so existing sounds do not change. */
-const drumExtras = { ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, accentEvery: 0, accentBoost: 30, keepFirst: false, looseMs: 0 };
+const drumExtras = { rhythm: 0, ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, accentEvery: 0, accentBoost: 30, keepFirst: false, looseMs: 0 };
 
 export type DroneState = {
   enabled: boolean;
@@ -396,6 +399,7 @@ export function captureScene(s: SceneSource): SceneData {
       velocity: d.velocity,
       probability: d.probability,
       humanize: d.humanize,
+      rhythm: d.rhythm,
       ghostHits: d.ghostHits,
       ghostRotation: d.ghostRotation,
       ghostVelocity: d.ghostVelocity,
@@ -1062,13 +1066,16 @@ export function toEngineJson(s: BedState): string {
       role: drumRole(d.name),
       note: d.note,
       channel: d.channel,
-      steps: d.steps,
-      hits: d.hits,
+      // A library rhythm brings its own number of steps and replaces the Euclidean spread with a fixed mask.
+      steps: d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].steps : d.steps,
+      hits: d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].hits.length : d.hits,
+      mask: d.rhythm > 0 ? rhythmMask(d.rhythm) : 0,
+      useMask: d.rhythm > 0,
       rotation: d.rotation,
       velocity: d.velocity,
       probability: d.probability / 100,
       humanize: d.humanize / 100,
-      ghostHits: Math.min(d.ghostHits, d.steps),
+      ghostHits: Math.min(d.ghostHits, d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].steps : d.steps),
       ghostRotation: d.ghostRotation,
       ghostVelocity: d.ghostVelocity,
       accentEvery: d.accentEvery,
