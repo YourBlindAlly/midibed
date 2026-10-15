@@ -1920,6 +1920,12 @@ export default function App() {
             )}
             {part === 'drums' && (
               <>
+                <Toggle
+                  label="Drums start at full volume"
+                  value={state.fade.drumsHard}
+                  onChange={(v) => patchFade({ drumsHard: v })}
+                  hint="On: the drums hit at full strength when you press Play and when a scene brings a drum in, for a strong downbeat. The fade in below is then only for switching a drum on by hand"
+                />
                 <Stepper label="Drums fade in" value={state.fade.drumIn} onChange={(v) => patchFade({ drumIn: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
                 <Stepper label="Drums fade out" value={state.fade.drumOut} onChange={(v) => patchFade({ drumOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
               </>
@@ -2384,12 +2390,6 @@ export default function App() {
 
 
           <Section title="Scene tools">
-            <ActionButton
-              label="Silence all drum patterns"
-              hint="Sets every drum's hits to 0 in this scene, so you can build a groove up one drum at a time. Steps, sounds and switches stay as they are"
-              onPress={silenceDrums}
-            />
-            {silencedMemory !== null && <ActionButton label="Bring the drum patterns back" hint="Puts every drum pattern back as it was before it was silenced" onPress={unsilenceDrums} />}
             <Text style={styles.note}>
               Each scene remembers its drums, bass drone on/off and voicing, chord pad, harmony, swing, and filter movement. Tempo, key, outputs, fades and MIDI routing stay the same in every scene. Changes you make are saved into the current scene.
             </Text>

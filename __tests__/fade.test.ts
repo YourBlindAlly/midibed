@@ -31,3 +31,16 @@ describe('fades and drum filter settings', () => {
     expect(s.wanderers[2].name).toBe('Drum cutoff');
   });
 });
+
+describe('drums at full volume', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const cfg = require('../src/config');
+
+  it('start hard by default, reach the engine, and old saved fades gain the setting', () => {
+    expect(cfg.defaultState.fade.drumsHard).toBe(true);
+    expect(JSON.parse(cfg.toEngineJson(cfg.defaultState)).fade.drumsHard).toBe(true);
+    const off = JSON.parse(cfg.toEngineJson({ ...cfg.defaultState, fade: { ...cfg.defaultState.fade, drumsHard: false } }));
+    expect(off.fade.drumsHard).toBe(false);
+    expect(cfg.migrateState({ fade: { cc: 11, drumIn: 30 } }).fade.drumsHard).toBe(true);
+  });
+});

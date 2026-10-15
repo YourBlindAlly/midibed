@@ -184,6 +184,8 @@ export type FadeState = {
   padOut: number;
   drumIn: number;
   drumOut: number;
+  /** The drums start at full volume at Play and when a scene brings a drum in (the fade-in is for switching one on by hand). */
+  drumsHard: boolean;
 };
 
 /**
@@ -753,7 +755,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     // Moves AGAINST the bass and chord cutoff, so the whole mix does not brighten and darken together.
     { name: 'Drum cutoff', enabled: false, cc: 74, channel: 9, min: 40, max: 127, cycleBars: 10, looseness: 50, phase: 0, smoothBeats: 4, opposes: 0, opposeAmount: 70 },
   ],
-  fade: { cc: 11, droneIn: 40, droneOut: 20, padIn: 40, padOut: 20, drumIn: 20, drumOut: 20 },
+  fade: { cc: 11, droneIn: 40, droneOut: 20, padIn: 40, padOut: 20, drumIn: 20, drumOut: 20, drumsHard: true },
   pad: {
     enabled: true,
     channel: 1,
@@ -1233,6 +1235,7 @@ export function toEngineJson(s: BedState): string {
       padOut: s.fade.padOut / 10,
       drumIn: s.fade.drumIn / 10,
       drumOut: s.fade.drumOut / 10,
+      drumsHard: s.fade.drumsHard,
     },
     wanderers: s.wanderers.map((w) => ({
       // Off with the filter movement switch, or while a preset owns this channel's filter.

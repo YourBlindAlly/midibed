@@ -104,6 +104,7 @@ struct MidiBedFadeConfig: Decodable {
   var padOut: Double
   var drumIn: Double
   var drumOut: Double
+  var drumsHard: Bool       // the drums start at full volume at Play and when a scene brings a drum in
 }
 
 /// A loop-playing app (like DrumJam's loops): not notes, just "choose this loop,
@@ -567,7 +568,17 @@ final class MidiBedEngine {
   }
 
   private func install(_ decoded: MidiBedConfig, atBar: Bool) {
+    let previous = config
     config = decoded
+    // A scene that brings a drum in on a bar line: with 'drums hard' it hits at full volume (a strong
+    // downbeat) instead of fading up. Drums that were already on are not touched.
+    if atBar, decoded.fade.drumsHard {
+      while drumLevels.count < decoded.drums.count { drumLevels.append(0) }
+      for (i, d) in decoded.drums.enumerated() where d.enabled {
+        let wasOn = (previous?.drums.indices.contains(i) ?? false) ? previous!.drums[i].enabled : false
+        if !wasOn { drumLevels[i] = 1 }
+      }
+    }
     synth.enabled = decoded.synthOut
     syncWanderers()
     rebuildChannelPorts(decoded)
@@ -1936,7 +1947,7 @@ final class MidiBedEngine {
 
   private func initDrumLevels() {
     guard let cfg = config else { return }
-    drumLevels = cfg.drums.map { $0.enabled ? (cfg.fade.drumIn > 0 ? 0 : 1) : 0 }
+    drumLevels = cfg.drums.map { $0.enabled ? ((cfg.fade.drumIn > 0 && !cfg.fade.drumsHard) ? 0 : 1) : 0 }
   }
 
   private func updateDrumLevels(tickDur: Double, cfg: MidiBedConfig) {

@@ -302,3 +302,6 @@ generator, and only if Rusty wants it on an AUM strip with effects.
 ### Multi-channel output (Rusty, 2026-10-15: FUTURE)
 - Today (round 62): the built-in sound can be mono on both sides, or mono on the left or right only, for a two-channel set-up (one side to the PA, the other a monitor with VoiceOver on it).
 - Later: a 4-channel audio interface with a STEREO mix on outputs 3/4 (and the monitor on 1/2). iOS apps normally get one stereo output; reaching channels 3/4 probably means routing through AUM (or a multi-channel route on the audio session, which needs testing with the interface). Questions for then: which interface, whether the phone exposes all four outputs to an app, and whether MidiBed should offer an 'output pair' choice or leave routing to AUM. Revisit when the interface exists.
+
+### Loop pitch (Rusty, 2026-10-15)
+- The loops fit the tempo by a plain speed change, so a tempo away from the file's own also moves the pitch. Rusty likes it ('they still sound cool, we might want the pitch change as a feature'). Keep this as the default 'pitch follows tempo' behaviour. A later choice per lane could add 'keep pitch' (real time-stretch) and/or a pitch offset in semitones (which needs the stretch so the loop still fills its bars).
