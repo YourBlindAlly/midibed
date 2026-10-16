@@ -95,11 +95,11 @@ describe('harmony settings', () => {
       activeScene: 1,
     };
     const s = migrateState(legacy);
-    expect(s.harmony).toEqual({ mode: 4, preset: 3, count: 2, degrees: [1, 4, 4, 7], colors: [0, 0, 0, 0], barsPerChord: 3 });
+    expect(s.harmony).toEqual({ mode: 4, preset: 3, count: 2, degrees: [1, 4, 4, 7, 1, 1, 1, 1, 1, 1, 1, 1], colors: Array(12).fill(0), barsPerChord: 3 });
     expect(s.pad.style).toBe(1);
     expect(s.pad).not.toHaveProperty('mode');
     expect(s.pad.follow).toBe(true);
-    expect(s.scenes[0].harmony).toEqual({ mode: 5, preset: 0, count: 3, degrees: [1, 6, 7, 7], colors: [0, 0, 0, 0], barsPerChord: 1 });
+    expect(s.scenes[0].harmony).toEqual({ mode: 5, preset: 0, count: 3, degrees: [1, 6, 7, 7, 1, 1, 1, 1, 1, 1, 1, 1], colors: Array(12).fill(0), barsPerChord: 1 });
     expect(s.scenes[0]).not.toHaveProperty('pad.mode');
   });
 

@@ -5,7 +5,7 @@ import { presetOwnsChannel } from './filters';
 import { clampOutputMode } from './outputmode';
 import { RHYTHMS, clampRhythm, rhythmMask } from './rhythms';
 import { LaneState, defaultLanes, lanesForEngine } from './looplib';
-import { buildBassChords, buildPadChords, clampColor, clampMode } from './chords';
+import { buildBassChords, buildPadChords, clampColor, clampMode, MAX_CHORDS } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
 import type { Layer } from './shortcuts';
@@ -152,8 +152,8 @@ export type HarmonyState = {
   mode: number; // index into MODE_NAMES
   preset: number; // index into PRESETS (0 = custom)
   count: number; // chords in the loop, 1-4
-  degrees: number[]; // 4 slots, scale degree 1-7 each; first `count` are used
-  /** 4 slots, parallel to degrees: the chord's colour (0 from the scale, 1 major, 2 minor, 3 sus 2, 4 sus 4). */
+  degrees: number[]; // MAX_CHORDS slots, scale degree 1-7 each; first `count` are used
+  /** MAX_CHORDS slots, parallel to degrees: the chord's colour (0 from the scale, 1 major, 2 minor, 3 sus 2, 4 sus 4). */
   colors: number[];
   barsPerChord: number;
 };
@@ -458,7 +458,11 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     swing: sc.swing,
     percussion: sc.percussion,
     drone: { ...s.drone, ...sc.drone },
-    harmony: { ...sc.harmony, degrees: [...sc.harmony.degrees], colors: [0, 1, 2, 3].map((k) => clampColor(sc.harmony.colors?.[k] ?? 0)) },
+    harmony: {
+      ...sc.harmony,
+      degrees: Array.from({ length: MAX_CHORDS }, (_, k) => sc.harmony.degrees[k] ?? 1),
+      colors: Array.from({ length: MAX_CHORDS }, (_, k) => clampColor(sc.harmony.colors?.[k] ?? 0)),
+    },
     motion: { preset: sc.motion.preset, bass: { ...sc.motion.bass }, pad: { ...sc.motion.pad }, drums: { ...sc.motion.drums } },
     advance: { ...sc.advance },
     transitionUse: { ...sc.transitionUse },
@@ -790,8 +794,8 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     mode: 1, // Dorian
     preset: 5, // Folk turn
     count: 4,
-    degrees: [1, 7, 4, 7],
-    colors: [0, 0, 0, 0],
+    degrees: [1, 7, 4, 7, 1, 1, 1, 1, 1, 1, 1, 1],
+    colors: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     barsPerChord: 2,
   },
   sounds: [
@@ -822,7 +826,7 @@ function startingScenes(): SceneData[] {
       ...b,
       drums: b.drums.map((d) => (d.name === 'Kick' ? { ...d, hits: 5 } : d.name === 'Hat' ? { ...d, hits: 9 } : d)),
       drone: { ...b.drone, follow: true },
-      harmony: { ...b.harmony, mode: 4, preset: 3, count: 2, degrees: [1, 4, 4, 7] },
+      harmony: { ...b.harmony, mode: 4, preset: 3, count: 2, degrees: [1, 4, 4, 7, 1, 1, 1, 1, 1, 1, 1, 1] },
     }),
     captureScene({
       ...b,

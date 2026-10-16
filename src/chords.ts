@@ -22,6 +22,9 @@ export const MODE_INTERVALS: number[][] = [
 ];
 
 // New chord types go at the END so a saved style number keeps its meaning.
+/** The most chords a progression can have. */
+export const MAX_CHORDS = 12;
+
 export const STYLE_NAMES = ['Triad', 'Sus 2', 'Sus 4', 'Add 9', 'Seventh', 'Open fifth', 'Fifth only'];
 
 /** Scale-step offsets from the chord's degree for each chord type. */
@@ -218,7 +221,7 @@ export type PadChordParams = {
  * stay put); without it, every chord is stacked in root position from `register`.
  */
 export function buildPadChords(p: PadChordParams): number[][] {
-  const count = Math.max(1, Math.min(4, p.count));
+  const count = Math.max(1, Math.min(MAX_CHORDS, p.count));
   const high = p.register + 19;
   const stacks = p.degrees.slice(0, count).map((d, i) => chordStack(p.root, p.mode, d, p.style, p.colors?.[i] ?? 0));
   const out: number[][] = [];
@@ -253,7 +256,7 @@ export type BassChordParams = {
  * a steady drone always uses a perfect fifth, as it always has.
  */
 export function buildBassChords(p: BassChordParams): number[][] {
-  const count = Math.max(1, Math.min(4, p.count));
+  const count = Math.max(1, Math.min(MAX_CHORDS, p.count));
   const degrees = p.follow ? p.degrees.slice(0, count) : [1];
   return degrees.map((d, i) => {
     const stack = chordStack(p.root, p.mode, d, 0, p.follow ? (p.colors?.[i] ?? 0) : 0);

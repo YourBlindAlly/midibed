@@ -61,7 +61,7 @@ import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, holdArmed, idForMidi, isDoublePress, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
 import { levelText, mixerMessages } from './src/mixer';
-import { COLOR_NAMES, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
+import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { RHYTHMS, rhythmDescribe, rhythmText } from './src/rhythms';
@@ -503,8 +503,8 @@ export default function App() {
     setState((s) => {
       const pr = PRESETS[idx];
       if (idx === 0 || !pr) return { ...s, harmony: { ...s.harmony, preset: 0 } };
-      const degrees = [0, 1, 2, 3].map((k) => pr.degrees[k] ?? s.harmony.degrees[k]);
-      return { ...s, harmony: { ...s.harmony, preset: idx, degrees, colors: [0, 0, 0, 0], count: pr.degrees.length } };
+      const degrees = Array.from({ length: MAX_CHORDS }, (_, k) => pr.degrees[k] ?? s.harmony.degrees[k] ?? 1);
+      return { ...s, harmony: { ...s.harmony, preset: idx, degrees, colors: Array(MAX_CHORDS).fill(0), count: pr.degrees.length } };
     });
   // What happens next in this scene. While stopped, or before the engine has said, work out the
   // target here (a random one cannot be known yet).
@@ -2426,7 +2426,7 @@ export default function App() {
               format={(v) => MODE_NAMES[v]}
               hint="The scale the chords come from, built on the key note."
             />
-            <Stepper label="Chords in loop" value={state.harmony.count} onChange={(v) => patchHarmony({ count: v, preset: 0 })} min={1} max={4} />
+            <Stepper label="Chords in loop" value={state.harmony.count} onChange={(v) => patchHarmony({ count: v, preset: 0 })} min={1} max={MAX_CHORDS} />
             {state.harmony.degrees.slice(0, state.harmony.count).map((d, i) => (
               <React.Fragment key={i}>
                 <Stepper

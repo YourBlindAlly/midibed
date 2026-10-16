@@ -1,4 +1,4 @@
-import { defaultState, keyRoot, applyScene, toEngineJson, MAX_JOURNEYS } from '../src/config';
+import { defaultState, keyRoot, applyScene, toEngineJson, migrateState, MAX_JOURNEYS } from '../src/config';
 import { chordLabel } from '../src/chords';
 import { RHYTHMS } from '../src/rhythms';
 import { STARTER_JOURNEYS, addStarterJourney } from '../src/starters';
@@ -98,8 +98,8 @@ describe('Flute G# minor B starter journey', () => {
     expect(names(2)[1]).toBe('G# minor');
     expect(names(1)[0].startsWith('B')).toBe(true);
     expect(names(2)[0]).toBe('B major');
-    expect(names(2).map((l) => l.split(' ')[0])).toEqual(['B', 'G#', 'C#', 'F#']);
-    expect(names(2)[3]).toBe('F# major');
+    expect(names(2).map((l) => l.split(' ')[0])).toEqual(['B', 'G#', 'C#', 'G#', 'B', 'G#', 'C#', 'G#', 'F#']);
+    expect(names(2)[8]).toBe('F# major');
     expect(names(3).map((l) => l.split(' ')[0])).toEqual(['G#', 'E', 'B', 'F#']);
     expect(at(2).harmony.barsPerChord).toBe(2);
   });
@@ -112,5 +112,36 @@ describe('Flute G# minor B starter journey', () => {
       expect(s.drums.find((d) => d.name === 'Kick')!.enabled).toBe(false);
       expect(s.drums.find((d) => d.name === 'Low tom')!.enabled).toBe(true);
     }
+  });
+});
+
+describe('twelve chords in a progression', () => {
+  it('a 9-chord scene plays nine chords of two bars each and keeps all of them', () => {
+    const added = addStarterJourney(defaultState, 2);
+    const s = applyScene(added, added.scenes[2]);
+    expect(s.harmony.count).toBe(9);
+    expect(s.harmony.degrees).toHaveLength(12);
+    const j = JSON.parse(toEngineJson(s));
+    expect(j.harmony).toEqual({ barsPerChord: 2, count: 9 });
+    expect(j.drone.chords).toHaveLength(9);
+    expect(j.pad.chords).toHaveLength(9);
+  });
+  it('old saved four-chord settings grow to twelve slots without changing', () => {
+    const old: any = JSON.parse(JSON.stringify(defaultState));
+    old.harmony.degrees = [1, 4, 5, 6];
+    old.harmony.colors = [1, 0, 2, 0];
+    const m = migrateState(old);
+    expect(m.harmony.degrees.slice(0, 4)).toEqual([1, 4, 5, 6]);
+    expect(m.harmony.colors.slice(0, 4)).toEqual([1, 0, 2, 0]);
+    expect(m.harmony.degrees).toHaveLength(12);
+  });
+  it('the two-chord flute journey cycles between two chords', () => {
+    const added = addStarterJourney(defaultState, 3);
+    expect(added.journeyName).toBe('Flute two-chord cycles');
+    const s3 = applyScene(added, added.scenes[2]);
+    const s4 = applyScene(added, added.scenes[3]);
+    expect([s3.harmony.count, s3.harmony.degrees[0], s3.harmony.degrees[1]]).toEqual([2, 3, 1]);
+    expect([s4.harmony.count, s4.harmony.degrees[0], s4.harmony.degrees[1]]).toEqual([2, 4, 1]);
+    expect(applyScene(added, added.scenes[0]).evolve.everyBars).toBe(4);
   });
 });

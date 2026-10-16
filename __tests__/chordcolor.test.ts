@@ -56,11 +56,11 @@ describe('chord colour', () => {
 
 describe('chord colour in the settings', () => {
   it('starts as the scale, in four slots, saved per scene, and survives older settings', () => {
-    expect(defaultState.harmony.colors).toEqual([0, 0, 0, 0]);
+    expect(defaultState.harmony.colors.slice(0, 4)).toEqual([0, 0, 0, 0]);
     const s = switchScene(switchScene({ ...defaultState, harmony: { ...defaultState.harmony, colors: [1, 0, 2, 0] } }, 1), 0);
-    expect(s.harmony.colors).toEqual([1, 0, 2, 0]);
-    expect(migrateState({ harmony: { mode: 2 } }).harmony.colors).toEqual([0, 0, 0, 0]);
-    expect(migrateState({}).scenes.every((sc) => sc.harmony.colors.length === 4)).toBe(true);
+    expect(s.harmony.colors.slice(0, 4)).toEqual([1, 0, 2, 0]);
+    expect(migrateState({ harmony: { mode: 2 } }).harmony.colors.slice(0, 4)).toEqual([0, 0, 0, 0]);
+    expect(migrateState({}).scenes.every((sc) => sc.harmony.colors.length === 12)).toBe(true);
   });
 
   it('changes the pad and the bass lists, and a relative key switch keeps the colours with their chords', () => {
