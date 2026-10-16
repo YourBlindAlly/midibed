@@ -145,3 +145,36 @@ describe('twelve chords in a progression', () => {
     expect(applyScene(added, added.scenes[0]).evolve.everyBars).toBe(4);
   });
 });
+
+describe('Ocarina modal starter journeys (all notes of C major)', () => {
+  const whiteNotes = new Set([0, 2, 4, 5, 7, 9, 11]);
+  const cases: [number, string, string, number, string[], string[]][] = [
+    [4, 'Ocarina Dorian', 'D', 88, ['D', 'G'], ['D', 'C', 'G', 'C']],
+    [5, 'Ocarina Mixolydian', 'G', 92, ['G', 'F'], ['G', 'F', 'C', 'F']],
+    [6, 'Ocarina Aeolian', 'A', 80, ['A', 'G'], ['A', 'F', 'C', 'G']],
+    [7, 'Ocarina Lydian', 'F', 84, ['F', 'G'], ['F', 'G', 'C', 'G']],
+  ];
+  it.each(cases)('journey %i %s: tempo, chords, and no notes outside C major', (idx, name, tonic, bpm, flip, turn) => {
+    const added = addStarterJourney(defaultState, idx);
+    expect(added.journeyName).toBe(name);
+    expect(added.bpm).toBe(bpm);
+    const lab = (i: number) => {
+      const s = applyScene(added, added.scenes[i]);
+      return s.harmony.degrees.slice(0, s.harmony.count).map((d, k) => chordLabel(keyRoot(s), s.harmony.mode, d, 0, s.harmony.colors[k]).split(' ')[0]);
+    };
+    expect(lab(0)).toEqual([tonic]);
+    expect(lab(1)).toEqual(flip);
+    expect(lab(2)).toEqual(turn);
+    expect(lab(3)).toEqual([tonic]);
+    for (let i = 0; i < 4; i++) {
+      const s = applyScene(added, added.scenes[i]);
+      const j = JSON.parse(toEngineJson(s));
+      for (const list of [...j.drone.chords, ...j.pad.chords] as number[][]) {
+        for (const n of list) expect(whiteNotes.has(n % 12)).toBe(true);
+      }
+    }
+    const s4 = applyScene(added, added.scenes[3]);
+    expect(s4.drums.filter((d) => d.enabled).length).toBeGreaterThanOrEqual(6);
+    expect(applyScene(added, added.scenes[0]).drums.find((d) => d.name === 'Kick')!.enabled).toBe(false);
+  });
+});

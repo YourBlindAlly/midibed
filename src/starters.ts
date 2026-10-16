@@ -1,7 +1,7 @@
 // Starter journeys: ready-made journeys Rusty can add and then change. Each is built from the
 // plain defaults plus a few overrides, so it stays valid whenever a new setting is added.
 import { BedState, Journey, MAX_JOURNEYS, SceneData, applyJourney, captureJourney, captureScene, defaultState } from './config';
-import { MAX_CHORDS } from './chords';
+import { MAX_CHORDS, MODE_NAMES, chordLabel } from './chords';
 import { RHYTHMS } from './rhythms';
 
 const rhythmIndex = (name: string): number => Math.max(0, RHYTHMS.findIndex((r) => r.name === name));
@@ -160,6 +160,47 @@ function fluteTwoChords(): Journey {
   return { ...captureJourney(defaultState), name: 'Flute two-chord cycles', root: 44, bpm: 90, activeScene: 0, scenes };
 }
 
+type ModalSpec = {
+  /** The mode's tonic as a MIDI note, low (the bass drone). */
+  tonic: number;
+  mode: number; // index into MODE_NAMES
+  bpm: number;
+  flip: number[]; // scale degrees of the two-chord flip-flop (scene 2)
+  turn: number[]; // scale degrees of a second, different progression (scene 3)
+};
+
+const shortChord = (root: number, mode: number, degree: number) =>
+  chordLabel(root, mode, degree, 0, 0).replace(' major', '').replace(' minor', 'm').replace(' diminished', ' dim');
+
+/**
+ * A journey for a C ocarina played modally: the chords are all notes of C major, with the tonic
+ * on D, E, F, G or A. 1 a drone to improvise over, 2 a two-chord flip-flop, 3 a different short
+ * progression, 4 home with a fuller kit. Two bars per chord; no MidiDancer (the player is the melody).
+ */
+function modalJourney(spec: ModalSpec): Journey {
+  const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule, bass = noRule) => ({ bass, pad, drums });
+  const wander = { everyBars: 4, chance: 60, returnAfter: 3 };
+  const soft = {
+    Kick: { rhythm: rhythmIndex('Half time'), steps: 16, hits: 1, rotation: 0, velocity: 78, accentEvery: 0, keepFirst: false },
+    Shaker: { velocity: 45, probability: 75 },
+    'Low tom': { velocity: 66 },
+    'Mid tom': { velocity: 58 },
+  };
+  const e = { keyOffset: 0, mode: spec.mode };
+  const name = (degrees: number[]) => degrees.map((d) => shortChord(spec.tonic, spec.mode, d)).join(', ');
+  const scenes = [
+    // 1: a steady tonic drone (bass and fifths pad) to improvise over; soft hand drums wander in after 8 bars.
+    minorScene({ ...e, name: 'Drone', degrees: [1], barsPerChord: 1, follow: false, padStyle: 6, drums: ['Shaker', 'Low tom', 'Mid tom'], snare: false, evolve: wander, drumOverrides: soft, motion: motion(drumsRule(8, 0, 2, 0)) }),
+    // 2: a two-chord flip-flop, two bars each.
+    minorScene({ ...e, name: name(spec.flip), degrees: spec.flip, barsPerChord: 2, follow: true, drums: ['Kick', 'Shaker', 'Low tom', 'Mid tom'], snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 2)) }),
+    // 3: a different short progression; the bass and pad go steady together now and then.
+    minorScene({ ...e, name: name(spec.turn), degrees: spec.turn, barsPerChord: 2, follow: true, drums: ['Kick', 'Shaker', 'Low tom', 'Mid tom'], snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
+    // 4: home on the tonic chord with a fuller kit: kick, snare, hats, tambourine, shaker and toms.
+    minorScene({ ...e, name: 'Home, full kit', degrees: [1], barsPerChord: 1, follow: false, drums: ['Kick', 'Snare', 'Hat', 'Tambourine', 'Shaker', 'Low tom'], snare: true, drumOverrides: { Shaker: { velocity: 50 }, 'Low tom': { velocity: 70 } }, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
+  ];
+  return { ...captureJourney(defaultState), name: `Ocarina ${MODE_NAMES[spec.mode].split(' ')[0]}`, root: spec.tonic, bpm: spec.bpm, activeScene: 0, scenes };
+}
+
 export const STARTER_JOURNEYS: StarterJourney[] = [
   {
     name: 'Go with Guitar',
@@ -180,6 +221,26 @@ export const STARTER_JOURNEYS: StarterJourney[] = [
     name: 'Flute two-chord cycles',
     about: '90 BPM for a flute in G# minor / B. Scenes 1 and 2 the G# minor and B major drones. Scene 3 B and G#m back and forth. Scene 4 C#m and G#m back and forth. Two bars per chord.',
     build: fluteTwoChords,
+  },
+  {
+    name: 'Ocarina Dorian',
+    about: '88 BPM, C ocarina, tonic D (D Dorian, all white notes). Drone, then Dm and G, then Dm C G C, then home with a full kit.',
+    build: () => modalJourney({ tonic: 38, mode: 1, bpm: 88, flip: [1, 4], turn: [1, 7, 4, 7] }),
+  },
+  {
+    name: 'Ocarina Mixolydian',
+    about: '92 BPM, C ocarina, tonic G (G Mixolydian). Drone, then G and F, then G F C F, then home with a full kit.',
+    build: () => modalJourney({ tonic: 43, mode: 4, bpm: 92, flip: [1, 7], turn: [1, 7, 4, 7] }),
+  },
+  {
+    name: 'Ocarina Aeolian',
+    about: '80 BPM, C ocarina, tonic A (A minor). Drone, then Am and G, then Am F C G, then home with a full kit.',
+    build: () => modalJourney({ tonic: 33, mode: 5, bpm: 80, flip: [1, 7], turn: [1, 6, 3, 7] }),
+  },
+  {
+    name: 'Ocarina Lydian',
+    about: '84 BPM, C ocarina, tonic F (F Lydian, dreamy). Drone, then F and G, then F G C G, then home with a full kit.',
+    build: () => modalJourney({ tonic: 41, mode: 3, bpm: 84, flip: [1, 2], turn: [1, 2, 5, 2] }),
   },
 ];
 
