@@ -53,14 +53,14 @@ export type StarterJourney = { name: string; about: string; build: () => Journey
 
 /** "Go with Guitar": 80 BPM, C major's relative minor (A minor). */
 function goWithGuitar(): Journey {
-  const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule) => ({ bass: noRule, pad, drums });
+  const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule, bass = noRule) => ({ bass, pad, drums });
   const scenes = [
     // 1: bass drone and a steady Am chord; the drums come in after 16 bars.
     minorScene({ name: 'Intro', degrees: [1], barsPerChord: 1, follow: false, drums: ['Kick', 'Hat', 'Tambourine'], snare: false, motion: motion(drumsRule(16, 0, 2, 0)) }),
     // 2: F, G, Am (2 bars); snare on 2 and 4; the drums drop out for a while now and then.
     minorScene({ name: 'F, G, Am', degrees: [6, 7, 1, 1], barsPerChord: 1, follow: true, drums: ['Kick', 'Snare', 'Hat', 'Tambourine'], snare: true, motion: motion(drumsRule(0, 8, 8, 0)) }),
-    // 3: Dm, C, G, G; the pad flips to a steady fifths drone; the breakdown loses kick and snare.
-    minorScene({ name: 'Dm, C, G', degrees: [4, 3, 7, 7], barsPerChord: 1, follow: true, drums: ['Kick', 'Snare', 'Hat', 'Tambourine'], snare: true, motion: motion(drumsRule(0, 8, 8, 1), rule(8, 8, 0)) }),
+    // 3: Dm, C, G, G; the pad goes to a steady fifths drone and the bass goes steady too, together; the breakdown loses kick and snare.
+    minorScene({ name: 'Dm, C, G', degrees: [4, 3, 7, 7], barsPerChord: 1, follow: true, drums: ['Kick', 'Snare', 'Hat', 'Tambourine'], snare: true, motion: motion(drumsRule(0, 8, 8, 1), rule(8, 8, 0), rule(8, 8, 0)) }),
     // 4: home to Am, with drums; the breathing takes all the drums out for a long stretch.
     minorScene({ name: 'Home', degrees: [1], barsPerChord: 1, follow: false, drums: ['Kick', 'Snare', 'Hat', 'Tambourine'], snare: true, motion: motion(drumsRule(0, 8, 64, 0)) }),
   ];

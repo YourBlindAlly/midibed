@@ -53,3 +53,10 @@ describe('Go with Guitar starter journey', () => {
     expect(STARTER_JOURNEYS.length).toBeGreaterThan(0);
   });
 });
+
+it('scene 3: bass and pad both go steady together', () => {
+  const s3 = applyScene(addStarterJourney(defaultState, 0), addStarterJourney(defaultState, 0).scenes[2]);
+  expect(s3.motion.bass).toMatchObject({ baseBars: 8, altBars: 8, kind: 0 });
+  expect(s3.motion.pad).toMatchObject({ baseBars: 8, altBars: 8, kind: 0 });
+  expect(s3.drone.follow).toBe(true);
+});
