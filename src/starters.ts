@@ -13,6 +13,12 @@ type SceneSpec = {
   /** Semitones above the journey key; default -3 (the relative minor of a major journey key). */
   keyOffset?: number;
   mode?: number;
+  /** Pad chord type (STYLE_NAMES); default 0 = triad, 6 = fifth only. */
+  padStyle?: number;
+  /** Patterns that wander by themselves: change every N bars. Default off. */
+  evolve?: { everyBars: number; chance: number; returnAfter: number };
+  /** Settings laid over a drum after the standard ones, by drum name. */
+  drumOverrides?: Record<string, Record<string, number | boolean>>;
   barsPerChord: number;
   follow: boolean; // bass and pad follow the chords
   drums: string[]; // names of the drums that are on
@@ -33,8 +39,8 @@ function minorScene(spec: SceneSpec): SceneData {
     }
     if (d.name === 'Hat') return { ...d, enabled: on, rhythm: 0, steps: 16, hits: 11, rotation: 0, probability: 90 };
     if (d.name === 'Tambourine') return { ...d, enabled: on, rhythm: 0, steps: 16, hits: 6, rotation: 3, probability: 85 };
-    return { ...d, enabled: false };
-  });
+    return { ...d, enabled: on };
+  }).map((d) => ({ ...d, ...(spec.drumOverrides?.[d.name] ?? {}) }));
   const count = spec.degrees.length;
   return captureScene({
     ...b,
@@ -43,7 +49,8 @@ function minorScene(spec: SceneSpec): SceneData {
     drums,
     harmony: { ...b.harmony, mode: spec.mode ?? 5, preset: 0, count, degrees: [...spec.degrees, 1, 1, 1, 1].slice(0, 4), colors: [...(spec.colors ?? []), 0, 0, 0, 0].slice(0, 4), barsPerChord: spec.barsPerChord },
     drone: { ...b.drone, follow: spec.follow },
-    pad: { ...b.pad, follow: spec.follow },
+    pad: { ...b.pad, follow: spec.follow, style: spec.padStyle ?? b.pad.style },
+    evolve: spec.evolve ?? b.evolve,
     motion: { ...b.motion, preset: 0, ...spec.motion },
     dancer: { ...b.dancer, enabled: false },
     loops: { ...b.loops, enabled: false },
@@ -97,6 +104,36 @@ function eAndC(): Journey {
   return { ...captureJourney(defaultState), name: 'E and C', root: 40, bpm: 85, activeScene: 0, scenes };
 }
 
+/**
+ * "Flute in G# minor / B": 90 BPM, for a Native American flute in G# minor (its relative major is B).
+ * The journey key is G# so the home chord is G#m; the B-major drone scene moves the key up 3 semitones
+ * and uses Ionian. In G# Aeolian the degrees are 1 G#m, 3 B, 4 C#m, 6 E, 7 F# (major), so no colours are needed.
+ */
+function fluteGsharpB(): Journey {
+  const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule, bass = noRule) => ({ bass, pad, drums });
+  const wander = { everyBars: 4, chance: 60, returnAfter: 3 };
+  const soft = {
+    Kick: { rhythm: rhythmIndex('Half time'), steps: 16, hits: 1, rotation: 0, velocity: 78, accentEvery: 0, keepFirst: false },
+    Shaker: { velocity: 45, probability: 75 },
+    'Low tom': { velocity: 66 },
+    'Mid tom': { velocity: 58 },
+    'High tom': { velocity: 54 },
+  };
+  const droneKit = ['Shaker', 'Low tom', 'Mid tom'];
+  const groove = ['Kick', 'Shaker', 'Low tom', 'Mid tom'];
+  const scenes = [
+    // 1: a steady G# minor drone (bass and a fifths pad); soft hand drums wander in after 8 bars and keep changing.
+    minorScene({ name: 'G# minor drone', keyOffset: 0, mode: 5, degrees: [1], barsPerChord: 1, follow: false, padStyle: 6, drums: droneKit, snare: false, evolve: wander, drumOverrides: soft, motion: motion(drumsRule(8, 0, 2, 0)) }),
+    // 2: the same idea on B major (the relative major: 3 semitones up, Ionian).
+    minorScene({ name: 'B major drone', keyOffset: 3, mode: 0, degrees: [1], barsPerChord: 1, follow: false, padStyle: 6, drums: [...droneKit, 'High tom'], snare: false, evolve: wander, drumOverrides: soft, motion: motion(drumsRule(8, 0, 2, 0)) }),
+    // 3: B, G#m, C#m, F# (major, the turnaround), 2 bars each; the drums drop to the kick now and then.
+    minorScene({ name: 'B, G#m, C#m, F#', keyOffset: 0, mode: 5, degrees: [3, 1, 4, 7], barsPerChord: 2, follow: true, drums: groove, snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 2)) }),
+    // 4: a sister progression G#m, E, B, F#; the pad and bass both go steady together now and then.
+    minorScene({ name: 'G#m, E, B, F#', keyOffset: 0, mode: 5, degrees: [1, 6, 3, 7], barsPerChord: 2, follow: true, drums: groove, snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
+  ];
+  return { ...captureJourney(defaultState), name: 'Flute G# minor B', root: 44, bpm: 90, activeScene: 0, scenes };
+}
+
 export const STARTER_JOURNEYS: StarterJourney[] = [
   {
     name: 'Go with Guitar',
@@ -107,6 +144,11 @@ export const STARTER_JOURNEYS: StarterJourney[] = [
     name: 'E and C',
     about: '85 BPM, E major flip-flopping with C major. Scene 1 bass drone and one E chord, drums after 16 bars. Scene 2 E, C. Scene 3 C, E quicker. Scene 4 home.',
     build: eAndC,
+  },
+  {
+    name: 'Flute G# minor B',
+    about: '90 BPM for a flute in G# minor / B. Scene 1 G# minor drone, scene 2 B major drone, both with soft wandering hand drums. Scene 3 B, G#m, C#m, F#. Scene 4 G#m, E, B, F#. Two bars per chord.',
+    build: fluteGsharpB,
   },
 ];
 

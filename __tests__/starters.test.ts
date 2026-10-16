@@ -84,3 +84,33 @@ describe('E and C starter journey', () => {
     expect(s3.motion.pad.baseBars).toBe(8);
   });
 });
+
+describe('Flute G# minor B starter journey', () => {
+  const added = addStarterJourney(defaultState, 2);
+  const at = (i: number) => applyScene(added, added.scenes[i]);
+  const names = (i: number) => {
+    const s = at(i);
+    return s.harmony.degrees.slice(0, s.harmony.count).map((d, k) => chordLabel(keyRoot(s), s.harmony.mode, d, s.pad.style, s.harmony.colors[k]));
+  };
+  it('is 90 BPM with the right chords, two bars each', () => {
+    expect(added.bpm).toBe(90);
+    expect(names(0)[0].startsWith('G#')).toBe(true);
+    expect(names(2)[1]).toBe('G# minor');
+    expect(names(1)[0].startsWith('B')).toBe(true);
+    expect(names(2)[0]).toBe('B major');
+    expect(names(2).map((l) => l.split(' ')[0])).toEqual(['B', 'G#', 'C#', 'F#']);
+    expect(names(2)[3]).toBe('F# major');
+    expect(names(3).map((l) => l.split(' ')[0])).toEqual(['G#', 'E', 'B', 'F#']);
+    expect(at(2).harmony.barsPerChord).toBe(2);
+  });
+  it('drone scenes are steady with wandering soft hand drums', () => {
+    for (const i of [0, 1]) {
+      const s = at(i);
+      expect(s.drone.follow).toBe(false);
+      expect(s.pad.follow).toBe(false);
+      expect(s.evolve.everyBars).toBe(4);
+      expect(s.drums.find((d) => d.name === 'Kick')!.enabled).toBe(false);
+      expect(s.drums.find((d) => d.name === 'Low tom')!.enabled).toBe(true);
+    }
+  });
+});
