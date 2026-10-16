@@ -4,7 +4,7 @@ import { defaultSectionUi } from './sectionui';
 import { presetOwnsChannel } from './filters';
 import { clampOutputMode } from './outputmode';
 import { RHYTHMS, clampRhythm, rhythmMask } from './rhythms';
-import { LaneState, defaultLanes, lanesForEngine } from './looplib';
+import { LaneState, defaultLanes, lanesForEngine, parseLibrary, resolveLoopId } from './looplib';
 import { buildBassChords, buildPadChords, clampColor, clampMode, MAX_CHORDS } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
@@ -937,6 +937,42 @@ export function mergeDefaults<T>(def: T, raw: unknown): T {
 // Chord-loop settings used to live inside the pad. Carry saved ones over to
 // `harmony` (live settings and every scene) before merging, or they would be lost.
 const HARMONY_KEYS = ['mode', 'preset', 'count', 'degrees', 'barsPerChord'];
+
+/**
+ * Point lanes at the loops the library really has: a lane (live, in a scene, in a journey) that names a loop
+ * the library does not hold under that id but holds under another folder name gets that id. Returns the same
+ * object when nothing changes, so it is safe to run whenever the library changes.
+ */
+export function resolveLaneIds(s: BedState): BedState {
+  const lib = parseLibrary(s.loopLib);
+  if (lib.length === 0) return s;
+  let changed = false;
+  const fixLanes = (lanes: LaneState[] | undefined): LaneState[] | undefined => {
+    if (!Array.isArray(lanes)) return lanes;
+    let any = false;
+    const out = lanes.map((l) => {
+      const id = resolveLoopId(lib, l.loop);
+      if (id === l.loop) return l;
+      any = true;
+      return { ...l, loop: id };
+    });
+    if (any) changed = true;
+    return any ? out : lanes;
+  };
+  const fixScene = (sc: SceneData): SceneData => {
+    const lanes = fixLanes(sc.lanes);
+    return lanes === sc.lanes ? sc : { ...sc, lanes: lanes as LaneState[] };
+  };
+  const lanes = fixLanes(s.lanes) as LaneState[];
+  const scenes = s.scenes.map(fixScene);
+  const journeys = s.journeys.map((j) => {
+    const js = j.scenes.map(fixScene);
+    return js.some((x, i) => x !== j.scenes[i]) ? { ...j, scenes: js } : j;
+  });
+  if (journeys.some((x, i) => x !== s.journeys[i])) changed = true;
+  if (scenes.some((x, i) => x !== s.scenes[i])) changed = true;
+  return changed ? { ...s, lanes, scenes, journeys } : s;
+}
 
 /**
  * A lane saved with the short-lived `keepPitch` setting becomes `follow: !keepPitch` (walks the whole saved

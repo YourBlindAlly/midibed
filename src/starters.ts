@@ -2,6 +2,7 @@
 // plain defaults plus a few overrides, so it stays valid whenever a new setting is added.
 import { BedState, Journey, MAX_JOURNEYS, SceneData, applyJourney, captureJourney, captureScene, defaultState } from './config';
 import { MAX_CHORDS, MODE_NAMES, chordLabel } from './chords';
+import { LaneState, defaultLane } from './looplib';
 import { RHYTHMS } from './rhythms';
 
 const rhythmIndex = (name: string): number => Math.max(0, RHYTHMS.findIndex((r) => r.name === name));
@@ -256,12 +257,49 @@ export const STARTER_JOURNEYS: StarterJourney[] = [
   },
 ];
 
+const SHAKERZ_FOLDER = 'SHAKERZ flat FLAC 16 bit';
+const TAMBOREENE_FOLDER = 'TAMBOREENE flat FLAC 16 bit';
+// The tempos each flattened loop exists at (see the loops folders).
+const CAXIXI_TEMPOS = [50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160];
+const MARACAS_8THS_TEMPOS = [80, 90, 100, 110, 120, 130, 140, 150, 160];
+const TAMB_2AND4_TEMPOS = [60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160];
+
+/** The tempo in the list closest to this one; a tie goes to the higher tempo (the loop then plays a touch slower). */
+export function nearestTempo(list: number[], bpm: number): number {
+  return list.reduce((best, t) => (Math.abs(t - bpm) < Math.abs(best - bpm) || (Math.abs(t - bpm) === Math.abs(best - bpm) && t > best) ? t : best), list[0]);
+}
+
+/**
+ * Loop lanes for a journey at this tempo: lane 1 a caxixi pulse (quarter notes), lane 2 maracas in straight
+ * eighths, lane 3 a tambourine on 2 and 4. Each scene says which are playing: 1 the caxixi alone over the drone,
+ * 2 and 3 maracas and tambourine, 4 all three. The loops are named for the flattened folders in Rusty's Dropbox
+ * (SHAKERZ / TAMBOREENE); a lane stays quiet until those loops are imported (`resolveLaneIds` finds them even
+ * if the folders are called something else).
+ */
+export function loopLanesFor(bpm: number, scene: number): LaneState[] {
+  const caxixi = `${SHAKERZ_FOLDER}/CAXIXI QUARTERS ${nearestTempo(CAXIXI_TEMPOS, bpm)}bpm.flac`;
+  const maracas = `${SHAKERZ_FOLDER}/MARACAS STR 8THS ${nearestTempo(MARACAS_8THS_TEMPOS, bpm)}bpm.flac`;
+  const tambourine = `${TAMBOREENE_FOLDER}/TAMBOURINE 2 AND 4 ${nearestTempo(TAMB_2AND4_TEMPOS, bpm)}bpm.flac`;
+  const on = [[true, false, false], [false, true, true], [false, true, true], [true, true, true]][Math.max(0, Math.min(3, scene))];
+  return [
+    { ...defaultLane, loop: caxixi, on: on[0], level: 70, pan: -40 },
+    { ...defaultLane, loop: maracas, on: on[1], level: 80, pan: 40 },
+    { ...defaultLane, loop: tambourine, on: on[2], level: 70, pan: 0 },
+    { ...defaultLane },
+  ];
+}
+
+/** A journey with the loop lanes added to each of its four scenes. */
+export function withLoops(j: Journey): Journey {
+  return { ...j, scenes: j.scenes.map((sc, i) => ({ ...sc, lanes: loopLanesFor(j.bpm, i) })) };
+}
+
 /** Add a starter journey after the others and make it the active one. Does nothing when the list is full. */
 export function addStarterJourney(s: BedState, index: number): BedState {
   const starter = STARTER_JOURNEYS[index];
   if (!starter || s.journeys.length >= MAX_JOURNEYS) return s;
   const saved = s.journeys.map((j, i) => (i === s.activeJourney ? captureJourney(s) : j));
-  let journey = starter.build();
+  let journey = withLoops(starter.build());
   if (saved.some((j) => j.name === journey.name)) {
     let n = 2;
     while (saved.some((j) => j.name === `${starter.name} ${n}`)) n++;

@@ -194,3 +194,63 @@ it('Phrygian scene 4 is Em and C, breathing to a steady E with fifths', () => {
   const alt = j.pad.altChords[0] as number[];
   expect(alt.map((n) => n % 12).sort((a, b) => a - b)).toEqual([4, 11]);
 });
+
+describe('loops in the starter journeys', () => {
+  const fs = require('fs');
+  const folderOf = (id: string) => id.slice(0, id.indexOf('/'));
+  const fileOf = (id: string) => id.slice(id.indexOf('/') + 1);
+
+  it('every starter gets a caxixi, a maracas and a tambourine lane at the nearest tempo', () => {
+    const { loopLanesFor, nearestTempo } = require('../src/starters');
+    expect(nearestTempo([80, 90, 100], 85)).toBe(90);
+    expect(nearestTempo([80, 90, 100], 76)).toBe(80);
+    const l = loopLanesFor(88, 0);
+    expect(l[0].loop).toBe('SHAKERZ flat FLAC 16 bit/CAXIXI QUARTERS 90bpm.flac');
+    expect(l[1].loop).toBe('SHAKERZ flat FLAC 16 bit/MARACAS STR 8THS 90bpm.flac');
+    expect(l[2].loop).toBe('TAMBOREENE flat FLAC 16 bit/TAMBOURINE 2 AND 4 90bpm.flac');
+    expect(l.map((x: any) => x.on)).toEqual([true, false, false, false]);
+    expect(loopLanesFor(88, 1).map((x: any) => x.on)).toEqual([false, true, true, false]);
+    expect(loopLanesFor(88, 3).map((x: any) => x.on)).toEqual([true, true, true, false]);
+  });
+
+  it('adding a starter puts those lanes in all four scenes, using the journey tempo', () => {
+    for (let idx = 0; idx < STARTER_JOURNEYS.length; idx++) {
+      const added = addStarterJourney(defaultState, idx);
+      for (let i = 0; i < 4; i++) {
+        const lanes = applyScene(added, added.scenes[i]).lanes;
+        expect(lanes[0].loop).toContain(`${[50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160].reduce((b, t) => (Math.abs(t - added.bpm) < Math.abs(b - added.bpm) || (Math.abs(t - added.bpm) === Math.abs(b - added.bpm) && t > b) ? t : b), 50)}bpm`);
+        expect(lanes.filter((x) => x.on).length).toBe([1, 2, 2, 3][i]);
+      }
+    }
+  });
+
+  it('every loop a starter names exists in the flattened folders (when those are present on this machine)', () => {
+    const base = 'loops';
+    if (!fs.existsSync(`${base}/SHAKERZ flat FLAC 16 bit`)) return;
+    const missing: string[] = [];
+    for (let idx = 0; idx < STARTER_JOURNEYS.length; idx++) {
+      const added = addStarterJourney(defaultState, idx);
+      for (const sc of added.scenes) {
+        for (const lane of sc.lanes) {
+          if (lane.loop && !fs.existsSync(`${base}/${folderOf(lane.loop)}/${fileOf(lane.loop)}`)) missing.push(lane.loop);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it('lanes find their loops by file name when the folder is called something else', () => {
+    const { resolveLaneIds } = require('../src/config');
+    const added = addStarterJourney(defaultState, 0);
+    const wanted = added.scenes[0].lanes[0].loop as string;
+    const file = fileOf(wanted);
+    const lib = JSON.stringify([{ id: `My shakers/${file}`, name: file, folder: 'My shakers', file: 'x.flac', seconds: 9.6, bpm: 90, bars: 4, repeats: 1 }]);
+    const fixed = resolveLaneIds({ ...added, loopLib: lib });
+    expect(fixed.scenes[0].lanes[0].loop).toBe(`My shakers/${file}`);
+    expect(fixed.journeys[1].scenes[0].lanes[0].loop).toBe(`My shakers/${file}`);
+    // nothing to fix: the very same object comes back
+    expect(resolveLaneIds(fixed)).toBe(fixed);
+    // an empty library changes nothing
+    expect(resolveLaneIds(added)).toBe(added);
+  });
+});

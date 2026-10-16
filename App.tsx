@@ -27,6 +27,7 @@ import {
   duplicateJourney,
   keyRoot,
   newJourney,
+  resolveLaneIds,
   noteName,
   padIsSteadyFifths,
   parseFavorites,
@@ -856,6 +857,10 @@ export default function App() {
 
   // ---- Loop player
   const loopLib = parseLibrary(state.loopLib);
+  // Lanes (a starter journey's) that name a loop by file name find it when it is in the library under another folder name.
+  useEffect(() => {
+    setState((s) => resolveLaneIds(s));
+  }, [state.loopLib]);
   const loopFolders = folderNames(loopLib);
   const [laneBrowse, setLaneBrowse] = useState<number[]>([0, 0, 0, 0]);
   const [importNote, setImportNote] = useState('');

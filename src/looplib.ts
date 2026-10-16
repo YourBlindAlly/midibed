@@ -124,6 +124,19 @@ export function bestFit(loop: Pick<LibraryLoop, 'seconds' | 'bpm' | 'bars' | 're
   return { ...best, speed: speedFor(best.bars, best.repeats) };
 }
 
+/**
+ * The library id for a wanted loop id. A lane (a starter journey's, or one saved before the loops were moved
+ * to another folder) may name a loop as 'Some folder/File name.flac'; if the library has no loop with exactly
+ * that id but has exactly one with the same file name in another folder, that one is used. Otherwise the id
+ * is returned unchanged (the lane stays quiet until the loop is imported).
+ */
+export function resolveLoopId(lib: LibraryLoop[], id: string): string {
+  if (!id || lib.some((l) => l.id === id)) return id;
+  const file = id.slice(id.lastIndexOf('/') + 1).toLowerCase();
+  const same = lib.filter((l) => l.id.slice(l.id.lastIndexOf('/') + 1).toLowerCase() === file);
+  return same.length === 1 ? same[0].id : id;
+}
+
 let cacheKey = '';
 let cacheValue: LibraryLoop[] = [];
 
