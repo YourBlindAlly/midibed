@@ -8,6 +8,11 @@ const rhythmIndex = (name: string): number => Math.max(0, RHYTHMS.findIndex((r) 
 type SceneSpec = {
   name: string;
   degrees: number[];
+  /** Per chord: 0 from the scale, 1 major, 2 minor (see COLOR_NAMES). Default all from the scale. */
+  colors?: number[];
+  /** Semitones above the journey key; default -3 (the relative minor of a major journey key). */
+  keyOffset?: number;
+  mode?: number;
   barsPerChord: number;
   follow: boolean; // bass and pad follow the chords
   drums: string[]; // names of the drums that are on
@@ -34,9 +39,9 @@ function minorScene(spec: SceneSpec): SceneData {
   return captureScene({
     ...b,
     sceneName: spec.name,
-    keyOffset: -3,
+    keyOffset: spec.keyOffset ?? -3,
     drums,
-    harmony: { ...b.harmony, mode: 5, preset: 0, count, degrees: [...spec.degrees, 1, 1, 1, 1].slice(0, 4), colors: [0, 0, 0, 0], barsPerChord: spec.barsPerChord },
+    harmony: { ...b.harmony, mode: spec.mode ?? 5, preset: 0, count, degrees: [...spec.degrees, 1, 1, 1, 1].slice(0, 4), colors: [...(spec.colors ?? []), 0, 0, 0, 0].slice(0, 4), barsPerChord: spec.barsPerChord },
     drone: { ...b.drone, follow: spec.follow },
     pad: { ...b.pad, follow: spec.follow },
     motion: { ...b.motion, preset: 0, ...spec.motion },
@@ -74,11 +79,34 @@ function goWithGuitar(): Journey {
   };
 }
 
+/** "E and C": 85 BPM, E (major) flip-flopping with C major, built as E Aeolian with chord 1 forced major. */
+function eAndC(): Journey {
+  const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule, bass = noRule) => ({ bass, pad, drums });
+  const e = { keyOffset: 0, mode: 5 };
+  const all = ['Kick', 'Snare', 'Hat', 'Tambourine'];
+  const scenes = [
+    // 1: bass drone and a steady E major chord; the drums come in after 16 bars.
+    minorScene({ ...e, name: 'Intro', degrees: [1], colors: [1], barsPerChord: 1, follow: false, drums: ['Kick', 'Hat', 'Tambourine'], snare: false, motion: motion(drumsRule(16, 0, 2, 0)) }),
+    // 2: E, C, two bars each; snare on 2 and 4; the drums drop out now and then.
+    minorScene({ ...e, name: 'E, C', degrees: [1, 6], colors: [1, 0], barsPerChord: 2, follow: true, drums: all, snare: true, motion: motion(drumsRule(0, 8, 8, 0)) }),
+    // 3: C, E, C, E one bar each (the flip-flop gets quicker); bass and pad go steady together; the breakdown loses kick and snare.
+    minorScene({ ...e, name: 'C, E quick', degrees: [6, 1, 6, 1], colors: [0, 1, 0, 1], barsPerChord: 1, follow: true, drums: all, snare: true, motion: motion(drumsRule(0, 8, 8, 1), rule(8, 8, 0), rule(8, 8, 0)) }),
+    // 4: home to a steady E major, with drums; the breathing takes all the drums out for a long stretch.
+    minorScene({ ...e, name: 'Home', degrees: [1], colors: [1], barsPerChord: 1, follow: false, drums: all, snare: true, motion: motion(drumsRule(0, 8, 64, 0)) }),
+  ];
+  return { ...captureJourney(defaultState), name: 'E and C', root: 40, bpm: 85, activeScene: 0, scenes };
+}
+
 export const STARTER_JOURNEYS: StarterJourney[] = [
   {
     name: 'Go with Guitar',
     about: '80 BPM in A minor. Scene 1 bass drone and one chord, drums after 16 bars. Scene 2 F, G, Am. Scene 3 Dm, C, G, G. Scene 4 home.',
     build: goWithGuitar,
+  },
+  {
+    name: 'E and C',
+    about: '85 BPM, E major flip-flopping with C major. Scene 1 bass drone and one E chord, drums after 16 bars. Scene 2 E, C. Scene 3 C, E quicker. Scene 4 home.',
+    build: eAndC,
   },
 ];
 

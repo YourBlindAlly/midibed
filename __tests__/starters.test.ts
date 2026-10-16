@@ -60,3 +60,27 @@ it('scene 3: bass and pad both go steady together', () => {
   expect(s3.motion.pad).toMatchObject({ baseBars: 8, altBars: 8, kind: 0 });
   expect(s3.drone.follow).toBe(true);
 });
+
+describe('E and C starter journey', () => {
+  const added = addStarterJourney(defaultState, 1);
+  const names = (i: number) => {
+    const s = applyScene(added, added.scenes[i]);
+    return s.harmony.degrees.slice(0, s.harmony.count).map((d, k) => chordLabel(keyRoot(s), s.harmony.mode, d, s.pad.style, s.harmony.colors[k]));
+  };
+  it('is 85 BPM on E and plays E major and C major', () => {
+    expect(added.journeyName).toBe('E and C');
+    expect(added.bpm).toBe(85);
+    expect(added.drone.root % 12).toBe(4);
+    expect(names(0)).toHaveLength(1);
+    expect(names(0)[0]).toMatch(/^E/);
+    expect(names(0)[0]).toBe('E major');
+    expect(names(1).map((l) => l.split(' ')[0])).toEqual(['E', 'C']);
+    expect(names(2).map((l) => l.split(' ')[0])).toEqual(['C', 'E', 'C', 'E']);
+  });
+  it('has the drum intro and steady scene 3 breathing', () => {
+    expect(applyScene(added, added.scenes[0]).motion.drums.introBars).toBe(16);
+    const s3 = applyScene(added, added.scenes[2]);
+    expect(s3.motion.bass.baseBars).toBe(8);
+    expect(s3.motion.pad.baseBars).toBe(8);
+  });
+});
