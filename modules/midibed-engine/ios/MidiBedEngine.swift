@@ -62,6 +62,9 @@ struct MidiBedBassRhythm: Decodable {
   var lengthPct: Double     // percent of the distance to the next kick hit
   var notes: Int            // 0 root only, 1 all the bass notes, 2 root with the octave on every other note
   var skip: Int             // mode 1: 0 every kick, 1 every other kick
+  var colorChance: Double?  // 0...1: a note after the first of each bar is a colour note instead of the root
+  var colorNotes: [[Int]]?  // the colour notes allowed, per chord (parallel to `chords`)
+  var altColorNotes: [[Int]]? // the same for `altChords`
 }
 
 struct MidiBedDroneConfig: Decodable {
@@ -1316,6 +1319,17 @@ final class MidiBedEngine {
     default: notes = [root]
     }
     bassHitCount += 1
+    // Colour notes: now and then something other than the root (never on the bar's first step).
+    if let chance = r.colorChance, chance > 0, step % 16 != 0 {
+      let useAlt = bassRT.alt && cfg.motion.bass.kind == 0 && !cfg.drone.altChords.isEmpty
+      let colours = (useAlt ? r.altColorNotes : r.colorNotes) ?? []
+      if !colours.isEmpty {
+        let own = colours[chordIndex % colours.count]
+        if !own.isEmpty, Double.random(in: 0..<1, using: &rng) < chance {
+          notes = [own[Int.random(in: 0..<own.count, using: &rng)]]
+        }
+      }
+    }
     notes = notes.map { max(0, min(127, $0)) }
     let ch = UInt8(max(0, min(15, cfg.drone.channel)))
     var vel = Double(cfg.drone.velocity)

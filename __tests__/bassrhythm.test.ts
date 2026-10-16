@@ -57,7 +57,7 @@ describe('bass rhythm in the settings', () => {
   it('starts as a held drone, is sent to the engine, and is saved with the scene', () => {
     expect(defaultState.drone.rhythm).toBe(0);
     const s = { ...defaultState, drone: { ...defaultState.drone, rhythm: 2, rhythmLength: 50, rhythmNotes: 2, rhythmSkip: 1 } };
-    expect(JSON.parse(toEngineJson(s)).drone.rhythm).toEqual({ mode: 2, lengthPct: 50, notes: 2, skip: 1 });
+    expect(JSON.parse(toEngineJson(s)).drone.rhythm).toMatchObject({ mode: 2, lengthPct: 50, notes: 2, skip: 1 });
     const copied = copyScenePart(s, 1, 2);
     expect(applyScene(copied, copied.scenes[1]).drone.rhythm).toBe(2);
   });
@@ -79,5 +79,77 @@ describe('bass rhythm in the settings', () => {
     expect(swift).toContain('private func stepBassRhythm(');
     expect(swift).toContain('struct MidiBedBassRhythm');
     expect(swift).toContain('var rhythm: MidiBedBassRhythm?');
+  });
+});
+
+describe('bass colour notes', () => {
+  const { buildBassColorNotes } = require('../src/bassrhythm');
+  const { bassColorNotes } = require('../src/config');
+  const aMinor = {
+    root: 33, // A1
+    mode: 5, // Aeolian
+    degrees: [1, 6, 7, 4],
+    count: 4,
+    follow: true,
+    octave: false,
+    fifth: false,
+    below: true,
+    stepKind: 0,
+    relRoot: true,
+    relThird: true,
+  };
+
+  it('over A minor: G below, C (root of the related major) and E (its third)', () => {
+    const am = buildBassColorNotes(aMinor)[0];
+    expect(am).toEqual([31, 36, 40]); // G1, C2, E2
+  });
+
+  it('over a major chord (F in A minor): the step below, the related minor root D, and its own third A', () => {
+    const f = buildBassColorNotes(aMinor)[1];
+    // F1 is 29; whole step below 27, related minor root 26 (D), the chord's third 33 (A)
+    expect(f).toEqual([27, 26, 33]);
+  });
+
+  it('the next note down the scale: a half step where the scale has one', () => {
+    const scale = buildBassColorNotes({ ...aMinor, stepKind: 1, relRoot: false, relThird: false });
+    expect(scale[0]).toEqual([31]); // A minor: G is a whole step below A
+    expect(scale[1]).toEqual([28]); // F in A minor: E is a half step below F
+    const cMajor = buildBassColorNotes({ ...aMinor, root: 36, mode: 0, degrees: [1], count: 1, stepKind: 1, relRoot: false, relThird: false });
+    expect(cMajor[0]).toEqual([35]); // B under C
+    const whole = buildBassColorNotes({ ...aMinor, root: 36, mode: 0, degrees: [1], count: 1, stepKind: 0, relRoot: false, relThird: false });
+    expect(whole[0]).toEqual([34]); // B-flat under C
+  });
+
+  it('only the ticked kinds are made', () => {
+    expect(buildBassColorNotes({ ...aMinor, relRoot: false, relThird: false })[0]).toEqual([31]);
+    expect(buildBassColorNotes({ ...aMinor, below: false, relThird: false })[0]).toEqual([36]);
+    expect(buildBassColorNotes({ ...aMinor, below: false, relRoot: false, relThird: false })[0]).toEqual([]);
+  });
+
+  it('a steady drone has one list, on the key root', () => {
+    const steady = buildBassColorNotes({ ...aMinor, follow: false });
+    expect(steady).toHaveLength(1);
+    expect(steady[0]).toEqual([31, 36, 40]);
+  });
+
+  it('is sent to the engine only when the rhythm is on and the chance is above zero', () => {
+    const base = { ...defaultState, drone: { ...defaultState.drone, rhythm: 1, colorChance: 30, colorBelow: true, colorRelRoot: true, colorRelThird: false, follow: true } };
+    const j = JSON.parse(toEngineJson(base)).drone.rhythm;
+    expect(j.colorChance).toBeCloseTo(0.3);
+    expect(j.colorNotes).toHaveLength(base.harmony.count);
+    expect(j.altColorNotes).toHaveLength(1); // the other version of a following bass is one steady note
+    expect(bassColorNotes({ ...base, drone: { ...base.drone, colorChance: 0 } })).toEqual([]);
+    expect(bassColorNotes({ ...base, drone: { ...base.drone, rhythm: 0 } })).toEqual([]);
+  });
+
+  it('is saved per scene, off by default, and the Swift engine reads it', () => {
+    expect(defaultState.drone.colorChance).toBe(0);
+    const old: any = JSON.parse(JSON.stringify(defaultState));
+    delete old.drone.colorChance;
+    for (const sc of old.scenes) delete sc.drone.colorChance;
+    expect(migrateState(old).scenes[1].drone.colorChance).toBe(0);
+    const swift = require('fs').readFileSync('modules/midibed-engine/ios/MidiBedEngine.swift', 'utf8');
+    expect(swift).toContain('var colorNotes: [[Int]]?');
+    expect(swift).toContain('step % 16 != 0');
   });
 });

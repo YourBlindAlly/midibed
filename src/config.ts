@@ -8,6 +8,7 @@ import { LaneState, defaultLanes, lanesForEngine, parseLibrary, resolveLoopId } 
 import { buildBassChords, buildPadChords, clampColor, clampMode, MAX_CHORDS } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
+import { buildBassColorNotes } from './bassrhythm';
 import { KEYS_RHYTHMS, KeysState, clampKeysRhythm, defaultKeys, keysMask } from './keys';
 import type { Layer } from './shortcuts';
 import { cycleBarsFromOldSpeed, phaseOffset, smoothBeatsFromOldSmooth } from './wander';
@@ -98,6 +99,14 @@ export type DroneState = {
   rhythmNotes: number;
   /** 0 every kick, 1 every other kick (mode 1). */
   rhythmSkip: number;
+  /** Percent of the rhythmic notes (after the first of each bar) that play a colour note instead of the root. 0 = never. */
+  colorChance: number;
+  /** Colour notes allowed: a step below the root; the root of the related key; the third of the related key. */
+  colorBelow: boolean;
+  /** 0 a whole step below, 1 the next note down the scale. */
+  colorStep: number;
+  colorRelRoot: boolean;
+  colorRelThird: boolean;
 };
 
 export type WandererState = {
@@ -372,7 +381,7 @@ export type SceneData = {
   keyOffset: number;
   swing: number;
   percussion: boolean;
-  drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow' | 'rhythm' | 'rhythmLength' | 'rhythmNotes' | 'rhythmSkip'>;
+  drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow' | 'rhythm' | 'rhythmLength' | 'rhythmNotes' | 'rhythmSkip' | 'colorChance' | 'colorBelow' | 'colorStep' | 'colorRelRoot' | 'colorRelThird'>;
   harmony: HarmonyState;
   motion: MotionState;
   advance: AdvanceRule;
@@ -415,6 +424,11 @@ export function captureScene(s: SceneSource): SceneData {
       rhythmLength: s.drone.rhythmLength,
       rhythmNotes: s.drone.rhythmNotes,
       rhythmSkip: s.drone.rhythmSkip,
+      colorChance: s.drone.colorChance,
+      colorBelow: s.drone.colorBelow,
+      colorStep: s.drone.colorStep,
+      colorRelRoot: s.drone.colorRelRoot,
+      colorRelThird: s.drone.colorRelThird,
     },
     harmony: { ...s.harmony, degrees: [...s.harmony.degrees], colors: [...s.harmony.colors] },
     motion: { preset: s.motion.preset, bass: { ...s.motion.bass }, pad: { ...s.motion.pad }, drums: { ...s.motion.drums } },
@@ -787,6 +801,11 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     rhythmLength: 70,
     rhythmNotes: 0,
     rhythmSkip: 0,
+    colorChance: 0,
+    colorBelow: true,
+    colorStep: 0,
+    colorRelRoot: false,
+    colorRelThird: false,
   },
   wanderers: [
     { name: 'Cutoff', enabled: true, cc: 74, channel: 0, min: 15, max: 105, cycleBars: 8, looseness: 50, phase: 0, smoothBeats: 4, opposes: -1, opposeAmount: 70 },
@@ -962,6 +981,26 @@ export function droneChords(s: BedState): number[][] {
     follow: s.drone.follow,
     octave: s.drone.octave,
     fifth: s.drone.fifth,
+  });
+}
+
+/** The bass colour notes for each chord (see bassrhythm.ts); `alt` is the other version (follow <-> steady) used while the bass breathes. */
+export function bassColorNotes(s: BedState, alt = false): number[][] {
+  if (s.drone.colorChance <= 0 || s.drone.rhythm === 0) return [];
+  const follow = alt ? !s.drone.follow : s.drone.follow;
+  return buildBassColorNotes({
+    root: keyRoot(s),
+    mode: s.harmony.mode,
+    degrees: s.harmony.degrees,
+    count: s.harmony.count,
+    colors: s.harmony.colors,
+    follow,
+    octave: s.drone.octave,
+    fifth: s.drone.fifth,
+    below: s.drone.colorBelow,
+    stepKind: s.drone.colorStep,
+    relRoot: s.drone.colorRelRoot,
+    relThird: s.drone.colorRelThird,
   });
 }
 
@@ -1303,7 +1342,15 @@ export function toEngineJson(s: BedState): string {
       altChords: droneAltChords(s),
       velocity: s.drone.velocity,
       retriggerBars: s.drone.retriggerBars,
-      rhythm: { mode: s.drone.rhythm, lengthPct: s.drone.rhythmLength, notes: s.drone.rhythmNotes, skip: s.drone.rhythmSkip },
+      rhythm: {
+        mode: s.drone.rhythm,
+        lengthPct: s.drone.rhythmLength,
+        notes: s.drone.rhythmNotes,
+        skip: s.drone.rhythmSkip,
+        colorChance: s.drone.colorChance / 100,
+        colorNotes: bassColorNotes(s, false),
+        altColorNotes: bassColorNotes(s, true),
+      },
     },
     pad: {
       enabled: s.solo ? s.solo === 'pad' : s.pad.enabled,

@@ -1,4 +1,4 @@
-import { BASS_NOTES_NAMES, BASS_RHYTHM_NAMES, BASS_SKIP_NAMES } from './src/bassrhythm';
+import { BASS_NOTES_NAMES, BASS_RHYTHM_NAMES, BASS_SKIP_NAMES, COLOR_STEP_NAMES } from './src/bassrhythm';
 import { KEYS_RHYTHMS, KeysState, keysPatternText } from './src/keys';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -1575,6 +1575,34 @@ export default function App() {
                   format={(v) => BASS_NOTES_NAMES[v]}
                   hint="All the bass notes plays the root with the octave and fifth switched on above"
                 />
+                <Stepper
+                  label="Bass colour notes"
+                  value={state.drone.colorChance}
+                  onChange={(v) => patchDrone({ colorChance: v })}
+                  min={0}
+                  max={100}
+                  step={5}
+                  format={(v) => (v === 0 ? 'off' : `${v} percent of the notes`)}
+                  hint="Now and then the bass plays a different note instead of the root: a step below it, or a note of the related key. The first note of each bar always stays on the root"
+                />
+                {state.drone.colorChance > 0 && (
+                  <>
+                    <Toggle label="Colour: a step below the root" value={state.drone.colorBelow} onChange={(v) => patchDrone({ colorBelow: v })} hint="In A minor, that is G" />
+                    {state.drone.colorBelow && (
+                      <Stepper
+                        label="The step below is"
+                        value={state.drone.colorStep}
+                        onChange={(v) => patchDrone({ colorStep: v })}
+                        min={0}
+                        max={COLOR_STEP_NAMES.length - 1}
+                        format={(v) => COLOR_STEP_NAMES[v]}
+                        hint="A whole step is always two semitones down. The next note down the scale stays inside the key: a half step in a major key (B under C), a whole step in a minor key"
+                      />
+                    )}
+                    <Toggle label="Colour: the root of the related key" value={state.drone.colorRelRoot} onChange={(v) => patchDrone({ colorRelRoot: v })} hint="Over A minor, C, the root of the related major. Over a major chord such as C, A, the root of the related minor" />
+                    <Toggle label="Colour: the third of the related key" value={state.drone.colorRelThird} onChange={(v) => patchDrone({ colorRelThird: v })} hint="Over A minor, E, the third of the related major. Over a major chord, the chord's own third" />
+                  </>
+                )}
                 {state.drone.rhythm === 1 && (
                   <Stepper
                     label="Bass uses"
