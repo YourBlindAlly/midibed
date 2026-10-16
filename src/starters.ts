@@ -247,6 +247,11 @@ export const STARTER_JOURNEYS: StarterJourney[] = [
     about: '90 BPM, C ocarina, tonic C (C major). Drone, then C and F, then C G Am F, then home with a full kit.',
     build: () => modalJourney({ tonic: 36, mode: 0, bpm: 90, flip: [1, 4], turn: [1, 5, 6, 4] }),
   },
+  {
+    name: 'Ocarina Phrygian',
+    about: '76 BPM, C ocarina, tonic E (E Phrygian, dark and a little Spanish). Drone, then Em and F, then Em F Em D, then home with a full kit.',
+    build: () => modalJourney({ tonic: 40, mode: 2, bpm: 76, flip: [1, 2], turn: [1, 2, 1, 7] }),
+  },
 ];
 
 /** Add a starter journey after the others and make it the active one. Does nothing when the list is full. */

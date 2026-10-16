@@ -154,6 +154,7 @@ describe('Ocarina modal starter journeys (all notes of C major)', () => {
     [6, 'Ocarina Aeolian', 'A', 80, ['A', 'G'], ['A', 'F', 'C', 'G']],
     [7, 'Ocarina Lydian', 'F', 84, ['F', 'G'], ['F', 'G', 'C', 'G']],
     [8, 'Ocarina Ionian', 'C', 90, ['C', 'F'], ['C', 'G', 'A', 'F']],
+    [9, 'Ocarina Phrygian', 'E', 76, ['E', 'F'], ['E', 'F', 'E', 'D']],
   ];
   it.each(cases)('journey %i %s: tempo, chords, and no notes outside C major', (idx, name, tonic, bpm, flip, turn) => {
     const added = addStarterJourney(defaultState, idx);
