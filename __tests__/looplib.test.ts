@@ -21,6 +21,12 @@ describe('loop names, lengths and the library', () => {
     expect(tempoFromName('068 BPM (Midwest Ballad)')).toBe(68);
     expect(tempoFromName('Kick.wav')).toBeNull();
     expect(tempoFromName('Loop_999.wav')).toBeNull();
+    // the tempo is the right-most standalone number from 40 to 220, so index numbers are skipped
+    expect(tempoFromName('Set126-01 ArabicPerc - Darabouka_01_126.flac')).toBe(126);
+    expect(tempoFromName('Set70-04 Taikobongos - Taikobongos_70_Bigtoms.flac')).toBe(70);
+    expect(tempoFromName('Single Cajun - Cajon_90_12.flac')).toBe(90);
+    expect(tempoFromName('Set90-1 StrangeConga - Bongos_90.flac')).toBe(90);
+    expect(tempoFromName('Single Swish EFX Timeless - Swish_EFX_Timeless_07.flac')).toBeNull();
   });
 
   it('works out whole bars from length and tempo, and repeats for loops shorter than a bar', () => {

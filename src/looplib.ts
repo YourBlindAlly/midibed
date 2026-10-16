@@ -50,17 +50,22 @@ export function isAudioFile(name: string): boolean {
   return AUDIO.test(name) && !name.startsWith('.') && !name.startsWith('._');
 }
 
-/** Tempo from a loop's name: '90bpm', '068 BPM', or a trailing number like 'PL_Conga_138_01.wav'. */
+/**
+ * Tempo from a loop's name: '90bpm' or '068 BPM' first; otherwise the right-most whole number of two or three
+ * digits between 40 and 220 that stands on its own between _, - or spaces ('PL_Conga_138_01' is 138, because
+ * 01 is too small to be a tempo; 'Darabouka_01_126' is 126; 'Taikobongos_70_Bigtoms' is 70).
+ */
 export function tempoFromName(name: string): number | null {
   const explicit = /(\d{2,3})\s*bpm/i.exec(name);
   if (explicit) {
     const n = Number(explicit[1]);
     return n >= 40 && n <= 220 ? n : null;
   }
-  const trailing = /_(\d{2,3})(?:_\d+)?\.[A-Za-z0-9]+$/.exec(name);
-  if (trailing) {
-    const n = Number(trailing[1]);
-    return n >= 40 && n <= 220 ? n : null;
+  const stem = name.replace(/\.[A-Za-z0-9]+$/, '');
+  const tokens = stem.split(/[_\-\s]+/).filter((tok) => /^\d{2,3}$/.test(tok));
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const n = Number(tokens[i]);
+    if (n >= 40 && n <= 220) return n;
   }
   return null;
 }
