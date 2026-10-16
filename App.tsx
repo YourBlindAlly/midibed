@@ -48,7 +48,7 @@ import {
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
-import { BAR_CHOICES, LANE_COUNT, LibraryLoop, NEAR_NAMES, filterLoops, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
+import { BAR_CHOICES, LANE_COUNT, LibraryLoop, NEAR_NAMES, bestFit, filterLoops, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -2247,8 +2247,16 @@ export default function App() {
                   onChange={(v) => patchLane(i, { bars: BAR_CHOICES[Math.max(0, Math.min(BAR_CHOICES.length - 1, v))] })}
                   min={0}
                   max={BAR_CHOICES.length - 1}
-                  format={(v) => (v === 0 ? `as the file says${current ? `: ${current.bars} bars` : ''}` : `${BAR_CHOICES[v]} ${BAR_CHOICES[v] === 1 ? 'bar' : 'bars'}`)}
-                  hint="How many bars the loop is stretched or squeezed to fill. Change it if a loop sounds the wrong speed"
+                  format={(v) => {
+                    const c = BAR_CHOICES[v];
+                    if (c > 0) return `${c} ${c === 1 ? 'bar' : 'bars'}`;
+                    if (!current) return c < 0 ? 'best fit' : 'as the file says';
+                    if (c === 0) return `as the file says: ${current.bars} ${current.bars === 1 ? 'bar' : 'bars'}`;
+                    const fit = bestFit(current, state.bpm);
+                    const pct = Math.round(Math.abs(fit.speed - 1) * 100);
+                    return `best fit: ${fit.bars} ${fit.bars === 1 ? 'bar' : 'bars'}${fit.repeats > 1 ? `, ${fit.repeats} times` : ''}, ${pct === 0 ? 'no speed change' : `${pct} percent ${fit.speed > 1 ? 'faster' : 'slower'}`}`;
+                  }}
+                  hint="Best fit picks the length, or half or double it, that needs the smallest speed change at this tempo. As the file says uses the length worked out from its name. Or choose the bars yourself"
                 />
                 <Stepper
                   label={`Lane ${i + 1} level`}

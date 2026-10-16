@@ -1113,7 +1113,7 @@ export function toEngineJson(s: BedState): string {
     filterHold: s.filterHold,
     sceneChangeAt: s.sceneChangeAt,
     // The Loop player layer: off (or another layer soloed) silences every lane.
-    lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster).map((l) => ({ ...l, on: l.on && (s.solo ? s.solo === 'player' : s.playerOn) })),
+    lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster, s.bpm).map((l) => ({ ...l, on: l.on && (s.solo ? s.solo === 'player' : s.playerOn) })),
     advance: {
       mode: s.advance.mode,
       bars: advanceBars(s.advance, s.harmony),

@@ -1,4 +1,4 @@
-import { BAR_CHOICES, LANE_COUNT, MATCH_FALLBACK, addToLibrary, matchGain, barsFromLength, defaultLanes, folderNames, isAudioFile, lanesForEngine, loopPath, parseLibrary, setLoopDir, tempoFromName } from '../src/looplib';
+import { BAR_CHOICES, bestFit, LANE_COUNT, MATCH_FALLBACK, addToLibrary, matchGain, barsFromLength, defaultLanes, folderNames, isAudioFile, lanesForEngine, loopPath, parseLibrary, setLoopDir, tempoFromName } from '../src/looplib';
 import { copyScenePart, defaultState, migrateState, switchScene, toEngineJson } from '../src/config';
 
 const entry = (over: Partial<ReturnType<typeof parseLibrary>[number]> = {}) => ({
@@ -57,7 +57,8 @@ describe('lanes', () => {
     expect(LANE_COUNT).toBe(4);
     expect(defaultState.lanes).toHaveLength(4);
     expect(defaultState.lanes.every((l) => l.loop === '' && !l.on)).toBe(true);
-    expect(BAR_CHOICES[0]).toBe(0);
+    expect(BAR_CHOICES[0]).toBe(-1);
+    expect(BAR_CHOICES[1]).toBe(0);
   });
 
   it('reach the engine with a path, bars, repeats and 0-1 units, and an empty lane never plays', () => {
@@ -222,5 +223,52 @@ describe('finding loops', () => {
 
   it('combines the filters', () => {
     expect(f({ near: 1, text: 'bongos' })).toEqual(['Set1 - Bongos_90']);
+  });
+});
+
+describe('best fit length', () => {
+  const loop = (bpm: number | null, seconds: number, bars: number, repeats = 1) => ({ seconds, bpm, bars, repeats });
+
+  it('keeps a loop that is already near the tempo', () => {
+    const f = bestFit(loop(90, 10.667, 4), 88);
+    expect(f.bars).toBe(4);
+    expect(f.speed).toBeCloseTo(88 / 90, 2);
+  });
+
+  it('plays a 170 BPM loop as half the bars at 88 BPM, and a 44 BPM loop as double', () => {
+    const fast = bestFit(loop(170, (16 * 60) / 170, 4), 88); // 4 bars at 170
+    expect(fast.bars).toBe(2);
+    expect(Math.abs(fast.speed - 1)).toBeLessThan(0.05);
+    const slow = bestFit(loop(44, (16 * 60) / 44, 4), 88);
+    expect(slow.bars).toBe(8);
+    expect(Math.abs(slow.speed - 1)).toBeLessThan(0.05);
+  });
+
+  it('picks the simplest of equal fits, and changes the repeats for a loop shorter than a bar', () => {
+    // two beats at 90 BPM played twice per bar, at 180 BPM: one bar at normal speed is as good as two bars
+    // of two repeats, and the shorter wins
+    const f = bestFit(loop(90, 1.333, 1, 2), 180);
+    expect(f).toMatchObject({ bars: 1, repeats: 1 });
+    expect(Math.abs(f.speed - 1)).toBeLessThan(0.01);
+    // a one-beat loop at 90 BPM: at 45 BPM a bar is 5.33 s, which is eight of its repeats at normal speed
+    expect(bestFit(loop(90, 0.667, 1, 4), 45)).toMatchObject({ bars: 1, repeats: 8 });
+  });
+
+  it('keeps the library length when the tempo is not known', () => {
+    expect(bestFit(loop(null, 10, 4), 88)).toMatchObject({ bars: 4, repeats: 1 });
+  });
+
+  it('is what a lane set to best fit sends, while a chosen length still wins', () => {
+    setLoopDir('file:///x/loops/');
+    const lib = JSON.stringify([entry({ id: 'Fast/170', file: 'f.flac', bpm: 170, seconds: (16 * 60) / 170, bars: 4 })]);
+    const lanes = defaultLanes();
+    lanes[0] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: -1 };
+    lanes[1] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 0 };
+    lanes[2] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 8 };
+    const out = lanesForEngine(lanes, lib, 100, 88);
+    expect(out[0].bars).toBe(2);
+    expect(out[1].bars).toBe(4);
+    expect(out[2].bars).toBe(8);
+    setLoopDir('');
   });
 });

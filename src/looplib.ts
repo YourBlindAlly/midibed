@@ -37,13 +37,13 @@ export type LaneState = {
   level: number;
   /** -100 (left) ... 100 (right) */
   pan: number;
-  /** 0 = what the library says, else 1-16 bars */
+  /** -1 = best fit (whole, half or double the bars, whichever needs the smallest speed change), 0 = what the file's name and length say, else 1-16 bars */
   bars: number;
 };
 
-export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: 0 };
+export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1 };
 export const defaultLanes = (): LaneState[] => Array.from({ length: LANE_COUNT }, () => ({ ...defaultLane }));
-export const BAR_CHOICES = [0, 1, 2, 4, 8, 16];
+export const BAR_CHOICES = [-1, 0, 1, 2, 4, 8, 16];
 
 const AUDIO = /\.(wav|wave|aif|aiff|caf|mp3|m4a|flac)$/i;
 export function isAudioFile(name: string): boolean {
@@ -80,6 +80,34 @@ export function barsFromLength(seconds: number, bpm: number | null): { bars: num
   if (beats >= 3.5) return { bars: Math.max(1, Math.round(beats / 4)), repeats: 1 };
   const repeats = Math.max(1, Math.round(4 / Math.max(0.5, beats)));
   return { bars: 1, repeats };
+}
+
+/**
+ * Best fit: of the loop's own length, half of it and double it (and, for a loop shorter than a bar, more or
+ * fewer repeats in the bar), the one that needs the smallest speed change to fill its bars at the journey
+ * tempo. A 170 BPM loop at 88 BPM comes out as half the bars; a 90 BPM loop stays as it is. A loop with no
+ * known tempo keeps the length the library worked out.
+ */
+export function bestFit(loop: Pick<LibraryLoop, 'seconds' | 'bpm' | 'bars' | 'repeats'>, journeyBpm: number): { bars: number; repeats: number; speed: number } {
+  const own = { bars: loop.bars, repeats: loop.repeats };
+  const speedFor = (bars: number, repeats: number) => (loop.seconds * repeats) / ((bars * 4 * 60) / Math.max(30, journeyBpm));
+  if (!loop.bpm || loop.seconds <= 0 || journeyBpm <= 0) return { ...own, speed: speedFor(own.bars, own.repeats) };
+  const options: { bars: number; repeats: number }[] = [own, { bars: own.bars * 2, repeats: own.repeats }];
+  if (own.bars >= 2 && own.bars % 2 === 0) options.push({ bars: own.bars / 2, repeats: own.repeats });
+  if (own.bars === 1) options.push({ bars: 1, repeats: own.repeats * 2 });
+  if (own.bars === 1 && own.repeats > 1 && own.repeats % 2 === 0) options.push({ bars: 1, repeats: own.repeats / 2 });
+  let best = options[0];
+  let bestCost = Math.abs(Math.log2(speedFor(best.bars, best.repeats)));
+  for (const o of options.slice(1)) {
+    const cost = Math.abs(Math.log2(speedFor(o.bars, o.repeats)));
+    // The smaller speed change wins; if two need the same, the shorter (fewer bars, then fewer repeats) wins.
+    const better = cost < bestCost - 1e-6 || (Math.abs(cost - bestCost) <= 1e-6 && (o.bars < best.bars || (o.bars === best.bars && o.repeats < best.repeats)));
+    if (better) {
+      best = o;
+      bestCost = Math.min(cost, bestCost);
+    }
+  }
+  return { ...best, speed: speedFor(best.bars, best.repeats) };
 }
 
 let cacheKey = '';
@@ -203,14 +231,16 @@ export function lanesForEngine(
   lanes: LaneState[],
   libJson: string,
   master = 100,
+  journeyBpm = 0,
 ): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean }[] {
   const lib = parseLibrary(libJson);
   return Array.from({ length: LANE_COUNT }, (_, i) => {
     const lane = lanes[i] ?? defaultLane;
     const loop = lib.find((l) => l.id === lane.loop);
     const path = loop ? loopPath(loop.file) : '';
-    const bars = lane.bars > 0 ? lane.bars : loop ? loop.bars : 4;
-    const repeats = lane.bars > 0 ? 1 : loop ? loop.repeats : 1;
+    const fit = loop && lane.bars < 0 && journeyBpm > 0 ? bestFit(loop, journeyBpm) : null;
+    const bars = lane.bars > 0 ? lane.bars : fit ? fit.bars : loop ? loop.bars : 4;
+    const repeats = lane.bars > 0 ? 1 : fit ? fit.repeats : loop ? loop.repeats : 1;
     const gain = loop ? matchGain(loop.peak, loop.rms) : 1;
     const level = (Math.max(0, Math.min(150, lane.level)) / 100) * (Math.max(0, Math.min(150, master)) / 100) * gain;
     return { path, bars, repeats, level, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '' };
