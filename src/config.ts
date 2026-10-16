@@ -938,6 +938,23 @@ export function mergeDefaults<T>(def: T, raw: unknown): T {
 // `harmony` (live settings and every scene) before merging, or they would be lost.
 const HARMONY_KEYS = ['mode', 'preset', 'count', 'degrees', 'barsPerChord'];
 
+/**
+ * A lane saved with the short-lived `keepPitch` setting becomes `follow: !keepPitch` (walks the whole saved
+ * structure: the live lanes, every scene, every journey's scenes).
+ */
+export function convertKeepPitch(raw: unknown): unknown {
+  if (Array.isArray(raw)) return raw.map(convertKeepPitch);
+  if (raw !== null && typeof raw === 'object') {
+    const src = raw as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(src)) out[k] = k === 'keepPitch' ? undefined : convertKeepPitch(src[k]);
+    if (typeof src.keepPitch === 'boolean' && out.follow === undefined) out.follow = !src.keepPitch;
+    for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
+    return out;
+  }
+  return raw;
+}
+
 function liftHarmony(raw: unknown): unknown {
   if (raw === null || typeof raw !== 'object') return raw;
   const r = { ...(raw as Record<string, unknown>) };
@@ -1039,7 +1056,7 @@ function resetLaneLevels(raw: unknown): unknown {
 
 export function migrateState(rawInput0: unknown): BedState {
   const rawInput = resetLaneLevels(rawInput0);
-  const lifted = markCustomMotion(liftHarmony(upgradeNoiseLevels(convertWanderers(rawInput))));
+  const lifted = markCustomMotion(liftHarmony(upgradeNoiseLevels(convertWanderers(convertKeepPitch(rawInput)))));
   const raw =
     lifted !== null && typeof lifted === 'object' && Array.isArray((lifted as Record<string, unknown>).scenes)
       ? {

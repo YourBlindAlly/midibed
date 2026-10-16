@@ -49,7 +49,7 @@ import {
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
-import { BAR_CHOICES, LANE_COUNT, LibraryLoop, NEAR_NAMES, bestFit, filterLoops, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
+import { BAR_CHOICES, LANE_COUNT, LibraryLoop, SEMI_RANGE, NEAR_NAMES, bestFit, filterLoops, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -2282,17 +2282,27 @@ export default function App() {
                     if (c > 0) return `${c} ${c === 1 ? 'bar' : 'bars'}`;
                     if (!current) return c < 0 ? 'best fit' : 'as the file says';
                     if (c === 0) return `as the file says: ${current.bars} ${current.bars === 1 ? 'bar' : 'bars'}`;
-                    const fit = bestFit(current, state.bpm, lane.keepPitch);
+                    const fit = bestFit(current, state.bpm, !lane.follow);
                     const pct = Math.round(Math.abs(fit.speed - 1) * 100);
-                    return `best fit: ${fit.bars} ${fit.bars === 1 ? 'bar' : 'bars'}${fit.repeats > 1 ? `, ${fit.repeats} times` : ''}, ${pct === 0 ? 'no speed change' : `${pct} percent ${fit.speed > 1 ? 'faster' : 'slower'}${lane.keepPitch ? ', pitch kept' : ''}`}`;
+                    return `best fit: ${fit.bars} ${fit.bars === 1 ? 'bar' : 'bars'}${fit.repeats > 1 ? `, ${fit.repeats} times` : ''}, ${pct === 0 ? 'no speed change' : `${pct} percent ${fit.speed > 1 ? 'faster' : 'slower'}${!lane.follow ? ', pitch kept' : ''}`}`;
                   }}
                   hint="Best fit picks the length, or half or double it, that needs the smallest speed change at this tempo. As the file says uses the length worked out from its name. Or choose the bars yourself"
                 />
                 <Toggle
-                  label={`Lane ${i + 1} keeps its pitch`}
-                  value={lane.keepPitch}
-                  onChange={(v) => patchLane(i, { keepPitch: v })}
-                  hint="On: the loop is time-stretched to fit the tempo and keeps its pitch. Off: a plain speed change, so a slower tempo lowers the pitch. A loop may take a moment to be ready after a tempo or loop change"
+                  label={`Lane ${i + 1} pitch follows the tempo`}
+                  value={lane.follow}
+                  onChange={(v) => patchLane(i, { follow: v })}
+                  hint="On: a plain speed change, so a slower tempo lowers the pitch. Off: the loop keeps its own pitch and is time-stretched to fit the tempo"
+                />
+                <Stepper
+                  label={`Lane ${i + 1} pitch shift`}
+                  value={lane.semis}
+                  onChange={(v) => patchLane(i, { semis: v })}
+                  min={-SEMI_RANGE}
+                  max={SEMI_RANGE}
+                  bigStep={5}
+                  format={(v) => (v === 0 ? 'no shift' : `${v > 0 ? 'up' : 'down'} ${Math.abs(v)} ${Math.abs(v) === 1 ? 'semitone' : 'semitones'}`)}
+                  hint="Whole semitones. The loop still fills its bars. It may take a moment to be ready after a change"
                 />
                 <Stepper
                   label={`Lane ${i + 1} level`}

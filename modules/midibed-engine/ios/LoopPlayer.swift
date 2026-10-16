@@ -5,10 +5,11 @@ import Foundation
 ///
 /// A lane holds one decoded audio file (any format AVAudioFile reads: WAV, AIFF, CAF, MP3, M4A, FLAC). The
 /// engine starts a lane on a bar line and restarts it every `bars` bars, and tells it how long those bars
-/// last in seconds. Two ways to make the file fill that time:
-///  - a plain speed change (the default): the pitch follows the tempo, which is fine, even nice, for percussion;
-///  - time-stretch (`keepPitch`): a copy of the file is made once, in the background, with exactly the right
-///    length and the original pitch (circular WSOLA, see `stretch`), and that copy plays at normal speed.
+/// last in seconds. Each lane has a pitch ratio P: the pitch the loop plays at relative to the file, which is
+/// (the tempo's speed change, if the pitch follows the tempo) times (the lane's semitone shift). When P is the
+/// plain speed change that fills the bars, the file just plays faster or slower. Otherwise a copy of the file is
+/// made once, in the background, with the right length for P (circular WSOLA, see `stretch`), and that copy is
+/// played at speed P, so the loop still fills its bars exactly. The copy lives in memory only, one per lane.
 /// Because the engine restarts the loop on a bar line every time round, the audio clock can never drift away
 /// from the bed.
 ///
@@ -36,12 +37,13 @@ final class LoopPlayer {
 
   private struct Lane {
     var raw: Buf?               // the file as decoded
-    var stretched: Buf?         // a copy stretched to `stretchedFrames` frames (keepPitch only)
+    var stretched: Buf?         // a copy stretched to `stretchedFrames` frames
     var stretchedFrames = 0
     var failedFrames = 0        // a length the stretch could not be made for (file too short): play `raw`
     var pendingFrames = 0       // a stretch job for this length is running
     var wantFrames = 0          // the length (at the file's rate) one pass of the loop should have
-    var keep = false
+    var follow = true           // the pitch follows the tempo (a plain speed change)
+    var semis = 0               // pitch shift in whole semitones
     var path = ""
     var playing = false
     var pos: Double = 0         // in frames of the buffer being played
@@ -118,15 +120,15 @@ final class LoopPlayer {
     }
   }
 
-  /// Can the lane start now? Its file is decoded and, when it keeps its pitch and needs a stretch, the
-  /// stretched copy is ready too (so a loop never starts at the wrong pitch for a moment).
+  /// Can the lane start now? Its file is decoded and, when it needs a stretched copy, the copy is ready too
+  /// (so a loop never starts at the wrong pitch for a moment).
   func isReady(_ lane: Int) -> Bool {
     guard lane >= 0, lane < LoopPlayer.laneCount else { return false }
     os_unfair_lock_lock(lock)
     defer { os_unfair_lock_unlock(lock) }
     let ln = lanes[lane]
     guard let raw = ln.raw else { return false }
-    if !ln.keep || ln.wantSeconds <= 0.05 { return true }
+    if ln.wantSeconds <= 0.05 { return true }
     if ln.wantFrames <= 0 { return false }
     if LoopPlayer.closeEnough(ln.wantFrames, raw.frames) { return true }
     if ln.failedFrames == ln.wantFrames { return true }
@@ -142,15 +144,17 @@ final class LoopPlayer {
     os_unfair_lock_unlock(lock)
   }
 
-  /// Tell the lane how long its bars last at the current tempo and whether to keep the pitch. With
-  /// `keepPitch` a stretched copy of the right length is made in the background if there is not one yet.
-  /// Safe to call as often as the tempo or the settings change; a lane that is playing keeps its place.
-  func fit(lane: Int, seconds: Double, repeats: Int, keepPitch: Bool) {
+  /// Tell the lane how long its bars last at the current tempo, whether its pitch follows the tempo, and its
+  /// shift in semitones. A stretched copy of the right length is made in the background if one is needed and
+  /// there is not one yet. Safe to call as often as the tempo or the settings change; a lane that is playing
+  /// keeps its place.
+  func fit(lane: Int, seconds: Double, repeats: Int, follow: Bool, semis: Int) {
     guard lane >= 0, lane < LoopPlayer.laneCount, seconds > 0.05 else { return }
     os_unfair_lock_lock(lock)
     lanes[lane].wantSeconds = seconds
     lanes[lane].wantRepeats = max(1, repeats)
-    lanes[lane].keep = keepPitch
+    lanes[lane].follow = follow
+    lanes[lane].semis = max(-24, min(24, semis))
     os_unfair_lock_unlock(lock)
     considerStretch(lane)
   }
@@ -189,20 +193,19 @@ final class LoopPlayer {
     have > 0 && abs(Double(want) / Double(have) - 1) <= 0.003
   }
 
-  /// Work out how long a stretched copy should be and, if it needs one that does not exist yet, make it in
-  /// the background. Without keepPitch any stretched copy is dropped to free its memory.
+  /// Work out the pitch ratio P (see the class comment) and the length a copy for it should have; if the file is
+  /// not already that length and there is no such copy yet, make one in the background. A copy that is no longer
+  /// wanted by the time its turn comes is skipped, so stepping quickly through semitones only makes the last one.
   private func considerStretch(_ lane: Int) {
     os_unfair_lock_lock(lock)
-    guard let raw = lanes[lane].raw, lanes[lane].keep, lanes[lane].wantSeconds > 0.05 else {
-      if !lanes[lane].keep {
-        lanes[lane].stretched = nil
-        lanes[lane].stretchedFrames = 0
-        lanes[lane].failedFrames = 0
-      }
+    guard let raw = lanes[lane].raw, lanes[lane].wantSeconds > 0.05 else {
       os_unfair_lock_unlock(lock)
       return
     }
-    let want = max(1, Int((lanes[lane].wantSeconds / Double(lanes[lane].wantRepeats) * raw.rate).rounded()))
+    let period = lanes[lane].wantSeconds / Double(lanes[lane].wantRepeats) * raw.rate // frames of one pass at the file's rate
+    let fitSpeed = Double(raw.frames) / max(1, period)
+    let ratio = (lanes[lane].follow ? fitSpeed : 1) * pow(2, Double(lanes[lane].semis) / 12)
+    let want = max(1, Int((period * ratio).rounded()))
     lanes[lane].wantFrames = want
     var run = false
     if LoopPlayer.closeEnough(want, raw.frames) {
@@ -216,6 +219,12 @@ final class LoopPlayer {
     guard run else { return }
     loader.async { [weak self] in
       guard let self = self else { return }
+      // Still wanted? (The tempo, the shift or the file may have changed while this waited its turn.)
+      os_unfair_lock_lock(self.lock)
+      let wanted = self.lanes[lane].raw === raw && self.lanes[lane].wantFrames == want
+      if !wanted && self.lanes[lane].pendingFrames == want { self.lanes[lane].pendingFrames = 0 }
+      os_unfair_lock_unlock(self.lock)
+      guard wanted else { return }
       let made = LoopPlayer.stretch(raw, outFrames: want)
       os_unfair_lock_lock(self.lock)
       if self.lanes[lane].raw === raw && self.lanes[lane].wantFrames == want {
@@ -243,7 +252,7 @@ final class LoopPlayer {
     for lane in 0..<LoopPlayer.laneCount where lanes[lane].playing {
       // The stretched copy if there is one (while a new one is being made the old one plays at a slightly
       // adjusted speed), otherwise the file itself.
-      let source: Buf? = (lanes[lane].keep && lanes[lane].stretched != nil) ? lanes[lane].stretched : lanes[lane].raw
+      let source: Buf? = lanes[lane].stretched != nil ? lanes[lane].stretched : lanes[lane].raw
       guard let b = source else {
         lanes[lane].playing = false
         continue

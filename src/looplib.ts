@@ -39,11 +39,14 @@ export type LaneState = {
   pan: number;
   /** -1 = best fit (whole, half or double the bars, whichever needs the smallest speed change), 0 = what the file's name and length say, else 1-16 bars */
   bars: number;
-  /** true = keep the pitch when the loop is fitted to the tempo (time-stretch); false = a plain speed change, so the pitch follows the tempo */
-  keepPitch: boolean;
+  /** true = the pitch follows the tempo (a plain speed change); false = the pitch stays where it is and the loop is time-stretched to fit */
+  follow: boolean;
+  /** pitch shift in whole semitones, -12 ... 12 (a shifted loop is time-stretched so it still fills its bars) */
+  semis: number;
 };
 
-export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1, keepPitch: false };
+export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1, follow: true, semis: 0 };
+export const SEMI_RANGE = 12;
 export const defaultLanes = (): LaneState[] => Array.from({ length: LANE_COUNT }, () => ({ ...defaultLane }));
 export const BAR_CHOICES = [-1, 0, 1, 2, 4, 8, 16];
 
@@ -243,18 +246,18 @@ export function lanesForEngine(
   libJson: string,
   master = 100,
   journeyBpm = 0,
-): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean; keep: boolean }[] {
+): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean; follow: boolean; semis: number }[] {
   const lib = parseLibrary(libJson);
   return Array.from({ length: LANE_COUNT }, (_, i) => {
     const lane = lanes[i] ?? defaultLane;
     const loop = lib.find((l) => l.id === lane.loop);
     const path = loop ? loopPath(loop.file) : '';
-    const fit = loop && lane.bars < 0 && journeyBpm > 0 ? bestFit(loop, journeyBpm, !!lane.keepPitch) : null;
+    const fit = loop && lane.bars < 0 && journeyBpm > 0 ? bestFit(loop, journeyBpm, lane.follow === false) : null;
     const bars = lane.bars > 0 ? lane.bars : fit ? fit.bars : loop ? loop.bars : 4;
     const repeats = lane.bars > 0 ? 1 : fit ? fit.repeats : loop ? loop.repeats : 1;
     const gain = loop ? matchGain(loop.peak, loop.rms) : 1;
     const level = (Math.max(0, Math.min(150, lane.level)) / 100) * (Math.max(0, Math.min(150, master)) / 100) * gain;
-    return { path, bars, repeats, level, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', keep: !!lane.keepPitch };
+    return { path, bars, repeats, level, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', follow: lane.follow !== false, semis: Math.max(-SEMI_RANGE, Math.min(SEMI_RANGE, Math.round(lane.semis || 0))) };
   });
 }
 
