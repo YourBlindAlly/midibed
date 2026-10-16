@@ -48,7 +48,7 @@ import {
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
-import { BAR_CHOICES, LANE_COUNT, LibraryLoop, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
+import { BAR_CHOICES, LANE_COUNT, LibraryLoop, NEAR_NAMES, filterLoops, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -848,12 +848,11 @@ export default function App() {
   const loopFolders = folderNames(loopLib);
   const [laneBrowse, setLaneBrowse] = useState<number[]>([0, 0, 0, 0]);
   const [importNote, setImportNote] = useState('');
+  // What the lane browser shows: how close to the tempo, and words the loop's name must contain.
+  const [loopNear, setLoopNear] = useState(0);
+  const [loopText, setLoopText] = useState('');
   const patchLane = (i: number, change: Partial<BedState['lanes'][number]>) =>
     setState((s) => ({ ...s, lanes: s.lanes.map((l, k) => (k === i ? { ...l, ...change } : l)) }));
-  const laneFolder = (i: number): string => {
-    const cur = loopLib.find((l) => l.id === state.lanes[i].loop);
-    return cur ? cur.folder : loopFolders[Math.min(laneBrowse[i] ?? 0, Math.max(0, loopFolders.length - 1))] ?? '';
-  };
   const importLoopFolder = async () => {
     if (!fsApi) {
       setImportNote('Adding loops works in the app on the phone');
@@ -2176,11 +2175,42 @@ export default function App() {
             />
           </Section>
 
+          <Section title="Find loops">
+            <Stepper
+              label="Tempo filter"
+              value={loopNear}
+              onChange={(v) => setLoopNear(Math.max(0, Math.min(NEAR_NAMES.length - 1, v)))}
+              min={0}
+              max={NEAR_NAMES.length - 1}
+              format={(v) => NEAR_NAMES[v]}
+              hint="Only loops whose own tempo is close to the journey tempo. Loops with no tempo in their name are left out while this is on"
+            />
+            <View accessible={false} style={styles.nameBox}>
+              <Text style={styles.note}>Name contains</Text>
+              <TextInput
+                style={styles.nameInput}
+                value={loopText}
+                onChangeText={setLoopText}
+                accessibilityLabel="Loop name contains"
+                accessibilityHint="Type words such as conga or shaker. Every word must appear in the loop's name or folder"
+                autoCorrect={false}
+                autoCapitalize="none"
+                placeholderTextColor={colors.dim}
+                onBlur={() => engine.reclaimKeys()}
+              />
+            </View>
+            <View accessible accessibilityLabel="Loops that match" accessibilityValue={{ text: `${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText }).length} of ${loopLib.length}` }}>
+              <Text style={styles.note}>{`${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText }).length} of ${loopLib.length} loops match`}</Text>
+            </View>
+          </Section>
+
           {Array.from({ length: LANE_COUNT }, (_, i) => {
             const lane = state.lanes[i];
-            const folder = laneFolder(i);
-            const inFolder = loopLib.filter((l) => l.folder === folder);
+            const browseIdx = Math.min(laneBrowse[i] ?? 0, loopFolders.length);
             const current = loopLib.find((l) => l.id === lane.loop);
+            let inFolder = filterLoops(loopLib, { folder: browseIdx === 0 ? '' : loopFolders[browseIdx - 1], near: loopNear, bpm: state.bpm, text: loopText });
+            // The loop already in the lane stays in the list even if the filter would hide it.
+            if (current && !inFolder.some((l) => l.id === current.id)) inFolder = [current, ...inFolder];
             const loopIdx = Math.max(0, inFolder.findIndex((l) => l.id === lane.loop) + 1);
             return (
               <Section key={`lane${i}`} title={`Lane ${i + 1}`} id={`Loop lane ${i + 1}`}>
@@ -2192,17 +2222,12 @@ export default function App() {
                 />
                 <Stepper
                   label={`Lane ${i + 1} folder`}
-                  value={Math.max(0, loopFolders.indexOf(folder))}
-                  onChange={(v) => {
-                    const f = loopFolders[Math.max(0, Math.min(loopFolders.length - 1, v))];
-                    setLaneBrowse((b) => b.map((x, k) => (k === i ? Math.max(0, Math.min(loopFolders.length - 1, v)) : x)));
-                    const first = loopLib.find((l) => l.folder === f);
-                    patchLane(i, { loop: first ? first.id : '' });
-                  }}
+                  value={browseIdx}
+                  onChange={(v) => setLaneBrowse((b) => b.map((x, k) => (k === i ? Math.max(0, Math.min(loopFolders.length, v)) : x)))}
                   min={0}
-                  max={Math.max(0, loopFolders.length - 1)}
-                  format={(v) => loopFolders[v] ?? 'no loops yet'}
-                  hint="The folder the loops came from. Choosing one picks its first loop"
+                  max={loopFolders.length}
+                  format={(v) => (v === 0 ? 'All folders' : loopFolders[v - 1] ?? '')}
+                  hint="Which folder's loops the loop stepper below goes through. All folders mixes them. The tempo and name filters at the top narrow it further"
                 />
                 <Stepper
                   label={`Lane ${i + 1} loop`}
@@ -2214,7 +2239,7 @@ export default function App() {
                   min={0}
                   max={inFolder.length}
                   format={(v) => (v === 0 ? 'empty' : `${inFolder[v - 1].name}, ${inFolder[v - 1].bars} ${inFolder[v - 1].bars === 1 ? 'bar' : 'bars'}${inFolder[v - 1].bpm ? `, ${inFolder[v - 1].bpm} BPM` : ''}`)}
-                  hint="Which loop is in this lane"
+                  hint="Which loop is in this lane. It goes through the loops that pass the filters"
                 />
                 <Stepper
                   label={`Lane ${i + 1} length`}

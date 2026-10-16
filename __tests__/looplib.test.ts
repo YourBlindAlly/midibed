@@ -179,3 +179,42 @@ describe('the Loop player layer', () => {
     expect(migrateState({}).playerOn).toBe(true);
   });
 });
+
+describe('finding loops', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const lib = require('../src/looplib');
+  const L = (name: string, folder: string, bpm: number | null) => ({
+    id: `${folder}/${name}`, name, folder, file: `${folder}__${name}.wav`, seconds: 10, bpm, bars: 4, repeats: 1,
+  });
+  const loops = [
+    L('Set1 - Bongos_90', '90 flat', 90),
+    L('Set2 - Tablas_90', '90 flat', 90),
+    L('Conga_138_01', 'Congas', 138),
+    L('Shakers_86_01', 'Shakers', 86),
+    L('Odd one', 'Other', null),
+  ];
+  const f = (over: object = {}) => lib.filterLoops(loops, { folder: '', near: 0, bpm: 88, text: '', ...over }).map((l: { name: string }) => l.name);
+
+  it('shows everything with no filter, and a single folder when one is chosen', () => {
+    expect(f()).toHaveLength(5);
+    expect(f({ folder: 'Congas' })).toEqual(['Conga_138_01']);
+  });
+
+  it('keeps loops within a few BPM of the tempo, leaving out loops with no tempo', () => {
+    expect(f({ near: 1 })).toEqual(['Set1 - Bongos_90', 'Set2 - Tablas_90', 'Shakers_86_01']); // within 3 of 88
+    expect(f({ near: 1, bpm: 90 })).toEqual(['Set1 - Bongos_90', 'Set2 - Tablas_90']);
+    expect(f({ near: 3, bpm: 130 })).toEqual(['Conga_138_01']); // within 10
+    expect(lib.NEAR_NAMES).toHaveLength(4);
+  });
+
+  it('needs every typed word to be in the name or the folder, in any case', () => {
+    expect(f({ text: 'conga' })).toEqual(['Conga_138_01']);
+    expect(f({ text: 'SHAKER 86' })).toEqual(['Shakers_86_01']);
+    expect(f({ text: 'flat tablas' })).toEqual(['Set2 - Tablas_90']);
+    expect(f({ text: 'zzz' })).toEqual([]);
+  });
+
+  it('combines the filters', () => {
+    expect(f({ near: 1, text: 'bongos' })).toEqual(['Set1 - Bongos_90']);
+  });
+});

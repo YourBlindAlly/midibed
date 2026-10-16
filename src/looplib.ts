@@ -116,6 +116,42 @@ export function addToLibrary(json: string, entries: LibraryLoop[]): string {
   return JSON.stringify(list);
 }
 
+/** The tempo filter's choices: how close to the journey tempo a loop's own tempo must be. */
+export const NEAR_NAMES = ['Any tempo', 'Within 3 BPM of the tempo', 'Within 6 BPM of the tempo', 'Within 10 BPM of the tempo'];
+export const NEAR_BPM = [0, 3, 6, 10];
+
+export type LoopFilter = {
+  /** '' = every folder. */
+  folder: string;
+  /** index into NEAR_NAMES (0 = any tempo) */
+  near: number;
+  /** the journey tempo the filter measures from */
+  bpm: number;
+  /** words that must all appear in the loop's name or folder (any case); '' = no filter */
+  text: string;
+};
+
+/**
+ * The loops that pass the lane browser's filters: in the chosen folder (or all), within a few BPM of the
+ * tempo (a loop with no known tempo is left out while that filter is on), and containing every typed word.
+ */
+export function filterLoops(lib: LibraryLoop[], f: LoopFilter): LibraryLoop[] {
+  const range = NEAR_BPM[Math.max(0, Math.min(NEAR_BPM.length - 1, Math.round(f.near)))];
+  const words = f.text
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  return lib.filter((l) => {
+    if (f.folder && l.folder !== f.folder) return false;
+    if (range > 0 && (l.bpm === null || Math.abs(l.bpm - f.bpm) > range)) return false;
+    if (words.length > 0) {
+      const hay = `${l.name} ${l.folder}`.toLowerCase();
+      if (!words.every((w) => hay.includes(w))) return false;
+    }
+    return true;
+  });
+}
+
 export function folderNames(lib: LibraryLoop[]): string[] {
   return Array.from(new Set(lib.map((l) => l.folder))).sort((a, b) => a.localeCompare(b));
 }
