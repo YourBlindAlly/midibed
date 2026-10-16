@@ -3,7 +3,7 @@ declare const __dirname: string;
 
 describe('per-part outputs', () => {
   it('default to everything on, for MIDI and the built-in sound', () => {
-    for (const part of ['bass', 'pad', 'dancer', 'drums', 'loops'] as const) {
+    for (const part of ['bass', 'pad', 'dancer', 'drums', 'loops', 'keys'] as const) {
       expect(defaultState.outputs[part]).toEqual({ midi: true, synth: true });
     }
   });

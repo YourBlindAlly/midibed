@@ -137,9 +137,9 @@ describe('your own apps and MIDI ports', () => {
   });
 
   it('MIDI ports are off by default, global, and sent to the engine', () => {
-    expect(defaultState.ports).toEqual({ bass: false, pad: false, dancer: false, drums: false });
-    const on = { ...defaultState, ports: { bass: true, pad: false, dancer: true, drums: false } };
-    expect(JSON.parse(toEngineJson(on)).ports).toEqual({ bass: true, pad: false, dancer: true, drums: false });
+    expect(defaultState.ports).toEqual({ bass: false, pad: false, dancer: false, drums: false, keys: false });
+    const on = { ...defaultState, ports: { bass: true, pad: false, dancer: true, drums: false, keys: false } };
+    expect(JSON.parse(toEngineJson(on)).ports).toEqual({ bass: true, pad: false, dancer: true, drums: false, keys: false });
     expect(switchScene(on, 1).ports.bass).toBe(true);
   });
 

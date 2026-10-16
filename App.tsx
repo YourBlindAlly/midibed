@@ -1,4 +1,5 @@
 import { BASS_NOTES_NAMES, BASS_RHYTHM_NAMES, BASS_SKIP_NAMES } from './src/bassrhythm';
+import { KEYS_RHYTHMS, KeysState, keysPatternText } from './src/keys';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -28,6 +29,7 @@ import {
   duplicateJourney,
   keyRoot,
   newJourney,
+  keysChords,
   resolveLaneIds,
   noteName,
   padIsSteadyFifths,
@@ -470,6 +472,7 @@ export default function App() {
     }
   };
   const patchPad = (p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
+  const patchKeys = (p: Partial<KeysState>) => setState((s) => ({ ...s, keys: { ...s.keys, ...p } }));
   const patchMotionRule = (layer: 'bass' | 'pad', p: Partial<MotionRule>) =>
     setState((s) => ({ ...s, motion: { ...s.motion, preset: 0, [layer]: { ...s.motion[layer], ...p } } }));
   const patchTransition = (which: 'entrance' | 'drumBreak' | 'drumReturn', p: Partial<TransitionSlot>) =>
@@ -760,6 +763,9 @@ export default function App() {
         } else if (action.layer === 'pad') {
           on = !state.pad.enabled;
           patchPad({ enabled: on });
+        } else if (action.layer === 'keys') {
+          on = !state.keys.enabled;
+          patchKeys({ enabled: on });
         } else if (action.layer === 'dancer') {
           on = !state.dancer.enabled;
           patchDancer({ enabled: on });
@@ -851,7 +857,7 @@ export default function App() {
   }, []);
 
   // ---- Parts tab helpers
-  const PARTS = ['bass', 'pad', 'dancer', 'drums', 'loops'] as const;
+  const PARTS = ['bass', 'pad', 'keys', 'dancer', 'drums', 'loops'] as const;
   const [partIdx, setPartIdx] = useState(0);
   // Which drum's settings the Drums module shows (one at a time).
   const [drumIdx, setDrumIdx] = useState(0);
@@ -978,14 +984,15 @@ export default function App() {
   const partProfile = partRole ? getProfile(state.profiles[partRole]) : getProfile('none');
   const soundSlot: number | undefined = part === 'bass' ? 0 : part === 'drums' ? 1 : part === 'pad' ? 2 : undefined;
   const partChannelsOf = (p: (typeof PARTS)[number]): number[] =>
-    p === 'bass' ? [state.drone.channel] : p === 'pad' ? [state.pad.channel] : p === 'dancer' ? [state.dancer.channel] : p === 'drums' ? state.drums.map((d) => d.channel) : [state.loops.channel];
+    p === 'bass' ? [state.drone.channel] : p === 'pad' ? [state.pad.channel] : p === 'keys' ? [state.keys.channel] : p === 'dancer' ? [state.dancer.channel] : p === 'drums' ? state.drums.map((d) => d.channel) : [state.loops.channel];
   const onThisPart = (channel: number) => partChannelsOf(part).includes(channel);
   const anyPartChannel = (channel: number) => PARTS.some((p) => partChannelsOf(p).includes(channel));
   const partIsOn =
-    part === 'bass' ? state.drone.enabled : part === 'pad' ? state.pad.enabled : part === 'dancer' ? state.dancer.enabled : part === 'drums' ? state.percussion : state.loops.enabled;
+    part === 'bass' ? state.drone.enabled : part === 'pad' ? state.pad.enabled : part === 'keys' ? state.keys.enabled : part === 'dancer' ? state.dancer.enabled : part === 'drums' ? state.percussion : state.loops.enabled;
   const setPartOn = (p: (typeof PARTS)[number], on: boolean) => {
     if (p === 'bass') patchDrone({ enabled: on });
     else if (p === 'pad') patchPad({ enabled: on });
+    else if (p === 'keys') patchKeys({ enabled: on });
     else if (p === 'dancer') patchDancer({ enabled: on });
     else if (p === 'drums') patch({ percussion: on });
     else patchLoops({ enabled: on });
@@ -1333,6 +1340,8 @@ export default function App() {
             <Toggle label="Solo bass drone" value={state.solo === 'bass'} onChange={(v) => setSolo(v ? 'bass' : null)} hint="Hear only the bass drone. The others fade out and come back when you clear the solo" />
             <Toggle label="Chord pad layer" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
             <Toggle label="Solo chord pad" value={state.solo === 'pad'} onChange={(v) => setSolo(v ? 'pad' : null)} />
+            <Toggle label="Keys layer" value={state.keys.enabled} onChange={(v) => patchKeys({ enabled: v })} hint="The rhythmic electric piano. Saved in each scene" />
+            <Toggle label="Solo keys" value={state.solo === 'keys'} onChange={(v) => setSolo(v ? 'keys' : null)} />
             <Toggle label="MidiDancer layer" value={state.dancer.enabled} onChange={(v) => patchDancer({ enabled: v })} />
             <Toggle label="Solo MidiDancer" value={state.solo === 'dancer'} onChange={(v) => setSolo(v ? 'dancer' : null)} />
             <Toggle
@@ -1493,6 +1502,9 @@ export default function App() {
             {part === 'pad' && (
               <Stepper label="Pad MIDI channel" value={state.pad.channel} onChange={(v) => patchPad({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the chords play on. Use the bass drone channel to play both with one sound" />
             )}
+            {part === 'keys' && (
+              <Stepper label="Keys MIDI channel" value={state.keys.channel} onChange={(v) => patchKeys({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the keys play on. Another app, or the built-in electric piano, hears them there" />
+            )}
             {part === 'dancer' && (
               <Stepper label="MidiDancer MIDI channel" value={state.dancer.channel} onChange={(v) => patchDancer({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel MidiDancer plays on" />
             )}
@@ -1611,6 +1623,66 @@ export default function App() {
             <Stepper label="Strum" value={state.pad.strumMs} onChange={(v) => patchPad({ strumMs: v })} min={0} max={300} step={10} format={(v) => (v === 0 ? 'none' : `${v} milliseconds`)} />
             <Stepper label="Pad velocity" value={state.pad.velocity} onChange={(v) => patchPad({ velocity: v })} min={1} max={127} step={5} />
             <Stepper label="Pad humanize" value={state.pad.humanize} onChange={(v) => patchPad({ humanize: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+              </>
+            )}
+            {part === 'keys' && (
+              <>
+                <Text style={styles.note}>
+                  A rhythmic electric piano that comps the chords of the harmony loop, in time with the bed. The pad stays smooth and sustained; the keys are where the rhythm is. Pick a pattern, or use the generator to spread hits over steps like the drums. Saved in each scene, except the channel.
+                </Text>
+                <Stepper
+                  label="Keys pattern"
+                  value={state.keys.rhythm}
+                  onChange={(v) => patchKeys({ rhythm: v })}
+                  min={0}
+                  max={KEYS_RHYTHMS.length - 1}
+                  format={(v) => KEYS_RHYTHMS[v].name}
+                  hint="Offbeat stabs, Charleston, skank, pushed, dotted eighths, tresillo and more. The first choice is the generator"
+                />
+                {state.keys.rhythm === 0 && (
+                  <>
+                    <Stepper label="Keys hits" value={state.keys.hits} onChange={(v) => patchKeys({ hits: v })} min={0} max={state.keys.steps} hint="How many chord hits are spread evenly over the steps" />
+                    <Stepper label="Keys steps" value={state.keys.steps} onChange={(v) => patchKeys({ steps: v, hits: Math.min(state.keys.hits, v) })} min={4} max={32} hint="Sixteenth notes in the pattern. 16 is one bar, 32 is two" />
+                  </>
+                )}
+                <Stepper
+                  label="Keys rotation"
+                  value={state.keys.rotation}
+                  onChange={(v) => patchKeys({ rotation: v })}
+                  min={0}
+                  max={Math.max(1, state.keys.rhythm > 0 ? KEYS_RHYTHMS[state.keys.rhythm].steps : state.keys.steps) - 1}
+                  hint="Slides the whole pattern later by this many sixteenths"
+                />
+                <View accessible accessibilityLabel="Keys pattern" accessibilityValue={{ text: keysPatternText(state.keys) }}>
+                  <Text style={styles.pattern}>{keysPatternText(state.keys)}</Text>
+                </View>
+                <Stepper label="Keys velocity" value={state.keys.velocity} onChange={(v) => patchKeys({ velocity: v })} min={1} max={127} step={5} bigStep={10} hint="The keys stay in the background, so quiet is usually right" />
+                <Stepper label="Keys chance" value={state.keys.probability} onChange={(v) => patchKeys({ probability: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} hint="Chance that each hit plays" />
+                <Stepper label="Keys humanize" value={state.keys.humanize} onChange={(v) => patchKeys({ humanize: v })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'none' : `${v} percent`)} />
+                <Stepper label="Chord rings for" value={state.keys.length} onChange={(v) => patchKeys({ length: v })} min={10} max={150} step={5} format={(v) => `${v} percent of the gap to the next hit`} hint="Short is staccato stabs; long lets chords run into each other" />
+                <Stepper label="Keys strum" value={state.keys.strumMs} onChange={(v) => patchKeys({ strumMs: v })} min={0} max={80} step={2} format={(v) => (v === 0 ? 'none, all together' : `${v} milliseconds`)} />
+                <Stepper label="Keys chord type" value={state.keys.style} onChange={(v) => patchKeys({ style: v })} min={0} max={STYLE_NAMES.length - 1} format={(v) => STYLE_NAMES[v]} hint="Seventh and Add 9 sound most like a Rhodes" />
+                <Stepper label="Lowest keys note" value={state.keys.register} onChange={(v) => patchKeys({ register: v })} min={36} max={84} bigStep={12} format={noteName} hint="Where the keys sit. Middle C is 60. A narrow register stays out of the way" />
+                <Toggle label="Keys smooth voice leading" value={state.keys.voiceLead} onChange={(v) => patchKeys({ voiceLead: v })} hint="Each chord moves as little as possible from the last one" />
+                <Stepper label="Suspended chords" value={state.keys.susChance} onChange={(v) => patchKeys({ susChance: v })} min={0} max={100} step={10} format={(v) => (v === 0 ? 'never' : `${v} percent of hits`)} hint="Now and then a hit plays the sus 4 version of its chord" />
+                <Section inner title="Keys: more settings">
+                  <Stepper label="Keys ghost hits" value={state.keys.ghostHits} onChange={(v) => patchKeys({ ghostHits: v })} min={0} max={state.keys.steps} hint="A second, quiet pattern on the steps the main one leaves free" />
+                  {state.keys.ghostHits > 0 && (
+                    <>
+                      <Stepper label="Keys ghost rotation" value={state.keys.ghostRotation} onChange={(v) => patchKeys({ ghostRotation: v })} min={0} max={Math.max(1, state.keys.steps) - 1} />
+                      <Stepper label="Keys ghost velocity" value={state.keys.ghostVelocity} onChange={(v) => patchKeys({ ghostVelocity: v })} min={1} max={127} step={5} />
+                    </>
+                  )}
+                  <Stepper label="Keys accent every" value={state.keys.accentEvery} onChange={(v) => patchKeys({ accentEvery: v })} min={0} max={8} format={(v) => (v === 0 ? 'off' : `${v} hits`)} />
+                  {state.keys.accentEvery > 1 && (
+                    <>
+                      <Stepper label="Keys accent starts at hit" value={state.keys.accentOffset} onChange={(v) => patchKeys({ accentOffset: v })} min={0} max={7} format={(v) => `hit ${v + 1}`} />
+                      <Stepper label="Keys accent boost" value={state.keys.accentBoost} onChange={(v) => patchKeys({ accentBoost: v })} min={0} max={100} step={10} format={(v) => `${v} percent`} />
+                    </>
+                  )}
+                  <Toggle label="Keys keep the first hit" value={state.keys.keepFirst} onChange={(v) => patchKeys({ keepFirst: v })} hint="The first hit of the pattern ignores the chance" />
+                  <Stepper label="Keys timing looseness" value={state.keys.looseMs} onChange={(v) => patchKeys({ looseMs: v })} min={0} max={40} step={2} format={(v) => (v === 0 ? 'on the grid' : `up to ${v} milliseconds late`)} />
+                </Section>
               </>
             )}
             {part === 'dancer' && (
@@ -2016,7 +2088,7 @@ export default function App() {
                 <Stepper label="Drums fade out" value={state.fade.drumOut} onChange={(v) => patchFade({ drumOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
               </>
             )}
-            {(part === 'dancer' || part === 'loops') && (
+            {(part === 'dancer' || part === 'loops' || part === 'keys') && (
               <Text style={styles.note}>This part has no fade of its own: switching it on or off is immediate.</Text>
             )}
           </Section>
@@ -2156,7 +2228,7 @@ export default function App() {
                 label={`${partName} has its own MIDI port`}
                 value={state.ports[part]}
                 onChange={(v) => patch({ ports: { ...state.ports, [part]: v } })}
-                hint={`Makes a source called MidiBed ${part === 'bass' ? 'Bass' : part === 'pad' ? 'Pad' : part === 'dancer' ? 'Dancer' : 'Drums'}. The app you point at it hears only this part and can stay on Omni. In that app, choose this source and switch MidiBed off.`}
+                hint={`Makes a source called MidiBed ${part === 'bass' ? 'Bass' : part === 'pad' ? 'Pad' : part === 'dancer' ? 'Dancer' : part === 'keys' ? 'Keys' : 'Drums'}. The app you point at it hears only this part and can stay on Omni. In that app, choose this source and switch MidiBed off.`}
               />
             )}
             {part === 'loops' && (
@@ -2172,6 +2244,9 @@ export default function App() {
             )}
             {part === 'pad' && (
               <ActionButton label="Play pad test chord" hint="Plays the first chord of the pad for a moment, to check routing" onPress={() => padChords(state)[0]?.forEach((n) => engine.sendNote(state.pad.channel, n, state.pad.velocity, 1500))} />
+            )}
+            {part === 'keys' && (
+              <ActionButton label="Play keys test chord" hint="Plays the first chord of the keys for a moment, to check routing" onPress={() => keysChords(state)[0]?.forEach((n) => engine.sendNote(state.keys.channel, n, state.keys.velocity, 1500))} />
             )}
             {part === 'dancer' && (
               <ActionButton label="Play MidiDancer test note" hint="Plays one note for a moment on the MidiDancer channel, to check routing" onPress={() => engine.sendNote(state.dancer.channel, state.dancer.register, state.dancer.velocity, 1000)} />
@@ -2196,6 +2271,13 @@ export default function App() {
                 Sends Bank Select and Program Change to this part's channel so you can step through sounds from here. The receiving app must be set to respond to program changes.
               </Text>
               {renderSlot(state.sounds[soundSlot], soundSlot)}
+            </Section>
+          )}
+          {part === 'keys' && (
+            <Section inner title="Keys: sound">
+              <Text style={styles.note}>
+                The built-in sound is an electric piano (Rhodes style) with a soft tremolo. To use another app's electric piano or keyboard instead, switch off Play in the built-in sound under where it goes, and point that app at this channel.
+              </Text>
             </Section>
           )}
           {part === 'dancer' && (
@@ -2964,7 +3046,7 @@ export default function App() {
             />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
             <Text style={styles.note}>
-              Each part can have its own MIDI source, set on the Parts tab under where it goes. The sources are called MidiBed, MidiBed Bass, MidiBed Pad, MidiBed Dancer, MidiBed Drums and MidiBed Loops.
+              Each part can have its own MIDI source, set on the Parts tab under where it goes. The sources are called MidiBed, MidiBed Bass, MidiBed Pad, MidiBed Dancer, MidiBed Keys, MidiBed Drums and MidiBed Loops.
             </Text>
             <Toggle label="Send MIDI clock" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo while playing" />
             <Toggle

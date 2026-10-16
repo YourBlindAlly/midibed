@@ -253,6 +253,34 @@ struct MidiBedFillConfig: Decodable {
   var palette: [MidiBedFillVoice]
 }
 
+/// Keys: a rhythmic electric piano comping the chords of the harmony loop (reference: src/keys.ts). The pattern
+/// fields mirror a drum's so it is played the same way: a library mask or the Euclidean spread, ghost notes, accents.
+struct MidiBedKeysConfig: Decodable {
+  var enabled: Bool
+  var channel: Int
+  var steps: Int
+  var hits: Int
+  var mask: Int
+  var useMask: Bool
+  var rotation: Int
+  var velocity: Int
+  var probability: Double
+  var humanize: Double
+  var ghostHits: Int
+  var ghostRotation: Int
+  var ghostVelocity: Int
+  var accentEvery: Int
+  var accentBoost: Double
+  var accentOffset: Int
+  var keepFirst: Bool
+  var looseMs: Double
+  var lengthPct: Double     // percent of the distance to the next hit that a chord rings
+  var strumMs: Double       // between the notes of a chord, low to high
+  var susChance: Double     // 0...1: a hit plays the sus 4 version of its chord
+  var chords: [[Int]]       // MIDI notes per chord of the harmony loop
+  var susChords: [[Int]]
+}
+
 /// Where one part's sound goes: out as MIDI to other apps, and/or into MidiBed's own built-in sound.
 struct MidiBedPartOutput: Decodable {
   var midi: Bool
@@ -265,6 +293,7 @@ struct MidiBedOutputsConfig: Decodable {
   var dancer: MidiBedPartOutput
   var drums: MidiBedPartOutput
   var loops: MidiBedPartOutput
+  var keys: MidiBedPartOutput?
 }
 
 /// Which parts have their own MIDI source ("MidiBed Bass", "MidiBed Pad", "MidiBed Dancer", "MidiBed Drums").
@@ -274,6 +303,7 @@ struct MidiBedPortsConfig: Decodable {
   var pad: Bool
   var dancer: Bool
   var drums: Bool
+  var keys: Bool?
 }
 
 struct MidiBedConfig: Decodable {
@@ -293,6 +323,7 @@ struct MidiBedConfig: Decodable {
   var drone: MidiBedDroneConfig
   var harmony: MidiBedHarmonyConfig
   var dancer: MidiBedDancerConfig
+  var keys: MidiBedKeysConfig?
   var fill: MidiBedFillConfig
   var ports: MidiBedPortsConfig
   var outputs: MidiBedOutputsConfig
@@ -326,7 +357,7 @@ final class MidiBedEngine {
   private var client = MIDIClientRef()
   private var source = MIDIEndpointRef()
   /// Extra virtual sources, indexed by port number: 1 loops, 2 bass, 3 pad, 4 dancer, 5 drums (0 is `source`).
-  private var portSources = [MIDIEndpointRef](repeating: MIDIEndpointRef(), count: 6)
+  private var portSources = [MIDIEndpointRef](repeating: MIDIEndpointRef(), count: 7)
   /// For each MIDI channel, which ports its messages go out (rebuilt whenever the settings change).
   private var channelPorts: [[Int]] = Array(repeating: [0], count: 16)
   /// For each MIDI channel: may its messages go out as MIDI, and may they play the built-in sound? (Per part, see
@@ -500,7 +531,7 @@ final class MidiBedEngine {
     // variant but still works and is what every receiving app understands.
     MIDISourceCreate(client, "MidiBed" as CFString, &source)
     portSources[0] = source
-    for (i, name) in [(1, "MidiBed Loops"), (2, "MidiBed Bass"), (3, "MidiBed Pad"), (4, "MidiBed Dancer"), (5, "MidiBed Drums")] {
+    for (i, name) in [(1, "MidiBed Loops"), (2, "MidiBed Bass"), (3, "MidiBed Pad"), (4, "MidiBed Dancer"), (5, "MidiBed Drums"), (6, "MidiBed Keys")] {
       var endpoint = MIDIEndpointRef()
       MIDISourceCreate(client, name as CFString, &endpoint)
       portSources[i] = endpoint
@@ -579,6 +610,7 @@ final class MidiBedEngine {
     add(c.pad.channel, c.ports.pad, 3, c.outputs.pad)
     add(c.dancer.channel, c.ports.dancer, 4, c.outputs.dancer)
     for d in c.drums { add(d.channel, c.ports.drums, 5, c.outputs.drums) }
+    if let k = c.keys { add(k.channel, c.ports.keys ?? false, 6, c.outputs.keys ?? MidiBedPartOutput(midi: true, synth: true)) }
     channelPorts = map.map { $0.isEmpty ? [0] : $0 }
     channelMidi = (0..<16).map { used[$0] ? midi[$0] : true }
     channelSynth = (0..<16).map { used[$0] ? synthOn[$0] : true }
@@ -600,6 +632,7 @@ final class MidiBedEngine {
     syncWanderers()
     rebuildChannelPorts(decoded)
     synth.bassChannel = decoded.drone.channel
+    synth.keysChannel = decoded.keys?.channel ?? -1
     synth.setPartChannels(bass: decoded.drone.channel, pad: decoded.pad.channel, dancer: decoded.dancer.channel)
     applyLanes(decoded)
     updateIdleClock()
@@ -1091,6 +1124,9 @@ final class MidiBedEngine {
     let step = tick / ticksPerStep
     let stepDur = tickDur * Double(ticksPerStep)
 
+    // The keys comp on, through fills too (they are not part of the drum pattern).
+    stepKeys(step: step, time: time, stepDur: stepDur, cfg: cfg)
+
     // Fills: plan one if one is due, and keep the normal pattern silent while it plays.
     planFillIfDue(tick: tick, time: time, tickDur: tickDur, cfg: cfg)
     if tick >= fillStartTick && tick < fillEndTick { return }
@@ -1142,6 +1178,79 @@ final class MidiBedEngine {
       let start = time + swingDelay + loose
       pending.append(Pending(time: start, status: 0x90 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: v))
       pending.append(Pending(time: start + 0.09, status: 0x80 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: 0))
+    }
+  }
+
+  // MARK: Keys
+
+  private func keysHit(_ k: MidiBedKeysConfig, position: Int, hits: Int, steps: Int) -> Bool {
+    if k.useMask { return position >= 0 && position < 62 && ((k.mask >> position) & 1) == 1 }
+    return euclidHit(position: position, hits: hits, steps: steps)
+  }
+
+  /// A step's place in the keys' pattern, with the rotation applied.
+  private func keysPosition(_ k: MidiBedKeysConfig, step: Int) -> Int {
+    let steps = max(1, min(64, k.steps))
+    let local = ((step % steps) + steps) % steps
+    return ((local - k.rotation % steps) % steps + steps) % steps
+  }
+
+  /// Steps from this one to the next hit of the keys' pattern (the whole loop if it has a single hit).
+  private func keysGap(_ k: MidiBedKeysConfig, from step: Int) -> Int {
+    let steps = max(1, min(64, k.steps))
+    let hits = max(0, min(steps, k.hits))
+    for j in 1...steps where keysHit(k, position: keysPosition(k, step: step + j), hits: hits, steps: steps) { return j }
+    return steps
+  }
+
+  /// At each 16th step: if the keys' pattern hits, play the current chord of the harmony loop (its sus 4 version
+  /// now and then), the notes spread a few milliseconds low to high, each ringing for lengthPct of the gap to
+  /// the next hit. The pattern is played as a drum's would be (chance, ghost notes, accents, looseness).
+  private func stepKeys(step: Int, time: Double, stepDur: Double, cfg: MidiBedConfig) {
+    guard let k = cfg.keys, k.enabled, !k.chords.isEmpty else { return }
+    let steps = max(1, min(64, k.steps))
+    let hits = max(0, min(steps, k.hits))
+    let pos = keysPosition(k, step: step)
+    let main = keysHit(k, position: pos, hits: hits, steps: steps)
+    var ghost = false
+    if !main, k.ghostHits > 0 {
+      let local = ((step % steps) + steps) % steps
+      let gpos = ((local - k.ghostRotation % steps) % steps + steps) % steps
+      ghost = euclidHit(position: gpos, hits: min(steps, k.ghostHits), steps: steps)
+    }
+    guard main || ghost else { return }
+    let sure = main && k.keepFirst && pos == 0
+    if !sure, k.probability < 1, Double.random(in: 0..<1, using: &rng) > k.probability { return }
+
+    var vel = Double(ghost ? k.ghostVelocity : k.velocity)
+    if main, k.accentEvery > 1 {
+      var rank = 0
+      for j in 0..<pos where keysHit(k, position: j, hits: hits, steps: steps) { rank += 1 }
+      let shifted = rank - max(0, k.accentOffset)
+      if ((shifted % k.accentEvery) + k.accentEvery) % k.accentEvery == 0 { vel *= 1 + max(0, min(1, k.accentBoost)) }
+    }
+    if k.humanize > 0 { vel *= 1 - k.humanize * 0.4 * Double.random(in: 0..<1, using: &rng) }
+    vel *= endFade
+    guard vel >= 1 else { return }
+
+    var list = k.chords
+    if !k.susChords.isEmpty, k.susChance > 0, Double.random(in: 0..<1, using: &rng) < k.susChance { list = k.susChords }
+    guard !list.isEmpty else { return }
+    let notes = list[chordIndex % list.count].sorted()
+
+    let swing = (step % 2 == 1) ? max(0, min(1, cfg.swing)) * stepDur * 0.5 : 0
+    let loose = k.looseMs > 0 ? Double.random(in: 0..<1, using: &rng) * k.looseMs / 1000 : 0
+    let start = time + swing + loose
+    let gap = keysGap(k, from: step)
+    let length = max(0.05, Double(gap) * stepDur * max(0.1, min(1.5, k.lengthPct / 100)) - 0.003)
+    let strum = max(0, k.strumMs) / 1000
+    let ch = UInt8(max(0, min(15, k.channel)))
+    let v = UInt8(max(1, min(127, Int(vel))))
+    for (i, n) in notes.enumerated() {
+      let note = UInt8(max(0, min(127, n)))
+      let at = start + Double(i) * strum
+      pending.append(Pending(time: at, status: 0x90 | ch, d1: note, d2: v))
+      pending.append(Pending(time: at + length, status: 0x80 | ch, d1: note, d2: 0))
     }
   }
 
@@ -2410,16 +2519,16 @@ final class MidiBedEngine {
     for key in sounding {
       let ch = UInt8((key >> 8) & 0x0F)
       let note = UInt8(key & 0x7F)
-      if midi { sendMIDI(0x80 | ch, note, 0, to: [0, 1, 2, 3, 4, 5]) }
+      if midi { sendMIDI(0x80 | ch, note, 0, to: [0, 1, 2, 3, 4, 5, 6]) }
       synth.post(status: 0x80 | ch, d1: note, d2: 0)
     }
     sounding.removeAll()
     allNotesOff()
     if midi, !soft {
-      for ch in 0..<16 { sendMIDI(0xB0 | UInt8(ch), 120, 0, to: [0, 1, 2, 3, 4, 5]) }
+      for ch in 0..<16 { sendMIDI(0xB0 | UInt8(ch), 120, 0, to: [0, 1, 2, 3, 4, 5, 6]) }
       // and put the pitch bend back to the centre on the MidiDancer channel
       if let dch = config?.dancer.channel {
-        sendMIDI(0xE0 | UInt8(max(0, min(15, dch))), 0, 0x40, to: [0, 1, 2, 3, 4, 5])
+        sendMIDI(0xE0 | UInt8(max(0, min(15, dch))), 0, 0x40, to: [0, 1, 2, 3, 4, 5, 6])
       }
     }
   }
@@ -2428,7 +2537,7 @@ final class MidiBedEngine {
     for ch in 0..<16 {
       emit(0xB0 | UInt8(ch), 123, 0)
       // ...and out every source, in case a part's port or channel changed while notes were sounding.
-      if config?.midiOut ?? true { sendMIDI(0xB0 | UInt8(ch), 123, 0, to: [0, 1, 2, 3, 4, 5]) }
+      if config?.midiOut ?? true { sendMIDI(0xB0 | UInt8(ch), 123, 0, to: [0, 1, 2, 3, 4, 5, 6]) }
     }
   }
 

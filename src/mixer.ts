@@ -10,9 +10,10 @@ export type MixerState = {
   dancer: number;
   drums: number;
   loops: number;
+  keys: number;
 };
 
-export const defaultMixer: MixerState = { send: false, bass: 100, pad: 100, dancer: 100, drums: 100, loops: 100 };
+export const defaultMixer: MixerState = { send: false, bass: 100, pad: 100, dancer: 100, drums: 100, loops: 100, keys: 100 };
 
 export type MixerMessage = { part: keyof Omit<MixerState, 'send'>; channel: number; cc: number; value: number; loops: boolean };
 
@@ -20,6 +21,7 @@ type RoutingView = {
   mixer: MixerState;
   drone: { channel: number };
   pad: { channel: number };
+  keys: { channel: number };
   dancer: { channel: number };
   drums: { channel: number }[];
   loops: { channel: number };
@@ -40,6 +42,7 @@ export function mixerMessages(s: RoutingView, loopCC?: number): MixerMessage[] {
   };
   add('bass', s.drone.channel, 7);
   add('pad', s.pad.channel, 7);
+  add('keys', s.keys.channel, 7);
   add('dancer', s.dancer.channel, 7);
   for (const d of s.drums) add('drums', d.channel, 7);
   add('loops', s.loops.channel, loopCC ?? 7, true);

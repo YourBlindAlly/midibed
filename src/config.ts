@@ -8,6 +8,7 @@ import { LaneState, defaultLanes, lanesForEngine, parseLibrary, resolveLoopId } 
 import { buildBassChords, buildPadChords, clampColor, clampMode, MAX_CHORDS } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
+import { KEYS_RHYTHMS, KeysState, clampKeysRhythm, defaultKeys, keysMask } from './keys';
 import type { Layer } from './shortcuts';
 import { cycleBarsFromOldSpeed, phaseOffset, smoothBeatsFromOldSmooth } from './wander';
 import { MotionState, defaultMotion, drumRole } from './motion';
@@ -217,10 +218,10 @@ export type LoopsState = {
   favorites: string; // comma-separated program numbers
 };
 
-export type PortsState = { bass: boolean; pad: boolean; dancer: boolean; drums: boolean };
+export type PortsState = { bass: boolean; pad: boolean; dancer: boolean; drums: boolean; keys: boolean };
 
 export type PartOutput = { midi: boolean; synth: boolean };
-export type OutputsState = { bass: PartOutput; pad: PartOutput; dancer: PartOutput; drums: PartOutput; loops: PartOutput };
+export type OutputsState = { bass: PartOutput; pad: PartOutput; dancer: PartOutput; drums: PartOutput; loops: PartOutput; keys: PartOutput };
 
 export type BedState = {
   /** Per part: send it out as MIDI, and/or play it in the built-in sound. Global routing. */
@@ -279,6 +280,8 @@ export type BedState = {
   soundFavs: string;
   /** MidiDancer: call-and-response phrases on the key's scale. Everything but the channel is saved per scene. */
   dancer: DancerState;
+  /** Keys: a rhythmic electric piano that comps the chords. Everything but the channel is saved per scene. */
+  keys: KeysState;
   bpm: number;
   swing: number; // percent 0-100
   midiOut: boolean;
@@ -364,6 +367,7 @@ export type SceneData = {
   filterMove: boolean;
   filterPreset: number;
   dancer: Omit<DancerState, 'channel'>;
+  keys: Omit<KeysState, 'channel'>;
   /** Semitones above the journey key; the scene's home note (see keyRoot). */
   keyOffset: number;
   swing: number;
@@ -381,11 +385,12 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'playerOn' | 'lanes' | 'filterMove' | 'filterPreset' | 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'playerOn' | 'lanes' | 'filterMove' | 'filterPreset' | 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keys' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
   const { channel: _dancerChannel, ...dancer } = s.dancer;
+  const { channel: _keysChannel, ...keys } = s.keys;
   return {
     fill: { ...s.fill },
     evolve: { ...s.evolve },
@@ -395,6 +400,7 @@ export function captureScene(s: SceneSource): SceneData {
     filterMove: s.filterMove,
     filterPreset: s.filterPreset,
     dancer: { ...dancer },
+    keys: { ...keys },
     keyOffset: s.keyOffset,
     swing: s.swing,
     percussion: s.percussion,
@@ -466,6 +472,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     filterMove: sc.filterMove !== false,
     filterPreset: typeof sc.filterPreset === 'number' ? sc.filterPreset : 0,
     dancer: { ...s.dancer, ...sc.dancer },
+    keys: { ...s.keys, ...(sc.keys ?? {}) },
     keyOffset: sc.keyOffset,
     swing: sc.swing,
     percussion: sc.percussion,
@@ -516,6 +523,7 @@ export const SCENE_COPY_PARTS = [
   'Loops',
   'After this scene',
   'Loop player lanes',
+  'Keys',
 ];
 
 /** Copy one part of the current scene (including unsaved edits) into scene `to`; the rest of `to` stays. */
@@ -535,6 +543,7 @@ export function copyScenePart(s: BedState, to: number, what: number): BedState {
     { loops: cur.loops },
     { advance: cur.advance },
     { lanes: cur.lanes },
+    { keys: cur.keys },
   ];
   const piece = JSON.parse(JSON.stringify(parts[what])) as Partial<SceneData>;
   return {
@@ -701,6 +710,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     dancer: { midi: true, synth: true },
     drums: { midi: true, synth: true },
     loops: { midi: true, synth: true },
+    keys: { midi: true, synth: true },
   },
   fill: defaultFill,
   evolve: defaultEvolve,
@@ -725,11 +735,12 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   solo: null,
   mixer: defaultMixer,
   shortcuts: true,
-  ports: { bass: false, pad: false, dancer: false, drums: false },
+  ports: { bass: false, pad: false, dancer: false, drums: false, keys: false },
   customApps: '[]',
   // Rusty's good Synth One pad presets, kept under the Synth One app.
   soundFavs: stringifyFavMap({ synthone: favsFromPrograms(parseFavorites(getProfile('synthone').favorites ?? '')) }),
   dancer: defaultDancer,
+  keys: defaultKeys,
   journeyName: 'Journey 1',
   profiles: defaultProfileChoice,
   bpm: 88,
@@ -886,6 +897,58 @@ export function padChords(s: BedState): number[][] {
     spread: s.pad.spread,
     voiceLead: s.pad.voiceLead,
   });
+}
+
+/** The keys' chords, one per chord of the harmony loop, voice-led in the keys' register. */
+export function keysChords(s: BedState, style = s.keys.style): number[][] {
+  return buildPadChords({
+    root: keyRoot(s),
+    mode: s.harmony.mode,
+    degrees: s.harmony.degrees,
+    count: s.harmony.count,
+    colors: s.harmony.colors,
+    style,
+    register: s.keys.register,
+    spread: false,
+    voiceLead: s.keys.voiceLead,
+  });
+}
+
+/** The same chords as suspended (sus 4) chords, for the occasional sus hit. */
+export function keysSusChords(s: BedState): number[][] {
+  return s.keys.susChance > 0 ? keysChords(s, 2) : [];
+}
+
+/** The keys as the engine takes them (the pattern fields mirror a drum's, so the engine plays it the same way). */
+function keysForEngine(s: BedState) {
+  const k = s.keys;
+  const lib = k.rhythm > 0 ? KEYS_RHYTHMS[clampKeysRhythm(k.rhythm)] : null;
+  const steps = lib ? lib.steps : Math.max(1, Math.min(32, k.steps));
+  return {
+    enabled: s.solo ? s.solo === 'keys' : k.enabled,
+    channel: k.channel,
+    steps,
+    hits: lib ? lib.hits.length : Math.min(steps, k.hits),
+    mask: lib ? keysMask(k.rhythm) : 0,
+    useMask: !!lib,
+    rotation: k.rotation,
+    velocity: k.velocity,
+    probability: k.probability / 100,
+    humanize: k.humanize / 100,
+    ghostHits: Math.min(k.ghostHits, steps),
+    ghostRotation: k.ghostRotation,
+    ghostVelocity: k.ghostVelocity,
+    accentEvery: k.accentEvery,
+    accentBoost: k.accentBoost / 100,
+    accentOffset: k.accentOffset,
+    keepFirst: k.keepFirst,
+    looseMs: k.looseMs,
+    lengthPct: k.length,
+    strumMs: k.strumMs,
+    susChance: k.susChance / 100,
+    chords: keysChords(s),
+    susChords: keysSusChords(s),
+  };
 }
 
 /** Bass note lists, one per chord of the harmony loop when following, or one steady list. */
@@ -1285,6 +1348,7 @@ export function toEngineJson(s: BedState): string {
     },
     ports: s.ports,
     outputs: s.outputs,
+    keys: keysForEngine(s),
     dancer: (() => {
       const on = s.solo ? s.solo === 'dancer' : s.dancer.enabled;
       return {

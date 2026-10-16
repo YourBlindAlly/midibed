@@ -40,9 +40,10 @@ describe('keyboard shortcuts', () => {
 
 describe('mixer', () => {
   const routing = {
-    mixer: { ...defaultMixer, send: true, bass: 80, pad: 60, dancer: 50, drums: 90, loops: 70 },
+    mixer: { ...defaultMixer, send: true, bass: 80, pad: 60, dancer: 50, drums: 90, loops: 70, keys: 40 },
     drone: { channel: 0 },
     pad: { channel: 1 },
+    keys: { channel: 4 },
     dancer: { channel: 3 },
     drums: [{ channel: 9 }, { channel: 9 }, { channel: 9 }, { channel: 9 }],
     loops: { channel: 9 },
@@ -58,6 +59,7 @@ describe('mixer', () => {
     expect(m.filter((x) => !x.loops).map((x) => [x.part, x.channel, x.cc, x.value])).toEqual([
       ['bass', 0, 7, 80],
       ['pad', 1, 7, 60],
+      ['keys', 4, 7, 40],
       ['dancer', 3, 7, 50],
       ['drums', 9, 7, 90], // four drums on one channel: one message
     ]);

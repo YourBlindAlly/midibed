@@ -34,7 +34,11 @@ enum UglyFXParam: Int {
   case loopsReverb
   case loopsDelay
   case loopsChorus      // reserved: the loops are not chorused yet
-  static let count = 24
+  case keysPan          // the keys, a fifth part (after the loops so older numbering is unchanged)
+  case keysReverb
+  case keysDelay
+  case keysChorus
+  static let count = 28
 }
 
 private final class FXLine {
@@ -93,7 +97,7 @@ final class UglyFX {
   private var revL: FXReverbSide
   private var revR: FXReverbSide
   private var chorusLines: [FXLine]
-  private var chorusPhase = [Float](repeating: 0, count: 4)
+  private var chorusPhase = [Float](repeating: 0, count: 5)
   private var delayL: FXLine
   private var delayR: FXLine
   private var delayLen: Float = 22050 // smoothed delay time in samples
@@ -110,7 +114,7 @@ final class UglyFX {
     params = ptr
     revL = FXReverbSide(sampleRate: 44100, spread: 0)
     revR = FXReverbSide(sampleRate: 44100, spread: 23)
-    chorusLines = (0..<4).map { _ in FXLine(2048) }
+    chorusLines = (0..<5).map { _ in FXLine(2048) }
     delayL = FXLine(Int(44100 * 1.6) + 4)
     delayR = FXLine(Int(44100 * 1.6) + 4)
   }
@@ -122,16 +126,16 @@ final class UglyFX {
     sr = rate
     revL = FXReverbSide(sampleRate: rate, spread: 0)
     revR = FXReverbSide(sampleRate: rate, spread: 23)
-    chorusLines = (0..<4).map { _ in FXLine(Int(rate * 0.05) + 8) }
+    chorusLines = (0..<5).map { _ in FXLine(Int(rate * 0.05) + 8) }
     delayL = FXLine(Int(rate * 1.6) + 4)
     delayR = FXLine(Int(rate * 1.6) + 4)
     delayLen = max(1, params[UglyFXParam.delayMs.rawValue] * 0.001 * rate)
   }
 
-  /// One frame: the four parts' mono signals in (bass, pad, dancer, drums) and the loop player's stereo pair,
+  /// One frame: the parts' mono signals in (bass, pad, dancer, drums, keys) and the loop player's stereo pair,
   /// stereo out.
   @inline(__always)
-  func process(_ b0: Float, _ b1: Float, _ b2: Float, _ b3: Float, loopL: Float, loopR: Float, left: inout Float, right: inout Float) {
+  func process(_ b0: Float, _ b1: Float, _ b2: Float, _ b3: Float, keys b4: Float, loopL: Float, loopR: Float, left: inout Float, right: inout Float) {
     let p = params
     var outL: Float = 0
     var outR: Float = 0
@@ -139,9 +143,9 @@ final class UglyFX {
     var delIn: Float = 0
     let invSr = 1 / sr
 
-    for i in 0..<4 {
-      let x = i == 0 ? b0 : (i == 1 ? b1 : (i == 2 ? b2 : b3))
-      let base = i * 4
+    for i in 0..<5 {
+      let x = i == 0 ? b0 : (i == 1 ? b1 : (i == 2 ? b2 : (i == 3 ? b3 : b4)))
+      let base = i < 4 ? i * 4 : UglyFXParam.keysPan.rawValue
       let pan = max(-1, min(1, p[base]))
       let rev = max(0, min(1, p[base + 1]))
       let del = max(0, min(1, p[base + 2]))

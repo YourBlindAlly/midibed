@@ -323,3 +323,6 @@ generator, and only if Rusty wants it on an AUM strip with effects.
 
 ### Free public-domain loop source (Rusty, 2026-10-16: just a NOTE for now)
 Rusty found a large collection of free, public-domain loops. The download list is a PDF at https://ln5.sync.com/dl/278346d00/view/pdf/31976989462012?sync_id=0#hienvehh-kqt2wju3-gd9v9x3h-4d7i9bde (a Sync.com share; not opened by Claude). He has grabbed a few packs and will put them in the git-ignored `loops` folder; there is a lot and he does not yet know how much is useful. Nothing to build. When he brings packs in: survey length, tempo (from names), bars, loudness and loop tightness as was done for the shake loops, and check each pack's licence text himself or with Claude before any audio is shared or used in a release (never commit audio; the repo is public). Companion idea: tempo-matched copies of loops (ffmpeg, pitch kept) or real time-stretch in the Loop player; see 'Loop stretching stays on the map'.
+
+### Keys: built v1 (2026-10-16), still to come
+- Built: pattern library + generator, Rhodes-style built-in voice, sus 4 chance, ghost notes/accents/looseness, own channel/port/outputs/FX/mixer/layer. Not yet: the occasional run or lick, a voice editor (tone, tremolo depth, release), keys in the starter journeys, ducking around MidiDancer, filter presets for the keys.

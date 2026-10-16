@@ -37,6 +37,21 @@ final class MidiBedTestSynth {
     var channel: UInt8 = 0
   }
 
+  /// One electric-piano note (the Keys part): two-operator FM, a body (modulator at the same frequency, its index
+  /// falling away) and a bright "tine" (modulator at 14 times, a quick ping), with a decay that is faster for
+  /// higher notes, and a quick release. Designed and level-checked offline (scratchpad rhodes_check.py): the
+  /// fundamental lands on pitch, the level is close to a pad note's, and almost no energy reaches above 16 kHz.
+  private struct KeysVoice {
+    var active = false
+    var gate = false
+    var note: Int = 0
+    var phase: Float = 0
+    var t: Float = 0      // seconds since the note began
+    var rel: Float = 1    // release gain
+    var velocity: Float = 0
+    var channel: UInt8 = 0
+  }
+
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 shaker, 7 tom,
   /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
@@ -84,6 +99,9 @@ final class MidiBedTestSynth {
   private var pads: UnsafeMutablePointer<PadVoice>
   private var drums: UnsafeMutablePointer<DrumVoice>
   private var drumPatches: UnsafeMutablePointer<DrumPatch>
+  private var keysVoices: UnsafeMutablePointer<KeysVoice>
+  private let keysCount = 12
+  private var keysTremPhase: Float = 0
   private let padCount = 16
   private let drumCount = 8
 
@@ -143,6 +161,8 @@ final class MidiBedTestSynth {
   var bassOn = false
   var bassExclusive = false
   var bassChannel = -1
+  /// The MIDI channel the electric piano plays on (-1 none): notes there use the keys voices.
+  var keysChannel = -1
 
   /// Control side: the drums' sound settings, by MIDI note. Replaces the whole table.
   func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float)]) {
@@ -194,6 +214,8 @@ final class MidiBedTestSynth {
     drums.initialize(repeating: DrumVoice(), count: drumCount)
     drumPatches = UnsafeMutablePointer<DrumPatch>.allocate(capacity: 128)
     drumPatches.initialize(repeating: DrumPatch(), count: 128)
+    keysVoices = UnsafeMutablePointer<KeysVoice>.allocate(capacity: keysCount)
+    keysVoices.initialize(repeating: KeysVoice(), count: keysCount)
     expTarget = UnsafeMutablePointer<Float>.allocate(capacity: 16)
     expTarget.initialize(repeating: 1, count: 16)
     expCurrent = UnsafeMutablePointer<Float>.allocate(capacity: 16)
@@ -223,6 +245,7 @@ final class MidiBedTestSynth {
     pads.deallocate()
     drums.deallocate()
     drumPatches.deallocate()
+    keysVoices.deallocate()
     expTarget.deallocate()
     expCurrent.deallocate()
     noiseRing.deallocate()
@@ -439,6 +462,23 @@ final class MidiBedTestSynth {
       drums[slot] = v
       return
     }
+    if Int(channel) == keysChannel {
+      var kslot = -1
+      for i in 0..<keysCount where !keysVoices[i].active { kslot = i; break }
+      if kslot < 0 {
+        // Steal a note that has been let go of, else the one that has been sounding longest.
+        var bestScore = Float.greatestFiniteMagnitude
+        for i in 0..<keysCount {
+          let score = (keysVoices[i].gate ? 10000 : 0) - keysVoices[i].t
+          if score < bestScore {
+            bestScore = score
+            kslot = i
+          }
+        }
+      }
+      keysVoices[kslot] = KeysVoice(active: true, gate: true, note: note, phase: 0, t: 0, rel: 1, velocity: velocity, channel: channel)
+      return
+    }
     padAgeCounter += 1
     var slot = -1
     for i in 0..<padCount where !pads[i].active { slot = i; break }
@@ -459,6 +499,12 @@ final class MidiBedTestSynth {
 
   private func noteOff(channel: UInt8, note: Int) {
     if channel == 9 { return }
+    if Int(channel) == keysChannel {
+      for i in 0..<keysCount where keysVoices[i].active && keysVoices[i].gate && keysVoices[i].note == note && keysVoices[i].channel == channel {
+        keysVoices[i].gate = false
+      }
+      return
+    }
     // The CHANNEL must match too: the same pitch can be playing on two channels at once (a pad's fifth and a
     // MidiDancer or bass note), and a note-off for one must not release the other.
     for i in 0..<padCount where pads[i].active && pads[i].gate && pads[i].note == note && pads[i].channel == channel {
@@ -468,6 +514,7 @@ final class MidiBedTestSynth {
 
   private func allNotesOff() {
     for i in 0..<padCount { pads[i].gate = false }
+    for i in 0..<keysCount { keysVoices[i].gate = false }
   }
 
   @inline(__always)
@@ -692,6 +739,7 @@ final class MidiBedTestSynth {
     let attack = 1 - expf(-dt / 0.9)
     let release = 1 - expf(-dt / 1.6)
     let expSmooth = 1 - expf(-dt / 0.03)
+    let keysRelease = expf(-dt / 0.12)
 
     // The loop player renders a whole buffer at once (false: nothing is playing).
     let haveLoops = loops.renderBlock(frames: frameCount)
@@ -701,6 +749,7 @@ final class MidiBedTestSynth {
       var partBass: Float = 0
       var partPad: Float = 0
       var partDancer: Float = 0
+      var partKeys: Float = 0
       var drumSum: Float = 0
 
       for c in 0..<16 {
@@ -734,6 +783,32 @@ final class MidiBedTestSynth {
         default: partPad += padOut
         }
       }
+
+      // The electric piano. A slow tremolo (about 4.8 Hz, a tenth deep) is the classic suitcase shimmer.
+      keysTremPhase += 4.8 * dt
+      if keysTremPhase >= 1 { keysTremPhase -= 1 }
+      let keysTrem = 0.9 + 0.1 * sinf(2 * Float.pi * keysTremPhase)
+      for i in 0..<keysCount where keysVoices[i].active {
+        let kn = keysVoices[i].note
+        let kf = 440 * powf(2, Float(kn - 69) / 12)
+        let kt = keysVoices[i].t
+        let kv = keysVoices[i].velocity
+        keysVoices[i].phase += kf * dt
+        if keysVoices[i].phase >= 1 { keysVoices[i].phase -= 1 }
+        let kph = keysVoices[i].phase
+        let decayRate = min(5, max(1.2, 2.2 * (1 + Float(kn - 60) / 36)))
+        let tineScale = min(1, max(0.2, 1 - Float(kn - 72) / 36))
+        let kamp = 0.75 * expf(-kt * decayRate) + 0.25 * expf(-kt * decayRate * 0.25)
+        let bodyIndex = (0.9 + 1.6 * kv) * expf(-kt * decayRate * 1.5)
+        let tineIndex = (0.35 + 0.9 * kv) * expf(-kt * 25) * tineScale
+        let twoPi = 2 * Float.pi
+        let ky = sinf(twoPi * kph + bodyIndex * sinf(twoPi * kph) + tineIndex * sinf(twoPi * 14 * kph))
+        if !keysVoices[i].gate { keysVoices[i].rel *= keysRelease }
+        keysVoices[i].t += dt
+        partKeys += ky * kamp * keysVoices[i].rel * (0.35 + 0.65 * kv) * 0.2 * expCurrent[Int(keysVoices[i].channel)]
+        if kamp * keysVoices[i].rel < 0.0003 { keysVoices[i].active = false }
+      }
+      partKeys *= keysTrem
 
       for i in 0..<drumCount where drums[i].active {
         let t = drums[i].t
@@ -908,6 +983,7 @@ final class MidiBedTestSynth {
         partBass = 0
         partPad = 0
         partDancer = 0
+        partKeys = 0
       }
       let partDrums: Float = on ? drumFiltered : 0
       var noiseOut: Float = 0
@@ -919,7 +995,7 @@ final class MidiBedTestSynth {
       var right: Float = 0
       let loopL: Float = haveLoops ? loops.left[frame] : 0
       let loopR: Float = haveLoops ? loops.right[frame] : 0
-      fx.process(partBass, partPad, partDancer, partDrums, loopL: loopL, loopR: loopR, left: &left, right: &right)
+      fx.process(partBass, partPad, partDancer, partDrums, keys: partKeys, loopL: loopL, loopR: loopR, left: &left, right: &right)
       // The output mode: mono sums both sides (3 dB down, so the level stays about the same) and puts the result
       // on both sides, or on the left only, or on the right only. Then a gentle soft clip so stacked voices
       // can't blast.
