@@ -223,6 +223,8 @@ export type BedState = {
   sceneName: string;
   /** The loop player's four lanes (src/looplib.ts). Saved with the scene. */
   lanes: LaneState[];
+  /** The Loop player layer switch: off silences all four lanes (at the next bar line). Saved with the scene. */
+  playerOn: boolean;
   /** The loop library, as JSON text (the audio files MidiBed has copied in). Global. */
   loopLib: string;
   /** The Loop player's overall level, percent (loops are loudness-matched first). Global. */
@@ -348,6 +350,7 @@ export type SceneData = {
   /** The scene's own name; empty when it has none. */
   name: string;
   lanes: LaneState[];
+  playerOn: boolean;
   filterMove: boolean;
   filterPreset: number;
   dancer: Omit<DancerState, 'channel'>;
@@ -368,7 +371,7 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'lanes' | 'filterMove' | 'filterPreset' | 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'playerOn' | 'lanes' | 'filterMove' | 'filterPreset' | 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
@@ -378,6 +381,7 @@ export function captureScene(s: SceneSource): SceneData {
     evolve: { ...s.evolve },
     name: s.sceneName,
     lanes: s.lanes.map((l) => ({ ...l })),
+    playerOn: s.playerOn,
     filterMove: s.filterMove,
     filterPreset: s.filterPreset,
     dancer: { ...dancer },
@@ -443,6 +447,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     evolve: { ...defaultEvolve, ...sc.evolve },
     sceneName: typeof sc.name === 'string' ? sc.name : '',
     lanes: Array.isArray(sc.lanes) ? defaultLanes().map((d, i) => ({ ...d, ...(sc.lanes[i] ?? {}) })) : defaultLanes(),
+    playerOn: sc.playerOn !== false,
     filterMove: sc.filterMove !== false,
     filterPreset: typeof sc.filterPreset === 'number' ? sc.filterPreset : 0,
     dancer: { ...s.dancer, ...sc.dancer },
@@ -682,6 +687,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   evolve: defaultEvolve,
   sceneName: '',
   lanes: defaultLanes(),
+  playerOn: true,
   loopLib: '[]',
   loopMaster: 100,
   loopMatchVersion: 1,
@@ -1106,7 +1112,8 @@ export function toEngineJson(s: BedState): string {
     frozen: s.frozen,
     filterHold: s.filterHold,
     sceneChangeAt: s.sceneChangeAt,
-    lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster),
+    // The Loop player layer: off (or another layer soloed) silences every lane.
+    lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster).map((l) => ({ ...l, on: l.on && (s.solo ? s.solo === 'player' : s.playerOn) })),
     advance: {
       mode: s.advance.mode,
       bars: advanceBars(s.advance, s.harmony),

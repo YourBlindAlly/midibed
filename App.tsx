@@ -753,6 +753,9 @@ export default function App() {
         } else if (action.layer === 'drums') {
           on = !state.percussion;
           patch({ percussion: on });
+        } else if (action.layer === 'player') {
+          on = !state.playerOn;
+          patch({ playerOn: on });
         } else {
           on = !state.loops.enabled;
           patchLoops({ enabled: on });
@@ -1313,8 +1316,15 @@ export default function App() {
               hint="Turns all the drums on or off together. Each drum keeps its own setting"
             />
             <Toggle label="Solo drums" value={state.solo === 'drums'} onChange={(v) => setSolo(v ? 'drums' : null)} />
-            <Toggle label="Loops layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} />
-            <Toggle label="Solo loops" value={state.solo === 'loops'} onChange={(v) => setSolo(v ? 'loops' : null)} />
+            <Toggle
+              label="Loop player layer"
+              value={state.playerOn}
+              onChange={(v) => patch({ playerOn: v })}
+              hint="Turns all four audio loop lanes on or off together, at the next bar line. Each lane keeps its own setting. The A key does the same"
+            />
+            <Toggle label="Solo loop player" value={state.solo === 'player'} onChange={(v) => setSolo(v ? 'player' : null)} hint="Hear only the audio loop lanes" />
+            <Toggle label="Loops app layer" value={state.loops.enabled} onChange={(v) => patchLoops({ enabled: v })} hint="The loops of another app such as DrumJam, started and stopped from MidiBed. The L key does the same" />
+            <Toggle label="Solo loops app" value={state.solo === 'loops'} onChange={(v) => setSolo(v ? 'loops' : null)} />
           </Section>
 
           <Section title="Filters">

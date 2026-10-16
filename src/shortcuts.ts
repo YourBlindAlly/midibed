@@ -4,7 +4,7 @@
  * side (MidiBedPagerView) only reports unmodified key presses while MidiBed is in front: iOS does not
  * deliver keys to an app in the background.
  */
-export type Layer = 'bass' | 'pad' | 'dancer' | 'drums' | 'loops';
+export type Layer = 'bass' | 'pad' | 'dancer' | 'drums' | 'loops' | 'player';
 
 export type ShortcutAction =
   | { type: 'scene'; index: number }
@@ -27,14 +27,15 @@ export type ShortcutAction =
   | { type: 'armSolo' }
   | { type: 'clearSolo' };
 
-const LAYER_KEYS: Record<string, Layer> = { r: 'bass', c: 'pad', m: 'dancer', d: 'drums', l: 'loops' };
+const LAYER_KEYS: Record<string, Layer> = { r: 'bass', c: 'pad', m: 'dancer', d: 'drums', l: 'loops', a: 'player' };
 
 export const LAYER_NAMES: Record<Layer, string> = {
   bass: 'Bass drone',
   pad: 'Chord pad',
   dancer: 'MidiDancer',
   drums: 'Drums',
-  loops: 'Loops',
+  loops: 'Loops app',
+  player: 'Loop player',
 };
 
 /**
@@ -99,7 +100,7 @@ export const SHORTCUT_HELP: string[] = [
   'V: next filter preset (wandering, open, warm, muffled, underwater, telephone, mid focus, thin, top)',
   'G: which module the filter preset goes to (the whole mix, or one module)',
   'Y: when scene changes land (the next bar, the end of the progression, the end of the scene)',
-  'D: drums on or off, C: chord pad, R: bass drone (root), M: MidiDancer, L: loops',
+  'D: drums on or off, C: chord pad, R: bass drone (root), M: MidiDancer, A: the Loop player (the four audio loop lanes), L: the loops app (such as DrumJam)',
   'A capital letter (or Shift) solos that part: Shift D hears only the drums. Pressing it again clears the solo.',
   'No capitals? Press O, then the part letter, to solo it. X clears the solo.',
 ];

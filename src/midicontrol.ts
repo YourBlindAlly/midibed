@@ -31,7 +31,8 @@ const LAYERS = [
   ['pad', 'Chord pad'],
   ['dancer', 'MidiDancer'],
   ['drums', 'Drums'],
-  ['loops', 'Loops'],
+  ['loops', 'Loops app'],
+  ['player', 'Loop player'],
 ] as const;
 
 // New actions go at the END so a saved mapping keeps its meaning.

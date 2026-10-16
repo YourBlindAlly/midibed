@@ -139,3 +139,43 @@ describe('loudness matching', () => {
     expect(migrateState(undefined).lanes.every((l) => l.level === 100)).toBe(true);
   });
 });
+
+describe('the Loop player layer', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sc = require('../src/shortcuts');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mc = require('../src/midicontrol');
+  const withLane = () => {
+    setLoopDir('file:///x/loops/');
+    const lib = addToLibrary('[]', [entry()]);
+    return { ...defaultState, loopLib: lib, lanes: defaultLanes().map((l, i) => (i === 0 ? { ...l, loop: 'Set/PL_Bongos_90', on: true } : l)) };
+  };
+
+  it('has the A key (and a capital A to solo it), distinct from the L key for the loops app', () => {
+    expect(sc.actionForKey('a')).toEqual({ type: 'layer', layer: 'player' });
+    expect(sc.actionForKey('A')).toEqual({ type: 'solo', layer: 'player' });
+    expect(sc.actionForKey('l')).toEqual({ type: 'layer', layer: 'loops' });
+    expect(mc.MIDI_ACTIONS.some((a: { id: string }) => a.id === 'layer:player')).toBe(true);
+    expect(mc.MIDI_ACTIONS.some((a: { id: string }) => a.id === 'solo:player')).toBe(true);
+    expect(sc.LAYER_NAMES.player).toBe('Loop player');
+  });
+
+  it('switches every lane off when it is off, or when another layer is soloed, and on when soloed itself', () => {
+    const s = withLane();
+    const on = (st: typeof s) => JSON.parse(toEngineJson(st)).lanes[0].on;
+    expect(on(s)).toBe(true);
+    expect(on({ ...s, playerOn: false })).toBe(false);
+    expect(on({ ...s, solo: 'drums' })).toBe(false);
+    expect(on({ ...s, solo: 'player' })).toBe(true);
+    expect(on({ ...s, playerOn: false, solo: 'player' })).toBe(true);
+    setLoopDir('');
+  });
+
+  it('is saved with the scene and on by default', () => {
+    expect(defaultState.playerOn).toBe(true);
+    const s = switchScene(switchScene({ ...defaultState, playerOn: false }, 1), 0);
+    expect(s.playerOn).toBe(false);
+    expect(switchScene({ ...defaultState, playerOn: false }, 1).playerOn).toBe(true);
+    expect(migrateState({}).playerOn).toBe(true);
+  });
+});
