@@ -115,13 +115,13 @@ function fluteGsharpB(): Journey {
   const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule, bass = noRule) => ({ bass, pad, drums });
   const wander = { everyBars: 4, chance: 60, returnAfter: 3 };
   const soft = {
-    Kick: { rhythm: rhythmIndex('Half time'), steps: 16, hits: 1, rotation: 0, velocity: 78, accentEvery: 0, keepFirst: false },
+    Kick: { rhythm: rhythmIndex('Kick on 1 and 3'), steps: 16, hits: 2, rotation: 0, velocity: 78, accentEvery: 0, keepFirst: false },
     Shaker: { velocity: 45, probability: 75 },
     'Low tom': { velocity: 66 },
     'Mid tom': { velocity: 58 },
     'High tom': { velocity: 54 },
   };
-  const droneKit = ['Shaker', 'Low tom', 'Mid tom'];
+  const droneKit = ['Kick', 'Shaker', 'Low tom', 'Mid tom'];
   const groove = ['Kick', 'Shaker', 'Low tom', 'Mid tom'];
   const scenes = [
     // 1: a steady G# minor drone (bass and a fifths pad); soft hand drums wander in after 8 bars and keep changing.
@@ -131,7 +131,7 @@ function fluteGsharpB(): Journey {
     // 3: B, G#m, C#m, F# (major, the turnaround), 2 bars each; the drums drop to the kick now and then.
     minorScene({ name: 'B, G#m, C#m, G#m twice, F#', keyOffset: 0, mode: 5, degrees: [3, 1, 4, 1, 3, 1, 4, 1, 7], barsPerChord: 2, follow: true, drums: groove, snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 2)) }),
     // 4: a sister progression G#m, E, B, F#; the pad and bass both go steady together now and then.
-    minorScene({ name: 'G#m, E, B, F#', keyOffset: 0, mode: 5, degrees: [1, 6, 3, 7], barsPerChord: 2, follow: true, drums: groove, snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
+    minorScene({ name: 'G#m, E, B, F#', keyOffset: 0, mode: 5, degrees: [1, 6, 3, 7], barsPerChord: 2, follow: true, drums: groove, snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 2), rule(16, 8, 0), rule(16, 8, 0)) }),
   ];
   return { ...captureJourney(defaultState), name: 'Flute G# minor B', root: 44, bpm: 90, activeScene: 0, scenes };
 }
@@ -140,13 +140,13 @@ function fluteTwoChords(): Journey {
   const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule, bass = noRule) => ({ bass, pad, drums });
   const wander = { everyBars: 4, chance: 60, returnAfter: 3 };
   const soft = {
-    Kick: { rhythm: rhythmIndex('Half time'), steps: 16, hits: 1, rotation: 0, velocity: 78, accentEvery: 0, keepFirst: false },
+    Kick: { rhythm: rhythmIndex('Kick on 1 and 3'), steps: 16, hits: 2, rotation: 0, velocity: 78, accentEvery: 0, keepFirst: false },
     Shaker: { velocity: 45, probability: 75 },
     'Low tom': { velocity: 66 },
     'Mid tom': { velocity: 58 },
     'High tom': { velocity: 54 },
   };
-  const droneKit = ['Shaker', 'Low tom', 'Mid tom'];
+  const droneKit = ['Kick', 'Shaker', 'Low tom', 'Mid tom'];
   const groove = ['Kick', 'Shaker', 'Low tom', 'Mid tom'];
   const scenes = [
     // 1: a steady G# minor drone (bass and a fifths pad); soft hand drums wander in after 8 bars and keep changing.
@@ -155,8 +155,8 @@ function fluteTwoChords(): Journey {
     minorScene({ name: 'B major drone', keyOffset: 3, mode: 0, degrees: [1], barsPerChord: 1, follow: false, padStyle: 6, drums: [...droneKit, 'High tom'], snare: false, evolve: wander, drumOverrides: soft, motion: motion(drumsRule(8, 0, 2, 0)) }),
     // 3: B and G#m, back and forth, 2 bars each.
     minorScene({ name: 'B, G#m cycle', keyOffset: 0, mode: 5, degrees: [3, 1], barsPerChord: 2, follow: true, drums: groove, snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 2)) }),
-    // 4: C#m and G#m, back and forth, 2 bars each; the pad and bass go steady together now and then.
-    minorScene({ name: 'C#m, G#m cycle', keyOffset: 0, mode: 5, degrees: [4, 1], barsPerChord: 2, follow: true, drums: groove, snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
+    // 4: C#m and G#m, back and forth, 2 bars each; the pad and bass go steady together now and then; the drum breakdown keeps the kick.
+    minorScene({ name: 'C#m, G#m cycle', keyOffset: 0, mode: 5, degrees: [4, 1], barsPerChord: 2, follow: true, drums: groove, snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 2), rule(16, 8, 0), rule(16, 8, 0)) }),
   ];
   return { ...captureJourney(defaultState), name: 'Flute two-chord cycles', root: 44, bpm: 90, activeScene: 0, scenes };
 }
@@ -184,7 +184,7 @@ function modalJourney(spec: ModalSpec): Journey {
   const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule, bass = noRule) => ({ bass, pad, drums });
   const wander = { everyBars: 4, chance: 60, returnAfter: 3 };
   const soft = {
-    Kick: { rhythm: rhythmIndex('Half time'), steps: 16, hits: 1, rotation: 0, velocity: 78, accentEvery: 0, keepFirst: false },
+    Kick: { rhythm: rhythmIndex('Kick on 1 and 3'), steps: 16, hits: 2, rotation: 0, velocity: 78, accentEvery: 0, keepFirst: false },
     Shaker: { velocity: 45, probability: 75 },
     'Low tom': { velocity: 66 },
     'Mid tom': { velocity: 58 },
@@ -193,13 +193,13 @@ function modalJourney(spec: ModalSpec): Journey {
   const name = (degrees: number[]) => degrees.map((d) => shortChord(spec.tonic, spec.mode, d)).join(', ');
   const scenes = [
     // 1: a steady tonic drone (bass and fifths pad) to improvise over; soft hand drums wander in after 8 bars.
-    minorScene({ ...e, name: 'Drone', degrees: [1], barsPerChord: 1, follow: false, padStyle: 6, drums: ['Shaker', 'Low tom', 'Mid tom'], snare: false, evolve: wander, drumOverrides: soft, motion: motion(drumsRule(8, 0, 2, 0)) }),
+    minorScene({ ...e, name: 'Drone', degrees: [1], barsPerChord: 1, follow: false, padStyle: 6, drums: ['Kick', 'Shaker', 'Low tom', 'Mid tom'], snare: false, evolve: wander, drumOverrides: soft, motion: motion(drumsRule(8, 0, 2, 0)) }),
     // 2: a two-chord flip-flop, two bars each.
     minorScene({ ...e, name: name(spec.flip), degrees: spec.flip, barsPerChord: 2, follow: true, drums: ['Kick', 'Shaker', 'Low tom', 'Mid tom'], snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 2)) }),
     // 3: a different short progression; the bass and pad go steady together now and then.
-    minorScene({ ...e, name: name(spec.turn), degrees: spec.turn, barsPerChord: 2, follow: true, drums: ['Kick', 'Shaker', 'Low tom', 'Mid tom'], snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
+    minorScene({ ...e, name: name(spec.turn), degrees: spec.turn, barsPerChord: 2, follow: true, drums: ['Kick', 'Shaker', 'Low tom', 'Mid tom'], snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 2), rule(16, 8, 0), rule(16, 8, 0)) }),
     // 4: home on the tonic chord with a fuller kit: kick, snare, hats, tambourine, shaker and toms.
-    minorScene({ ...e, name: spec.home ? `${name(spec.home)}, full kit` : 'Home, full kit', degrees: spec.home ?? [1], barsPerChord: spec.home ? 2 : 1, follow: !!spec.home, drums: ['Kick', 'Snare', 'Hat', 'Tambourine', 'Shaker', 'Low tom'], snare: true, drumOverrides: { Shaker: { velocity: 50 }, 'Low tom': { velocity: 70 } }, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
+    minorScene({ ...e, name: spec.home ? `${name(spec.home)}, full kit` : 'Home, full kit', degrees: spec.home ?? [1], barsPerChord: spec.home ? 2 : 1, follow: !!spec.home, drums: ['Kick', 'Snare', 'Hat', 'Tambourine', 'Shaker', 'Low tom'], snare: true, drumOverrides: { Shaker: { velocity: 50 }, 'Low tom': { velocity: 70 } }, motion: motion(drumsRule(0, 16, 8, 2), rule(16, 8, 0), rule(16, 8, 0)) }),
   ];
   return { ...captureJourney(defaultState), name: `Ocarina ${MODE_NAMES[spec.mode].split(' ')[0]}`, root: spec.tonic, bpm: spec.bpm, activeScene: 0, scenes };
 }

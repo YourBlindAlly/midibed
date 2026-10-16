@@ -109,7 +109,7 @@ describe('Flute G# minor B starter journey', () => {
       expect(s.drone.follow).toBe(false);
       expect(s.pad.follow).toBe(false);
       expect(s.evolve.everyBars).toBe(4);
-      expect(s.drums.find((d) => d.name === 'Kick')!.enabled).toBe(false);
+      expect(s.drums.find((d) => d.name === 'Kick')!.enabled).toBe(true);
       expect(s.drums.find((d) => d.name === 'Low tom')!.enabled).toBe(true);
     }
   });
@@ -178,7 +178,7 @@ describe('Ocarina modal starter journeys (all notes of C major)', () => {
     }
     const s4 = applyScene(added, added.scenes[3]);
     expect(s4.drums.filter((d) => d.enabled).length).toBeGreaterThanOrEqual(6);
-    expect(applyScene(added, added.scenes[0]).drums.find((d) => d.name === 'Kick')!.enabled).toBe(false);
+    expect(applyScene(added, added.scenes[0]).drums.find((d) => d.name === 'Kick')!.enabled).toBe(true);
   });
 });
 
@@ -252,5 +252,29 @@ describe('loops in the starter journeys', () => {
     expect(resolveLaneIds(fixed)).toBe(fixed);
     // an empty library changes nothing
     expect(resolveLaneIds(added)).toBe(added);
+  });
+});
+
+describe('every starter has a kick foundation', () => {
+  it('a kick on beats 1 and 3 in every scene of every starter', () => {
+    for (let idx = 0; idx < STARTER_JOURNEYS.length; idx++) {
+      const added = addStarterJourney(defaultState, idx);
+      added.scenes.forEach((sc, i) => {
+        const s = applyScene(added, sc);
+        const kick = s.drums.find((d) => d.name === 'Kick')!;
+        const hits = RHYTHMS[kick.rhythm].hits;
+        expect([STARTER_JOURNEYS[idx].name, i, kick.enabled, hits.includes(0), hits.includes(8)]).toEqual([STARTER_JOURNEYS[idx].name, i, true, true, true]);
+      });
+    }
+  });
+  it('the flute and ocarina breakdowns keep the kick (kick-only style)', () => {
+    for (const idx of [2, 3, 4, 5, 6, 7, 8, 9]) {
+      const added = addStarterJourney(defaultState, idx);
+      // the two flute journeys start with two drone scenes (no breakdown); the ocarina ones with one
+      for (const i of idx < 4 ? [2, 3] : [1, 2, 3]) {
+        const style = applyScene(added, added.scenes[i]).motion.drums.style;
+        expect([STARTER_JOURNEYS[idx].name, i, style]).toEqual([STARTER_JOURNEYS[idx].name, i, 2]);
+      }
+    }
   });
 });

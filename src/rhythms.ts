@@ -37,6 +37,8 @@ export const RHYTHMS: Rhythm[] = [
   { name: 'Straight sixteenths', steps: 16, hits: Array.from({ length: 16 }, (_, i) => i) },
   // Beat 1, the 'e' of beat 2 (2.25), beat 3: a syncopated kick.
   { name: 'Syncopated kick: 1, 2 e, 3', steps: 16, hits: [0, 5, 8] },
+  // A kick on beats 1 and 3: a plain foundation.
+  { name: 'Kick on 1 and 3', steps: 16, hits: [0, 8] },
 ];
 
 export function clampRhythm(i: number): number {
