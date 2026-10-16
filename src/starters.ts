@@ -1,0 +1,97 @@
+// Starter journeys: ready-made journeys Rusty can add and then change. Each is built from the
+// plain defaults plus a few overrides, so it stays valid whenever a new setting is added.
+import { BedState, Journey, MAX_JOURNEYS, SceneData, applyJourney, captureJourney, captureScene, defaultState } from './config';
+import { RHYTHMS } from './rhythms';
+
+const rhythmIndex = (name: string): number => Math.max(0, RHYTHMS.findIndex((r) => r.name === name));
+
+type SceneSpec = {
+  name: string;
+  degrees: number[];
+  barsPerChord: number;
+  follow: boolean; // bass and pad follow the chords
+  drums: string[]; // names of the drums that are on
+  snare: boolean;
+  motion: Partial<BedState['motion']>;
+};
+
+/** Build one scene on top of the defaults. Key A minor is the journey key C moved down 3 semitones. */
+function minorScene(spec: SceneSpec): SceneData {
+  const b = defaultState;
+  const drums = b.drums.map((d) => {
+    const on = spec.drums.includes(d.name);
+    if (d.name === 'Kick') {
+      return { ...d, enabled: on, rhythm: rhythmIndex('Syncopated kick: 1, 2 e, 3'), steps: 16, hits: 3, rotation: 0, velocity: 100, accentEvery: 3, accentOffset: 1, accentBoost: 40, keepFirst: true };
+    }
+    if (d.name === 'Snare') {
+      return { ...d, enabled: on, rhythm: rhythmIndex('Backbeat'), steps: 16, hits: 2, rotation: 0 };
+    }
+    if (d.name === 'Hat') return { ...d, enabled: on, rhythm: 0, steps: 16, hits: 11, rotation: 0, probability: 90 };
+    if (d.name === 'Tambourine') return { ...d, enabled: on, rhythm: 0, steps: 16, hits: 6, rotation: 3, probability: 85 };
+    return { ...d, enabled: false };
+  });
+  const count = spec.degrees.length;
+  return captureScene({
+    ...b,
+    sceneName: spec.name,
+    keyOffset: -3,
+    drums,
+    harmony: { ...b.harmony, mode: 5, preset: 0, count, degrees: [...spec.degrees, 1, 1, 1, 1].slice(0, 4), colors: [0, 0, 0, 0], barsPerChord: spec.barsPerChord },
+    drone: { ...b.drone, follow: spec.follow },
+    pad: { ...b.pad, follow: spec.follow },
+    motion: { ...b.motion, preset: 0, ...spec.motion },
+    dancer: { ...b.dancer, enabled: false },
+    loops: { ...b.loops, enabled: false },
+  });
+}
+
+const rule = (baseBars: number, altBars: number, kind = 0) => ({ baseBars, altBars, chance: 100, kind });
+const noRule = rule(0, 2);
+const drumsRule = (introBars: number, baseBars: number, breakBars: number, style: number) => ({ introBars, baseBars, breakBars, chance: 100, style });
+
+export type StarterJourney = { name: string; about: string; build: () => Journey };
+
+/** "Go with Guitar": 80 BPM, C major's relative minor (A minor). */
+function goWithGuitar(): Journey {
+  const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule) => ({ bass: noRule, pad, drums });
+  const scenes = [
+    // 1: bass drone and a steady Am chord; the drums come in after 16 bars.
+    minorScene({ name: 'Intro', degrees: [1], barsPerChord: 1, follow: false, drums: ['Kick', 'Hat', 'Tambourine'], snare: false, motion: motion(drumsRule(16, 0, 2, 0)) }),
+    // 2: F, G, Am (2 bars); snare on 2 and 4; the drums drop out for a while now and then.
+    minorScene({ name: 'F, G, Am', degrees: [6, 7, 1, 1], barsPerChord: 1, follow: true, drums: ['Kick', 'Snare', 'Hat', 'Tambourine'], snare: true, motion: motion(drumsRule(0, 8, 8, 0)) }),
+    // 3: Dm, C, G, G; the pad flips to a steady fifths drone; the breakdown loses kick and snare.
+    minorScene({ name: 'Dm, C, G', degrees: [4, 3, 7, 7], barsPerChord: 1, follow: true, drums: ['Kick', 'Snare', 'Hat', 'Tambourine'], snare: true, motion: motion(drumsRule(0, 8, 8, 1), rule(8, 8, 0)) }),
+    // 4: home to Am, with drums; the breathing takes all the drums out for a long stretch.
+    minorScene({ name: 'Home', degrees: [1], barsPerChord: 1, follow: false, drums: ['Kick', 'Snare', 'Hat', 'Tambourine'], snare: true, motion: motion(drumsRule(0, 8, 64, 0)) }),
+  ];
+  return {
+    ...captureJourney(defaultState),
+    name: 'Go with Guitar',
+    root: 36, // C2; every scene sits 3 semitones below it, on A
+    bpm: 80,
+    activeScene: 0,
+    scenes,
+  };
+}
+
+export const STARTER_JOURNEYS: StarterJourney[] = [
+  {
+    name: 'Go with Guitar',
+    about: '80 BPM in A minor. Scene 1 bass drone and one chord, drums after 16 bars. Scene 2 F, G, Am. Scene 3 Dm, C, G, G. Scene 4 home.',
+    build: goWithGuitar,
+  },
+];
+
+/** Add a starter journey after the others and make it the active one. Does nothing when the list is full. */
+export function addStarterJourney(s: BedState, index: number): BedState {
+  const starter = STARTER_JOURNEYS[index];
+  if (!starter || s.journeys.length >= MAX_JOURNEYS) return s;
+  const saved = s.journeys.map((j, i) => (i === s.activeJourney ? captureJourney(s) : j));
+  let journey = starter.build();
+  if (saved.some((j) => j.name === journey.name)) {
+    let n = 2;
+    while (saved.some((j) => j.name === `${starter.name} ${n}`)) n++;
+    journey = { ...journey, name: `${starter.name} ${n}` };
+  }
+  return { ...applyJourney(s, journey), journeys: [...saved, journey], activeJourney: saved.length };
+}

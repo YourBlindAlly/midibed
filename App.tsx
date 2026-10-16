@@ -1,3 +1,4 @@
+import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -402,6 +403,16 @@ export default function App() {
     const next = newJourney(state);
     setState(next);
     announceLater(`New journey, ${next.journeyName}`, 500);
+  };
+  const [starterIndex, setStarterIndex] = useState(0);
+  const addStarter = () => {
+    if (state.journeys.length >= MAX_JOURNEYS) {
+      announceLater(`You can have up to ${MAX_JOURNEYS} journeys`, 300);
+      return;
+    }
+    const next = addStarterJourney(state, starterIndex);
+    setState(next);
+    announceLater(`Added ${next.journeyName}`, 500);
   };
   const copyJourney = () => {
     if (state.journeys.length >= MAX_JOURNEYS) {
@@ -1286,6 +1297,16 @@ export default function App() {
               />
             </View>
             <ActionButton label="New journey" onPress={addJourney} hint="Adds a journey with the starting scenes, in the same key and tempo" />
+            <Stepper
+              label="Starter journey"
+              value={starterIndex}
+              onChange={setStarterIndex}
+              min={0}
+              max={STARTER_JOURNEYS.length - 1}
+              format={(v) => STARTER_JOURNEYS[v].name}
+              hint={STARTER_JOURNEYS[starterIndex].about}
+            />
+            <ActionButton label="Add the starter journey" onPress={addStarter} hint="Adds the chosen ready-made journey after your others and switches to it" />
             <ActionButton label="Duplicate this journey" onPress={copyJourney} hint="Makes a copy of this journey with all its scenes" />
             <ActionButton label="Delete this journey" onPress={removeJourney} hint="Asks first. You always keep at least one" />
           </Section>
@@ -1738,6 +1759,15 @@ export default function App() {
                 max={8}
                 format={(v) => (v < 2 ? 'off' : `every ${v} hits`)}
                 hint="Every Nth hit of the pattern is louder"
+              />
+              <Stepper
+                label={`${d.name} accent starts at hit`}
+                value={d.accentOffset}
+                onChange={(v) => patchDrum(i, { accentOffset: v })}
+                min={0}
+                max={7}
+                format={(v) => `hit ${v + 1}`}
+                hint="With accent every 3 and this at hit 2, only the second of every three hits is accented"
               />
               <Stepper
                 label={`${d.name} accent boost`}
@@ -2561,6 +2591,16 @@ export default function App() {
           </Section>
 
           <Section title="Drum breathing">
+            <Stepper
+              label="Drums: wait before coming in"
+              value={state.motion.drums.introBars}
+              onChange={(v) => patchBreakdown({ introBars: v })}
+              min={0}
+              max={64}
+              bigStep={4}
+              format={(v) => (v === 0 ? 'no wait' : barsText(v))}
+              hint="The scene starts without drums, and they come in at full strength on a bar line after this many bars. Then the settings below carry on from there"
+            />
             <Stepper
               label="Drums: play for"
               value={state.motion.drums.baseBars}

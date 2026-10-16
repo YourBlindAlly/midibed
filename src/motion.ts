@@ -27,6 +27,8 @@ export type DrumBreakdown = {
   breakBars: number; // bars of breakdown
   chance: number; // percent 1-100
   style: number; // index into BREAKDOWN_NAMES
+  /** Bars at the start of the scene with the drums OUT; they come in, at full strength on the bar line, after this many. 0 = no intro. */
+  introBars: number;
 };
 
 export type MotionState = {
@@ -47,7 +49,7 @@ export const defaultMotion: MotionState = {
   preset: 1,
   bass: { baseBars: 0, altBars: 4, chance: 100, kind: 0 },
   pad: { baseBars: 0, altBars: 4, chance: 100, kind: 0 },
-  drums: { baseBars: 0, breakBars: 2, chance: 100, style: 0 },
+  drums: { baseBars: 0, breakBars: 2, chance: 100, style: 0, introBars: 0 },
 };
 
 /** The ready-made settings for a preset, or null for Custom (which changes nothing). */
@@ -60,21 +62,21 @@ export function motionPreset(index: number): MotionState | null {
         preset: 2,
         bass: { baseBars: 16, altBars: 8, chance: 70, kind: 0 },
         pad: { baseBars: 16, altBars: 8, chance: 60, kind: 0 },
-        drums: { baseBars: 0, breakBars: 2, chance: 100, style: 1 },
+        drums: { baseBars: 0, breakBars: 2, chance: 100, style: 1, introBars: 0 },
       };
     case 3: // Wide: clear, regular movement in all three
       return {
         preset: 3,
         bass: { baseBars: 8, altBars: 4, chance: 100, kind: 0 },
         pad: { baseBars: 12, altBars: 4, chance: 80, kind: 0 },
-        drums: { baseBars: 16, breakBars: 2, chance: 100, style: 1 },
+        drums: { baseBars: 16, breakBars: 2, chance: 100, style: 1, introBars: 0 },
       };
     case 4: // Sparse: layers drop out completely and come back on the beat
       return {
         preset: 4,
         bass: { baseBars: 8, altBars: 2, chance: 80, kind: 1 },
         pad: { baseBars: 8, altBars: 4, chance: 70, kind: 1 },
-        drums: { baseBars: 8, breakBars: 4, chance: 80, style: 0 },
+        drums: { baseBars: 8, breakBars: 4, chance: 80, style: 0, introBars: 0 },
       };
     default:
       return null;

@@ -22,6 +22,7 @@ struct MidiBedDrumConfig: Decodable {
   var ghostVelocity: Int
   var accentEvery: Int      // every Nth hit of the main pattern is louder (0 = off)
   var accentBoost: Double   // 0...1 extra velocity for accents
+  var accentOffset: Int     // the hit the accents start on (0 = the first)
   var keepFirst: Bool       // the pattern's first hit ignores the chance
   var looseMs: Double       // each hit up to this many ms late, at random
 }
@@ -136,6 +137,7 @@ struct MidiBedBreakdown: Decodable {
   var breakBars: Int
   var chance: Double
   var style: Int            // 0 all drums out, 1 kick and snare out, 2 everything but the kick out
+  var introBars: Int        // bars at the start of the scene with the drums out; they come in on a bar line after this many
 }
 
 struct MidiBedMotionConfig: Decodable {
@@ -452,6 +454,8 @@ final class MidiBedEngine {
   private var bassRT = RuleRuntime()
   private var padRT = RuleRuntime()
   private var drumRT = RuleRuntime()
+  /// Bars of intro left at the start of a scene (the drums are out until it reaches 0).
+  private var drumIntroLeft = 0
 
   // Fade state: 0...1 per layer. Drone/pad levels go out as CC on their channel
   // (squared, for a more natural volume taper); drum levels scale velocity.
@@ -1107,7 +1111,8 @@ final class MidiBedEngine {
         // Which hit of the pattern this is (0 for the first); every Nth one is the accent.
         var rank = 0
         for j in 0..<pos where drumHit(drum, position: j, hits: hits, steps: steps) { rank += 1 }
-        if rank % drum.accentEvery == 0 { vel *= 1 + max(0, min(1, drum.accentBoost)) }
+        let shifted = rank - max(0, drum.accentOffset)
+        if ((shifted % drum.accentEvery) + drum.accentEvery) % drum.accentEvery == 0 { vel *= 1 + max(0, min(1, drum.accentBoost)) }
       }
       if drum.humanize > 0 {
         vel *= 1 - drum.humanize * 0.4 * Double.random(in: 0..<1, using: &rng)
@@ -1682,6 +1687,7 @@ final class MidiBedEngine {
   /// progress) does not silence it.
   private func drumIsOn(_ d: MidiBedDrumConfig, _ cfg: MidiBedConfig) -> Bool {
     guard d.enabled else { return false }
+    if drumIntroLeft > 0 { return false }
     guard drumRT.alt else { return true }
     switch cfg.motion.drums.style {
     case 1: return !(d.role == "kick" || d.role == "snare")
@@ -1716,6 +1722,13 @@ final class MidiBedEngine {
     bassRT = RuleRuntime(alt: false, barsLeft: max(0, cfg.motion.bass.baseBars))
     padRT = RuleRuntime(alt: false, barsLeft: max(0, cfg.motion.pad.baseBars))
     drumRT = RuleRuntime(alt: false, barsLeft: max(0, cfg.motion.drums.baseBars))
+    // An intro: the scene starts with the drums OUT for `introBars` bars (alt shows them as out); stepMotion
+    // brings them in at full strength on the bar line, then the normal rules carry on from there.
+    drumIntroLeft = max(0, cfg.motion.drums.introBars)
+    if drumIntroLeft > 0 {
+      drumRT = RuleRuntime(alt: true, barsLeft: 0)
+      drumLevels = [Double](repeating: 0, count: cfg.drums.count)
+    }
     // Lead-ins the old scene had scheduled but not started are dropped (the new scene's own
     // scene-start sound, tag 0, is kept: it is due on this very bar line).
     pendingNoise.removeAll { $0.tag != 0 }
@@ -1905,7 +1918,17 @@ final class MidiBedEngine {
     }
     // A drum breakdown needs no note changes: drumIsOn() decides who plays and the
     // drum fade times ease them out and back in.
-    if stepRule(&drumRT, baseBars: m.drums.baseBars, altBars: m.drums.breakBars, chance: m.drums.chance) {
+    if drumIntroLeft > 0 {
+      drumIntroLeft -= 1
+      if drumIntroLeft == 0 {
+        // The intro is over: the drums land at full strength on this bar line.
+        drumRT = RuleRuntime(alt: false, barsLeft: max(0, m.drums.baseBars))
+        changed = true
+        for (i, d) in cfg.drums.enumerated() where i < drumLevels.count && drumIsOn(d, cfg) {
+          drumLevels[i] = 1
+        }
+      }
+    } else if stepRule(&drumRT, baseBars: m.drums.baseBars, altBars: m.drums.breakBars, chance: m.drums.chance) {
       changed = true
       if !drumRT.alt {
         // Coming back from a breakdown: the drums land at FULL strength on this bar
@@ -1920,7 +1943,7 @@ final class MidiBedEngine {
     // Lookahead: on the FINAL bar of a drum phase, settle the chance roll for the coming
     // change now (once), so a lead-in can rise into it. At the end of the normal phase
     // the change is a BREAK; at the end of a breakdown it is the RETURN (kick on the downbeat).
-    if m.drums.baseBars > 0, drumRT.barsLeft == 1, drumRT.roll == nil {
+    if m.drums.baseBars > 0, drumIntroLeft == 0, drumRT.barsLeft == 1, drumRT.roll == nil {
       let r = Double.random(in: 0..<1, using: &rng)
       drumRT.roll = r
       if r * 100 < m.drums.chance {
@@ -1947,7 +1970,7 @@ final class MidiBedEngine {
 
   private func initDrumLevels() {
     guard let cfg = config else { return }
-    drumLevels = cfg.drums.map { $0.enabled ? ((cfg.fade.drumIn > 0 && !cfg.fade.drumsHard) ? 0 : 1) : 0 }
+    drumLevels = cfg.drums.map { $0.enabled && drumIntroLeft == 0 ? ((cfg.fade.drumIn > 0 && !cfg.fade.drumsHard) ? 0 : 1) : 0 }
   }
 
   private func updateDrumLevels(tickDur: Double, cfg: MidiBedConfig) {

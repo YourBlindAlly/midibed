@@ -49,6 +49,8 @@ export type DrumState = {
   /** Every Nth hit of the main pattern is louder (0 = off, else 2-8), by accentBoost percent. */
   accentEvery: number;
   accentBoost: number; // percent 0-100
+  /** Which hit the accents start on: 0 the first hit, 1 the second... (with accentEvery 3 and 1, only the second of three is accented). */
+  accentOffset: number;
   /** The first hit of the pattern always plays, whatever the chance says. */
   keepFirst: boolean;
   /** Each hit lands up to this many milliseconds late, at random (0 = exactly on the grid). */
@@ -75,7 +77,7 @@ export type EvolveState = {
 export const defaultEvolve: EvolveState = { everyBars: 0, chance: 50, returnAfter: 4 };
 
 /** The pattern extras every drum starts with: all off, so existing sounds do not change. */
-const drumExtras = { rhythm: 0, ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, accentEvery: 0, accentBoost: 30, keepFirst: false, looseMs: 0 };
+const drumExtras = { rhythm: 0, ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, accentEvery: 0, accentOffset: 0, accentBoost: 30, keepFirst: false, looseMs: 0 };
 
 export type DroneState = {
   enabled: boolean;
@@ -415,6 +417,7 @@ export function captureScene(s: SceneSource): SceneData {
       ghostVelocity: d.ghostVelocity,
       accentEvery: d.accentEvery,
       accentBoost: d.accentBoost,
+      accentOffset: d.accentOffset,
       keepFirst: d.keepFirst,
       looseMs: d.looseMs,
     })),
@@ -1148,6 +1151,7 @@ export function toEngineJson(s: BedState): string {
       ghostVelocity: d.ghostVelocity,
       accentEvery: d.accentEvery,
       accentBoost: d.accentBoost / 100,
+      accentOffset: d.accentOffset,
       keepFirst: d.keepFirst,
       looseMs: d.looseMs,
     })),
