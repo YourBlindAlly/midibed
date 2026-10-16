@@ -5,9 +5,12 @@ import Foundation
 ///
 /// A lane holds one decoded audio file (any format AVAudioFile reads: WAV, AIFF, CAF, MP3, M4A, FLAC). The
 /// engine starts a lane on a bar line and restarts it every `bars` bars, and tells it how long those bars
-/// last in seconds; the lane plays at exactly the speed that makes the file fill that time (a plain speed
-/// change: a few percent moves the pitch a little, which is fine for percussion). Because the engine restarts
-/// the loop on a bar line every time round, the audio clock can never drift away from the bed.
+/// last in seconds. Two ways to make the file fill that time:
+///  - a plain speed change (the default): the pitch follows the tempo, which is fine, even nice, for percussion;
+///  - time-stretch (`keepPitch`): a copy of the file is made once, in the background, with exactly the right
+///    length and the original pitch (circular WSOLA, see `stretch`), and that copy plays at normal speed.
+/// Because the engine restarts the loop on a bar line every time round, the audio clock can never drift away
+/// from the bed.
 ///
 /// Thread safety: the control side (engine queue, loader queue) and the audio thread share one
 /// os_unfair_lock. The audio thread only ever try-locks (one buffer of loops is skipped if the lock is busy).
@@ -32,12 +35,20 @@ final class LoopPlayer {
   }
 
   private struct Lane {
-    var buf: Buf?
+    var raw: Buf?               // the file as decoded
+    var stretched: Buf?         // a copy stretched to `stretchedFrames` frames (keepPitch only)
+    var stretchedFrames = 0
+    var failedFrames = 0        // a length the stretch could not be made for (file too short): play `raw`
+    var pendingFrames = 0       // a stretch job for this length is running
+    var wantFrames = 0          // the length (at the file's rate) one pass of the loop should have
+    var keep = false
     var path = ""
     var playing = false
-    var pos: Double = 0     // in file frames
-    var step: Double = 1    // file frames per output sample
-    var gain: Float = 0     // smoothed
+    var pos: Double = 0         // in frames of the buffer being played
+    var posFrames = 0           // the length of that buffer
+    var wantSeconds: Double = 0 // how long one pass of the lane's bars lasts at the current tempo
+    var wantRepeats = 1
+    var gain: Float = 0         // smoothed
     var target: Float = 0
     var level: Float = 1
     var pan: Float = 0
@@ -52,7 +63,7 @@ final class LoopPlayer {
   private let outR: UnsafeMutablePointer<Float>
   private let loader = DispatchQueue(label: "midibed.loops.decode", qos: .userInitiated)
 
-  /// Called (on the loader queue) when a lane's file has finished decoding.
+  /// Called (on the loader queue) when a lane's file has finished decoding or stretching.
   var onLoaded: ((Int) -> Void)?
 
   init() {
@@ -86,7 +97,11 @@ final class LoopPlayer {
     let same = lanes[lane].path == path
     if !same {
       lanes[lane].path = path
-      lanes[lane].buf = nil
+      lanes[lane].raw = nil
+      lanes[lane].stretched = nil
+      lanes[lane].stretchedFrames = 0
+      lanes[lane].failedFrames = 0
+      lanes[lane].pendingFrames = 0
       lanes[lane].playing = false
       lanes[lane].gain = 0
       lanes[lane].target = 0
@@ -96,18 +111,26 @@ final class LoopPlayer {
     loader.async { [weak self] in
       guard let self = self, let decoded = LoopPlayer.decode(path: path) else { return }
       os_unfair_lock_lock(self.lock)
-      if self.lanes[lane].path == path { self.lanes[lane].buf = decoded }
+      if self.lanes[lane].path == path { self.lanes[lane].raw = decoded }
       os_unfair_lock_unlock(self.lock)
+      self.considerStretch(lane)
       self.onLoaded?(lane)
     }
   }
 
+  /// Can the lane start now? Its file is decoded and, when it keeps its pitch and needs a stretch, the
+  /// stretched copy is ready too (so a loop never starts at the wrong pitch for a moment).
   func isReady(_ lane: Int) -> Bool {
     guard lane >= 0, lane < LoopPlayer.laneCount else { return false }
     os_unfair_lock_lock(lock)
-    let ok = lanes[lane].buf != nil
-    os_unfair_lock_unlock(lock)
-    return ok
+    defer { os_unfair_lock_unlock(lock) }
+    let ln = lanes[lane]
+    guard let raw = ln.raw else { return false }
+    if !ln.keep || ln.wantSeconds <= 0.05 { return true }
+    if ln.wantFrames <= 0 { return false }
+    if LoopPlayer.closeEnough(ln.wantFrames, raw.frames) { return true }
+    if ln.failedFrames == ln.wantFrames { return true }
+    return ln.stretched != nil && ln.stretchedFrames == ln.wantFrames
   }
 
   func setMix(lane: Int, level: Float, pan: Float) {
@@ -119,28 +142,31 @@ final class LoopPlayer {
     os_unfair_lock_unlock(lock)
   }
 
+  /// Tell the lane how long its bars last at the current tempo and whether to keep the pitch. With
+  /// `keepPitch` a stretched copy of the right length is made in the background if there is not one yet.
+  /// Safe to call as often as the tempo or the settings change; a lane that is playing keeps its place.
+  func fit(lane: Int, seconds: Double, repeats: Int, keepPitch: Bool) {
+    guard lane >= 0, lane < LoopPlayer.laneCount, seconds > 0.05 else { return }
+    os_unfair_lock_lock(lock)
+    lanes[lane].wantSeconds = seconds
+    lanes[lane].wantRepeats = max(1, repeats)
+    lanes[lane].keep = keepPitch
+    os_unfair_lock_unlock(lock)
+    considerStretch(lane)
+  }
+
   /// Start from the top. `seconds` is how long the loop's bars last at the current tempo.
   func start(lane: Int, seconds: Double, repeats: Int = 1) {
     guard lane >= 0, lane < LoopPlayer.laneCount else { return }
     os_unfair_lock_lock(lock)
-    if let b = lanes[lane].buf, seconds > 0.05 {
-      let fileSeconds = Double(b.frames) / b.rate
-      lanes[lane].step = (fileSeconds * Double(max(1, repeats)) / seconds) * b.rate / Double(sampleRate)
+    if lanes[lane].raw != nil, seconds > 0.05 {
+      lanes[lane].wantSeconds = seconds
+      lanes[lane].wantRepeats = max(1, repeats)
       lanes[lane].pos = 0
+      lanes[lane].posFrames = 0
       lanes[lane].playing = true
       lanes[lane].target = lanes[lane].level
       lanes[lane].fadeSec = 0.008
-    }
-    os_unfair_lock_unlock(lock)
-  }
-
-  /// A tempo change while a lane plays: new speed, same place.
-  func retune(lane: Int, seconds: Double, repeats: Int = 1) {
-    guard lane >= 0, lane < LoopPlayer.laneCount else { return }
-    os_unfair_lock_lock(lock)
-    if let b = lanes[lane].buf, seconds > 0.05 {
-      let fileSeconds = Double(b.frames) / b.rate
-      lanes[lane].step = (fileSeconds * Double(max(1, repeats)) / seconds) * b.rate / Double(sampleRate)
     }
     os_unfair_lock_unlock(lock)
   }
@@ -158,6 +184,54 @@ final class LoopPlayer {
     for i in 0..<LoopPlayer.laneCount { stop(lane: i, fade: fade) }
   }
 
+  /// A stretch of less than this much (0.3 percent) is not worth making: the file already has the right length.
+  private static func closeEnough(_ want: Int, _ have: Int) -> Bool {
+    have > 0 && abs(Double(want) / Double(have) - 1) <= 0.003
+  }
+
+  /// Work out how long a stretched copy should be and, if it needs one that does not exist yet, make it in
+  /// the background. Without keepPitch any stretched copy is dropped to free its memory.
+  private func considerStretch(_ lane: Int) {
+    os_unfair_lock_lock(lock)
+    guard let raw = lanes[lane].raw, lanes[lane].keep, lanes[lane].wantSeconds > 0.05 else {
+      if !lanes[lane].keep {
+        lanes[lane].stretched = nil
+        lanes[lane].stretchedFrames = 0
+        lanes[lane].failedFrames = 0
+      }
+      os_unfair_lock_unlock(lock)
+      return
+    }
+    let want = max(1, Int((lanes[lane].wantSeconds / Double(lanes[lane].wantRepeats) * raw.rate).rounded()))
+    lanes[lane].wantFrames = want
+    var run = false
+    if LoopPlayer.closeEnough(want, raw.frames) {
+      lanes[lane].stretched = nil
+      lanes[lane].stretchedFrames = 0
+    } else if lanes[lane].stretchedFrames != want && lanes[lane].pendingFrames != want && lanes[lane].failedFrames != want {
+      lanes[lane].pendingFrames = want
+      run = true
+    }
+    os_unfair_lock_unlock(lock)
+    guard run else { return }
+    loader.async { [weak self] in
+      guard let self = self else { return }
+      let made = LoopPlayer.stretch(raw, outFrames: want)
+      os_unfair_lock_lock(self.lock)
+      if self.lanes[lane].raw === raw && self.lanes[lane].wantFrames == want {
+        if let m = made {
+          self.lanes[lane].stretched = m
+          self.lanes[lane].stretchedFrames = want
+        } else {
+          self.lanes[lane].failedFrames = want
+        }
+      }
+      if self.lanes[lane].pendingFrames == want { self.lanes[lane].pendingFrames = 0 }
+      os_unfair_lock_unlock(self.lock)
+      self.onLoaded?(lane)
+    }
+  }
+
   // MARK: Audio thread
 
   /// Render `frames` samples of every lane into the shared output blocks (stereo). Returns false when
@@ -167,7 +241,10 @@ final class LoopPlayer {
     defer { os_unfair_lock_unlock(lock) }
     var rendered = false
     for lane in 0..<LoopPlayer.laneCount where lanes[lane].playing {
-      guard let b = lanes[lane].buf else {
+      // The stretched copy if there is one (while a new one is being made the old one plays at a slightly
+      // adjusted speed), otherwise the file itself.
+      let source: Buf? = (lanes[lane].keep && lanes[lane].stretched != nil) ? lanes[lane].stretched : lanes[lane].raw
+      guard let b = source else {
         lanes[lane].playing = false
         continue
       }
@@ -179,8 +256,15 @@ final class LoopPlayer {
         rendered = true
       }
       let n = Double(b.frames)
+      // Switching between the file and its stretched copy keeps the place within the loop.
+      if lanes[lane].posFrames != b.frames {
+        if lanes[lane].posFrames > 0 { lanes[lane].pos = lanes[lane].pos * n / Double(lanes[lane].posFrames) }
+        lanes[lane].posFrames = b.frames
+      }
       var pos = lanes[lane].pos
-      let step = lanes[lane].step
+      // File frames per output sample: the buffer's frames, times its repeats in the period, over the
+      // output samples in the period. For a copy stretched to exactly the period this is rate / sampleRate.
+      let step = n * Double(max(1, lanes[lane].wantRepeats)) / max(0.05, lanes[lane].wantSeconds) / Double(sampleRate)
       var gain = lanes[lane].gain
       let target = lanes[lane].target
       let coef: Float = 1 - expf(-1 / (sampleRate * max(0.002, lanes[lane].fadeSec)))
@@ -214,6 +298,113 @@ final class LoopPlayer {
   /// The block rendered by the last `renderBlock` call (valid until the next one).
   var left: UnsafeMutablePointer<Float> { outL }
   var right: UnsafeMutablePointer<Float> { outR }
+
+  // MARK: Time-stretch
+
+  /// Pitch-keeping time-stretch of a whole loop to exactly `outFrames` frames: circular WSOLA. The loop is
+  /// cut into overlapping 25 ms frames (Hann windows, half overlap); frame k is taken from near the place
+  /// k / hops of the way through the input, nudged (within about a third of a frame either way) to wherever
+  /// it best continues the frame before (normalised cross-correlation of a mono mix), and the frames are added
+  /// together at an even spacing through the output. Input and output are both treated as circles, so the
+  /// loop's end joins its start without a seam. Checked offline with a numpy port (scratchpad wsola.py): a
+  /// 440 Hz sine stays at 439.6-439.8 Hz, lengths are exact, and a click train keeps every click (none
+  /// doubled or lost, timing within a few ms). Returns nil for a file too short to stretch (then the plain
+  /// speed change is used).
+  private static func stretch(_ src: Buf, outFrames: Int) -> Buf? {
+    let n = src.frames
+    var frame = Int((src.rate * 0.025).rounded())
+    frame = max(256, min(2048, frame))
+    frame -= frame % 2
+    let half = frame / 2
+    guard n >= 4 * frame, outFrames >= 4 * frame else { return nil }
+
+    var win = [Float](repeating: 0, count: frame)
+    for i in 0..<frame { win[i] = Float(0.5 - 0.5 * cos(2 * Double.pi * Double(i) / Double(frame))) }
+    let hops = max(1, Int((Double(outFrames) / Double(half)).rounded()))
+    let hOut = Double(outFrames) / Double(hops)
+    let hIn = Double(n) / Double(hops)
+    let delta = max(32, frame / 3)
+
+    // The mono mix three times end to end, so a search position just before the start or past the end is a plain index.
+    var mono = [Float](repeating: 0, count: 3 * n)
+    for i in 0..<n {
+      let v = 0.5 * (src.l[i] + src.r[i])
+      mono[i] = v
+      mono[n + i] = v
+      mono[2 * n + i] = v
+    }
+
+    // Where each frame is taken from (an unwrapped input position; may be a little below 0 or above n).
+    var pos = [Int](repeating: 0, count: hops)
+    var tmpl = [Float](repeating: 0, count: half)
+    mono.withUnsafeBufferPointer { m in
+      var k = 1
+      while k < hops {
+        let ideal = Int((Double(k) * hIn).rounded())
+        let prev = pos[k - 1]
+        // What the previous frame's second half is: the next frame's start should continue it.
+        for i in 0..<half { tmpl[i] = m[n + prev + half + i] }
+        var best = ideal
+        var bestScore = -Double.greatestFiniteMagnitude
+        var c = ideal - delta
+        var energy = 0.0
+        for i in 0..<half {
+          let v = Double(m[n + c + i])
+          energy += v * v
+        }
+        while c <= ideal + delta {
+          let base = n + c
+          var dot: Float = 0
+          for i in 0..<half { dot += m[base + i] * tmpl[i] }
+          let score = Double(dot) / (energy + 1e-9).squareRoot()
+          if score > bestScore {
+            bestScore = score
+            best = c
+          }
+          // Slide the candidate window one sample along.
+          let leaving = Double(m[base])
+          let entering = Double(m[base + half])
+          energy += entering * entering - leaving * leaving
+          if energy < 0 { energy = 0 }
+          c += 1
+        }
+        pos[k] = best
+        k += 1
+      }
+    }
+
+    let out = Buf(frames: outFrames, rate: src.rate)
+    let wsum = UnsafeMutablePointer<Float>.allocate(capacity: outFrames)
+    defer { wsum.deallocate() }
+    for i in 0..<outFrames {
+      out.l[i] = 0
+      out.r[i] = 0
+      wsum[i] = 0
+    }
+    for k in 0..<hops {
+      var s = ((pos[k] % n) + n) % n
+      var o = Int((Double(k) * hOut).rounded()) % outFrames
+      for i in 0..<frame {
+        let wv = win[i]
+        out.l[o] += wv * src.l[s]
+        out.r[o] += wv * src.r[s]
+        wsum[o] += wv
+        s += 1
+        if s >= n { s = 0 }
+        o += 1
+        if o >= outFrames { o = 0 }
+      }
+    }
+    // The windows add up to 1 apart from small rounding in the spacing; divide that out.
+    for i in 0..<outFrames {
+      let w = wsum[i]
+      if w > 1e-3 {
+        out.l[i] /= w
+        out.r[i] /= w
+      }
+    }
+    return out
+  }
 
   // MARK: Decoding
 

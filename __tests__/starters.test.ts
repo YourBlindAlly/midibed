@@ -157,6 +157,7 @@ describe('Ocarina modal starter journeys (all notes of C major)', () => {
     [9, 'Ocarina Phrygian', 'E', 76, ['E', 'F'], ['E', 'F', 'E', 'D']],
   ];
   it.each(cases)('journey %i %s: tempo, chords, and no notes outside C major', (idx, name, tonic, bpm, flip, turn) => {
+    const home = name === 'Ocarina Phrygian' ? ['E', 'C'] : undefined;
     const added = addStarterJourney(defaultState, idx);
     expect(added.journeyName).toBe(name);
     expect(added.bpm).toBe(bpm);
@@ -167,7 +168,7 @@ describe('Ocarina modal starter journeys (all notes of C major)', () => {
     expect(lab(0)).toEqual([tonic]);
     expect(lab(1)).toEqual(flip);
     expect(lab(2)).toEqual(turn);
-    expect(lab(3)).toEqual([tonic]);
+    expect(lab(3)).toEqual(home ?? [tonic]);
     for (let i = 0; i < 4; i++) {
       const s = applyScene(added, added.scenes[i]);
       const j = JSON.parse(toEngineJson(s));
@@ -179,4 +180,17 @@ describe('Ocarina modal starter journeys (all notes of C major)', () => {
     expect(s4.drums.filter((d) => d.enabled).length).toBeGreaterThanOrEqual(6);
     expect(applyScene(added, added.scenes[0]).drums.find((d) => d.name === 'Kick')!.enabled).toBe(false);
   });
+});
+
+it('Phrygian scene 4 is Em and C, breathing to a steady E with fifths', () => {
+  const added = addStarterJourney(defaultState, 9);
+  const s4 = applyScene(added, added.scenes[3]);
+  expect(s4.drone.follow).toBe(true);
+  expect(s4.pad.follow).toBe(true);
+  expect(s4.motion.pad).toMatchObject({ baseBars: 16, altBars: 8, kind: 0 });
+  expect(s4.motion.bass).toMatchObject({ baseBars: 16, altBars: 8, kind: 0 });
+  const j = JSON.parse(toEngineJson(s4));
+  // the pad's other version is the root and fifth of E only
+  const alt = j.pad.altChords[0] as number[];
+  expect(alt.map((n) => n % 12).sort((a, b) => a - b)).toEqual([4, 11]);
 });

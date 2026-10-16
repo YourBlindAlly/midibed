@@ -65,10 +65,10 @@ describe('lanes', () => {
     setLoopDir('file:///var/mobile/Documents/loops/');
     const lib = JSON.stringify([entry(), entry({ id: 'Set/short', file: 'Set__short.wav', bars: 1, repeats: 2 })]);
     const lanes = defaultLanes();
-    lanes[0] = { loop: 'Set/PL_Bongos_90', on: true, level: 80, pan: -50, bars: 0 };
-    lanes[1] = { loop: 'Set/short', on: true, level: 100, pan: 0, bars: 0 };
-    lanes[2] = { loop: 'Set/short', on: true, level: 100, pan: 0, bars: 2 };
-    lanes[3] = { loop: 'gone', on: true, level: 100, pan: 0, bars: 0 };
+    lanes[0] = { loop: 'Set/PL_Bongos_90', on: true, level: 80, pan: -50, bars: 0, keepPitch: false };
+    lanes[1] = { loop: 'Set/short', on: true, level: 100, pan: 0, bars: 0, keepPitch: false };
+    lanes[2] = { loop: 'Set/short', on: true, level: 100, pan: 0, bars: 2, keepPitch: false };
+    lanes[3] = { loop: 'gone', on: true, level: 100, pan: 0, bars: 0, keepPitch: false };
     const out = lanesForEngine(lanes, lib);
     expect(out[0].level).toBeCloseTo(0.8 * MATCH_FALLBACK); // an unmeasured file gets the flat match
     expect(out[0]).toMatchObject({ path: '/var/mobile/Documents/loops/Set__PL_Bongos_90.wav', bars: 4, repeats: 1, pan: -0.5, on: true });
@@ -122,7 +122,7 @@ describe('loudness matching', () => {
     setLoopDir('file:///x/loops/');
     const lib = JSON.stringify([entry({ peak: 0.82, rms: 0.158 })]);
     const lanes = defaultLanes();
-    lanes[0] = { loop: 'Set/PL_Bongos_90', on: true, level: 100, pan: 0, bars: 0 };
+    lanes[0] = { loop: 'Set/PL_Bongos_90', on: true, level: 100, pan: 0, bars: 0, keepPitch: false };
     const g = matchGain(0.82, 0.158);
     expect(lanesForEngine(lanes, lib)[0].level).toBeCloseTo(g);
     expect(lanesForEngine(lanes, lib, 50)[0].level).toBeCloseTo(g * 0.5);
@@ -262,13 +262,52 @@ describe('best fit length', () => {
     setLoopDir('file:///x/loops/');
     const lib = JSON.stringify([entry({ id: 'Fast/170', file: 'f.flac', bpm: 170, seconds: (16 * 60) / 170, bars: 4 })]);
     const lanes = defaultLanes();
-    lanes[0] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: -1 };
-    lanes[1] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 0 };
-    lanes[2] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 8 };
+    lanes[0] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: -1, keepPitch: false };
+    lanes[1] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 0, keepPitch: false };
+    lanes[2] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 8, keepPitch: false };
     const out = lanesForEngine(lanes, lib, 100, 88);
     expect(out[0].bars).toBe(2);
     expect(out[1].bars).toBe(4);
     expect(out[2].bars).toBe(8);
     setLoopDir('');
   });
+});
+
+describe('keep the pitch (time-stretch)', () => {
+  const shaker120 = { seconds: 8, bpm: 120, bars: 4, repeats: 1 };
+  const fast170 = { seconds: (4 * 4 * 60) / 170, bpm: 170, bars: 4, repeats: 1 };
+
+  it('keeps a whole loop while the stretch is moderate, where best fit would cut it in half', () => {
+    expect(bestFit(shaker120, 80).bars).toBe(2); // plain speed change: half the bars, 33 percent faster
+    const kept = bestFit(shaker120, 80, true);
+    expect(kept.bars).toBe(4);
+    expect(kept.speed).toBeCloseTo(0.667, 2);
+  });
+
+  it('still cuts a loop when it would need an extreme stretch', () => {
+    expect(bestFit(fast170, 88, true).bars).toBe(2);
+  });
+
+  it('tells the engine which lanes keep their pitch', () => {
+    const lib = JSON.stringify([{ id: 'S/x', name: 'x', folder: 'S', file: 'x.wav', seconds: 8, bpm: 120, bars: 4, repeats: 1 }]);
+    const lanes = defaultLanes();
+    lanes[0] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, keepPitch: true };
+    lanes[1] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, keepPitch: false };
+    const out = lanesForEngine(lanes, lib, 100, 80);
+    expect(out[0].keep).toBe(true);
+    expect(out[0].bars).toBe(4);
+    expect(out[1].keep).toBe(false);
+    expect(out[1].bars).toBe(2);
+    expect(out[2].keep).toBe(false);
+  });
+});
+
+it('the Swift stretch exists and the engine config carries the setting', () => {
+  const fs = require('fs');
+  const swift = fs.readFileSync('modules/midibed-engine/ios/LoopPlayer.swift', 'utf8');
+  expect(swift).toContain('private static func stretch(');
+  expect(swift).toContain('func fit(lane: Int, seconds: Double, repeats: Int, keepPitch: Bool)');
+  const engine = fs.readFileSync('modules/midibed-engine/ios/MidiBedEngine.swift', 'utf8');
+  expect(engine).toContain('var keep: Bool?');
+  expect(engine).toContain('synth.loops.fit(');
 });

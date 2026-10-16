@@ -2282,11 +2282,17 @@ export default function App() {
                     if (c > 0) return `${c} ${c === 1 ? 'bar' : 'bars'}`;
                     if (!current) return c < 0 ? 'best fit' : 'as the file says';
                     if (c === 0) return `as the file says: ${current.bars} ${current.bars === 1 ? 'bar' : 'bars'}`;
-                    const fit = bestFit(current, state.bpm);
+                    const fit = bestFit(current, state.bpm, lane.keepPitch);
                     const pct = Math.round(Math.abs(fit.speed - 1) * 100);
-                    return `best fit: ${fit.bars} ${fit.bars === 1 ? 'bar' : 'bars'}${fit.repeats > 1 ? `, ${fit.repeats} times` : ''}, ${pct === 0 ? 'no speed change' : `${pct} percent ${fit.speed > 1 ? 'faster' : 'slower'}`}`;
+                    return `best fit: ${fit.bars} ${fit.bars === 1 ? 'bar' : 'bars'}${fit.repeats > 1 ? `, ${fit.repeats} times` : ''}, ${pct === 0 ? 'no speed change' : `${pct} percent ${fit.speed > 1 ? 'faster' : 'slower'}${lane.keepPitch ? ', pitch kept' : ''}`}`;
                   }}
                   hint="Best fit picks the length, or half or double it, that needs the smallest speed change at this tempo. As the file says uses the length worked out from its name. Or choose the bars yourself"
+                />
+                <Toggle
+                  label={`Lane ${i + 1} keeps its pitch`}
+                  value={lane.keepPitch}
+                  onChange={(v) => patchLane(i, { keepPitch: v })}
+                  hint="On: the loop is time-stretched to fit the tempo and keeps its pitch. Off: a plain speed change, so a slower tempo lowers the pitch. A loop may take a moment to be ready after a tempo or loop change"
                 />
                 <Stepper
                   label={`Lane ${i + 1} level`}

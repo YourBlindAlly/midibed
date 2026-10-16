@@ -45,6 +45,7 @@ struct MidiBedLaneConfig: Decodable {
   var level: Double
   var pan: Double
   var on: Bool
+  var keep: Bool?           // true = time-stretch to the tempo and keep the pitch
 }
 
 /// Patterns that change by themselves (kick excluded).
@@ -1259,7 +1260,7 @@ final class MidiBedEngine {
       synth.loops.load(lane: i, path: path)
       synth.loops.setMix(lane: i, level: Float(lane?.level ?? 1), pan: Float(lane?.pan ?? 0))
       // A tempo change: the lane keeps its place at its new speed.
-      if let l = lane, laneActive[i] { synth.loops.retune(lane: i, seconds: loopSeconds(l.bars, cfg), repeats: max(1, l.repeats)) }
+      if let l = lane { synth.loops.fit(lane: i, seconds: loopSeconds(l.bars, cfg), repeats: max(1, l.repeats), keepPitch: l.keep ?? false) }
     }
   }
 

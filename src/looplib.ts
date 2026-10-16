@@ -39,9 +39,11 @@ export type LaneState = {
   pan: number;
   /** -1 = best fit (whole, half or double the bars, whichever needs the smallest speed change), 0 = what the file's name and length say, else 1-16 bars */
   bars: number;
+  /** true = keep the pitch when the loop is fitted to the tempo (time-stretch); false = a plain speed change, so the pitch follows the tempo */
+  keepPitch: boolean;
 };
 
-export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1 };
+export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1, keepPitch: false };
 export const defaultLanes = (): LaneState[] => Array.from({ length: LANE_COUNT }, () => ({ ...defaultLane }));
 export const BAR_CHOICES = [-1, 0, 1, 2, 4, 8, 16];
 
@@ -82,16 +84,25 @@ export function barsFromLength(seconds: number, bpm: number | null): { bars: num
   return { bars: 1, repeats };
 }
 
+/** With the pitch kept, a loop is stretched rather than cut while it needs between 0.62 and 1.6 times its speed. */
+export const KEEP_PITCH_MIN = 0.62;
+export const KEEP_PITCH_MAX = 1.6;
+
 /**
  * Best fit: of the loop's own length, half of it and double it (and, for a loop shorter than a bar, more or
  * fewer repeats in the bar), the one that needs the smallest speed change to fill its bars at the journey
  * tempo. A 170 BPM loop at 88 BPM comes out as half the bars; a 90 BPM loop stays as it is. A loop with no
  * known tempo keeps the length the library worked out.
  */
-export function bestFit(loop: Pick<LibraryLoop, 'seconds' | 'bpm' | 'bars' | 'repeats'>, journeyBpm: number): { bars: number; repeats: number; speed: number } {
+export function bestFit(loop: Pick<LibraryLoop, 'seconds' | 'bpm' | 'bars' | 'repeats'>, journeyBpm: number, keepPitch = false): { bars: number; repeats: number; speed: number } {
   const own = { bars: loop.bars, repeats: loop.repeats };
   const speedFor = (bars: number, repeats: number) => (loop.seconds * repeats) / ((bars * 4 * 60) / Math.max(30, journeyBpm));
   if (!loop.bpm || loop.seconds <= 0 || journeyBpm <= 0) return { ...own, speed: speedFor(own.bars, own.repeats) };
+  // Stretching keeps the pitch, so the whole loop is kept (not cut in half) while it only needs a moderate stretch.
+  if (keepPitch) {
+    const s = speedFor(own.bars, own.repeats);
+    if (s >= KEEP_PITCH_MIN && s <= KEEP_PITCH_MAX) return { ...own, speed: s };
+  }
   const options: { bars: number; repeats: number }[] = [own, { bars: own.bars * 2, repeats: own.repeats }];
   if (own.bars >= 2 && own.bars % 2 === 0) options.push({ bars: own.bars / 2, repeats: own.repeats });
   if (own.bars === 1) options.push({ bars: 1, repeats: own.repeats * 2 });
@@ -232,18 +243,18 @@ export function lanesForEngine(
   libJson: string,
   master = 100,
   journeyBpm = 0,
-): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean }[] {
+): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean; keep: boolean }[] {
   const lib = parseLibrary(libJson);
   return Array.from({ length: LANE_COUNT }, (_, i) => {
     const lane = lanes[i] ?? defaultLane;
     const loop = lib.find((l) => l.id === lane.loop);
     const path = loop ? loopPath(loop.file) : '';
-    const fit = loop && lane.bars < 0 && journeyBpm > 0 ? bestFit(loop, journeyBpm) : null;
+    const fit = loop && lane.bars < 0 && journeyBpm > 0 ? bestFit(loop, journeyBpm, !!lane.keepPitch) : null;
     const bars = lane.bars > 0 ? lane.bars : fit ? fit.bars : loop ? loop.bars : 4;
     const repeats = lane.bars > 0 ? 1 : fit ? fit.repeats : loop ? loop.repeats : 1;
     const gain = loop ? matchGain(loop.peak, loop.rms) : 1;
     const level = (Math.max(0, Math.min(150, lane.level)) / 100) * (Math.max(0, Math.min(150, master)) / 100) * gain;
-    return { path, bars, repeats, level, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '' };
+    return { path, bars, repeats, level, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', keep: !!lane.keepPitch };
   });
 }
 

@@ -167,6 +167,8 @@ type ModalSpec = {
   bpm: number;
   flip: number[]; // scale degrees of the two-chord flip-flop (scene 2)
   turn: number[]; // scale degrees of a second, different progression (scene 3)
+  /** Scene 4 plays these chords (following them) instead of one steady tonic chord. */
+  home?: number[];
 };
 
 const shortChord = (root: number, mode: number, degree: number) =>
@@ -196,7 +198,7 @@ function modalJourney(spec: ModalSpec): Journey {
     // 3: a different short progression; the bass and pad go steady together now and then.
     minorScene({ ...e, name: name(spec.turn), degrees: spec.turn, barsPerChord: 2, follow: true, drums: ['Kick', 'Shaker', 'Low tom', 'Mid tom'], snare: false, drumOverrides: soft, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
     // 4: home on the tonic chord with a fuller kit: kick, snare, hats, tambourine, shaker and toms.
-    minorScene({ ...e, name: 'Home, full kit', degrees: [1], barsPerChord: 1, follow: false, drums: ['Kick', 'Snare', 'Hat', 'Tambourine', 'Shaker', 'Low tom'], snare: true, drumOverrides: { Shaker: { velocity: 50 }, 'Low tom': { velocity: 70 } }, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
+    minorScene({ ...e, name: spec.home ? `${name(spec.home)}, full kit` : 'Home, full kit', degrees: spec.home ?? [1], barsPerChord: spec.home ? 2 : 1, follow: !!spec.home, drums: ['Kick', 'Snare', 'Hat', 'Tambourine', 'Shaker', 'Low tom'], snare: true, drumOverrides: { Shaker: { velocity: 50 }, 'Low tom': { velocity: 70 } }, motion: motion(drumsRule(0, 16, 8, 1), rule(16, 8, 0), rule(16, 8, 0)) }),
   ];
   return { ...captureJourney(defaultState), name: `Ocarina ${MODE_NAMES[spec.mode].split(' ')[0]}`, root: spec.tonic, bpm: spec.bpm, activeScene: 0, scenes };
 }
@@ -249,8 +251,8 @@ export const STARTER_JOURNEYS: StarterJourney[] = [
   },
   {
     name: 'Ocarina Phrygian',
-    about: '76 BPM, C ocarina, tonic E (E Phrygian, dark and a little Spanish). Drone, then Em and F, then Em F Em D, then home with a full kit.',
-    build: () => modalJourney({ tonic: 40, mode: 2, bpm: 76, flip: [1, 2], turn: [1, 2, 1, 7] }),
+    about: '76 BPM, C ocarina, tonic E (E Phrygian, dark and a little Spanish). Drone, then Em and F, then Em F Em D, then Em and C with a full kit; the breathing there drops to a plain E drone with fifths.',
+    build: () => modalJourney({ tonic: 40, mode: 2, bpm: 76, flip: [1, 2], turn: [1, 2, 1, 7], home: [1, 6] }),
   },
 ];
 
