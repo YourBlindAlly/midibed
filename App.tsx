@@ -1,3 +1,4 @@
+import { BASS_NOTES_NAMES, BASS_RHYTHM_NAMES, BASS_SKIP_NAMES } from './src/bassrhythm';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -1533,6 +1534,47 @@ export default function App() {
               onChange={(v) => patchDrone({ fifth: v })}
               hint="For a root and fifth drone, turn this on and turn the octave off"
             />
+            <Stepper
+              label="Bass rhythm"
+              value={state.drone.rhythm}
+              onChange={(v) => patchDrone({ rhythm: v })}
+              min={0}
+              max={BASS_RHYTHM_NAMES.length - 1}
+              format={(v) => BASS_RHYTHM_NAMES[v]}
+              hint="Steady drone holds its notes. Plays on the kick puts a bass note on each kick hit. Plays between the kicks puts one halfway between kick hits. It follows the Kick drum's pattern, even when the kick is out in a breakdown. Saved with the scene"
+            />
+            {state.drone.rhythm > 0 && (
+              <>
+                <Stepper
+                  label="Bass note length"
+                  value={state.drone.rhythmLength}
+                  onChange={(v) => patchDrone({ rhythmLength: v })}
+                  min={10}
+                  max={100}
+                  step={10}
+                  format={(v) => `${v} percent of the gap to the next kick`}
+                />
+                <Stepper
+                  label="Bass rhythm notes"
+                  value={state.drone.rhythmNotes}
+                  onChange={(v) => patchDrone({ rhythmNotes: v })}
+                  min={0}
+                  max={BASS_NOTES_NAMES.length - 1}
+                  format={(v) => BASS_NOTES_NAMES[v]}
+                  hint="All the bass notes plays the root with the octave and fifth switched on above"
+                />
+                {state.drone.rhythm === 1 && (
+                  <Stepper
+                    label="Bass uses"
+                    value={state.drone.rhythmSkip}
+                    onChange={(v) => patchDrone({ rhythmSkip: v })}
+                    min={0}
+                    max={BASS_SKIP_NAMES.length - 1}
+                    format={(v) => BASS_SKIP_NAMES[v]}
+                  />
+                )}
+              </>
+            )}
             <Stepper label="Bass drone velocity" value={state.drone.velocity} onChange={(v) => patchDrone({ velocity: v })} min={1} max={127} step={5} />
             <Stepper
               label="Retrigger every"

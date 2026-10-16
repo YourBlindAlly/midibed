@@ -56,6 +56,14 @@ struct MidiBedEvolveConfig: Decodable {
   var returnAfter: Int      // changes before a drum goes back to its own pattern
 }
 
+/// The bass playing notes locked to the kick instead of holding them (reference: src/bassrhythm.ts).
+struct MidiBedBassRhythm: Decodable {
+  var mode: Int             // 0 a held drone, 1 on the kick, 2 between the kicks
+  var lengthPct: Double     // percent of the distance to the next kick hit
+  var notes: Int            // 0 root only, 1 all the bass notes, 2 root with the octave on every other note
+  var skip: Int             // mode 1: 0 every kick, 1 every other kick
+}
+
 struct MidiBedDroneConfig: Decodable {
   var enabled: Bool
   var channel: Int
@@ -63,6 +71,7 @@ struct MidiBedDroneConfig: Decodable {
   var altChords: [[Int]]    // the same bass the other way round (follow <-> steady), for breathing
   var velocity: Int
   var retriggerBars: Int    // 0 = hold until stopped
+  var rhythm: MidiBedBassRhythm?
 }
 
 struct MidiBedWandererConfig: Decodable {
@@ -439,6 +448,8 @@ final class MidiBedEngine {
     var note: Int
   }
   private var heldDrone: [HeldNote] = []
+  /// Bass rhythm: how many notes it has played this scene (the octave goes on every other one).
+  private var bassHitCount = 0
   /// Every note that has been started and not yet ended (channel << 8 | note), so Stop and Panic can end
   /// exactly those, even if their note-offs were still waiting to be sent.
   private var sounding = Set<Int>()
@@ -1087,6 +1098,9 @@ final class MidiBedEngine {
     // Swing: push every second 16th later, up to half a step.
     let swingDelay = (step % 2 == 1) ? max(0, min(1, cfg.swing)) * stepDur * 0.5 : 0
 
+    // A bass that plays along with the kick (nothing when it holds a drone). Fills silence it with the kick.
+    stepBassRhythm(step: step, time: time + swingDelay, stepDur: stepDur, cfg: cfg)
+
     for (i, drum) in cfg.drums.enumerated() where drum.enabled || (i < drumLevels.count && drumLevels[i] > 0.001) {
       let steps = max(1, min(64, drum.steps))
       var hits = max(0, min(steps, drum.hits))
@@ -1128,6 +1142,81 @@ final class MidiBedEngine {
       let start = time + swingDelay + loose
       pending.append(Pending(time: start, status: 0x90 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: v))
       pending.append(Pending(time: start + 0.09, status: 0x80 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: 0))
+    }
+  }
+
+  // MARK: Bass rhythm
+
+  /// Does the kick play on this 16th step? Its pattern (a library rhythm or the Euclidean spread, with the
+  /// scene's evolving nudges) is used; its chance and looseness are ignored so the bass stays steady. Returns
+  /// the hit's number within the pattern (0 for the first) or nil. The kick is the first drum whose role is
+  /// "kick", switched on or not.
+  private func kickHit(_ cfg: MidiBedConfig, step: Int) -> Int? {
+    guard let i = cfg.drums.firstIndex(where: { $0.role == "kick" }) else { return nil }
+    let drum = cfg.drums[i]
+    let steps = max(1, min(64, drum.steps))
+    var hits = max(0, min(steps, drum.hits))
+    var rotation = drum.rotation
+    if i < evoHits.count {
+      if hits > 0, !drum.useMask { hits = max(1, min(steps, hits + evoHits[i])) }
+      rotation += evoRot[i]
+    }
+    let local = ((step % steps) + steps) % steps
+    let pos = ((local - rotation % steps) % steps + steps) % steps
+    guard drumHit(drum, position: pos, hits: hits, steps: steps) else { return nil }
+    var rank = 0
+    for j in 0..<pos where drumHit(drum, position: j, hits: hits, steps: steps) { rank += 1 }
+    return rank
+  }
+
+  /// Steps from `step` to the next kick hit (forwards, or backwards when `back`), nil if the kick never plays.
+  private func kickDistance(_ cfg: MidiBedConfig, from step: Int, back: Bool) -> Int? {
+    for j in 1...64 where kickHit(cfg, step: back ? step - j : step + j) != nil { return j }
+    return nil
+  }
+
+  /// Must behave exactly like bassRhythmSteps in src/bassrhythm.ts (which is unit-tested): mode 1 puts a bass
+  /// note on each kick hit, mode 2 one halfway between kick hits; a note lasts lengthPct of the gap to the next hit.
+  private func stepBassRhythm(step: Int, time: Double, stepDur: Double, cfg: MidiBedConfig) {
+    guard let r = cfg.drone.rhythm, r.mode > 0, droneOn(cfg) else { return }
+    let list = activeDroneChords(cfg)
+    guard !list.isEmpty else { return }
+    let chord = list[chordIndex % list.count].sorted()
+    guard let root = chord.first else { return }
+
+    var gapSteps = 0
+    if r.mode == 1 {
+      guard let rank = kickHit(cfg, step: step) else { return }
+      if r.skip == 1, rank % 2 == 1 { return }
+      gapSteps = kickDistance(cfg, from: step, back: false) ?? 16
+    } else if r.mode == 2 {
+      guard kickHit(cfg, step: step) == nil,
+        let after = kickDistance(cfg, from: step, back: false),
+        let before = kickDistance(cfg, from: step, back: true),
+        before >= after, before - after <= 1, before + after >= 2
+      else { return }
+      gapSteps = after
+    } else {
+      return
+    }
+
+    var notes: [Int]
+    switch r.notes {
+    case 1: notes = chord
+    case 2: notes = [bassHitCount % 2 == 1 ? root + 12 : root]
+    default: notes = [root]
+    }
+    bassHitCount += 1
+    notes = notes.map { max(0, min(127, $0)) }
+    let ch = UInt8(max(0, min(15, cfg.drone.channel)))
+    var vel = Double(cfg.drone.velocity)
+    if step % 16 == 0 { vel *= 1.1 }
+    vel *= endFade
+    let v = UInt8(max(1, min(127, Int(vel))))
+    let length = max(0.03, Double(gapSteps) * stepDur * max(0.1, min(1, r.lengthPct / 100)) - 0.003)
+    for n in notes {
+      pending.append(Pending(time: time, status: 0x90 | ch, d1: UInt8(n), d2: v))
+      pending.append(Pending(time: time + length, status: 0x80 | ch, d1: UInt8(n), d2: 0))
     }
   }
 
@@ -1749,6 +1838,7 @@ final class MidiBedEngine {
     evoHits = [Int](repeating: 0, count: cfg.drums.count)
     evoRot = [Int](repeating: 0, count: cfg.drums.count)
     evoCount = [Int](repeating: 0, count: cfg.drums.count)
+    bassHitCount = 0
     advanceEntranceScheduled = false
     emitMotion("reset")
     emitScene(index: cfg.sceneIndex, reason: "tick")
@@ -2063,6 +2153,12 @@ final class MidiBedEngine {
     guard let cfg = config else { return }
     let d = cfg.drone
     let ch = max(0, min(15, d.channel))
+
+    // A rhythmic bass plays separate notes (stepBassRhythm), so nothing is held.
+    if let r = d.rhythm, r.mode > 0, droneOn(cfg), running {
+      releaseDrone()
+      return
+    }
 
     guard droneOn(cfg), running else {
       // Switched off. With a fade-out and CC fading on, the notes stay held and

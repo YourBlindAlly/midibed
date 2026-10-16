@@ -89,6 +89,14 @@ export type DroneState = {
   retriggerBars: number;
   /** Play the root of each chord of the harmony loop instead of staying on the key root. */
   follow: boolean;
+  /** 0 a held drone, 1 notes on the kick, 2 notes between the kicks (see bassrhythm.ts). Saved per scene. */
+  rhythm: number;
+  /** Percent of the distance to the next kick hit that a rhythmic note lasts. */
+  rhythmLength: number;
+  /** 0 root only, 1 all the bass notes, 2 root with the octave on every other note. */
+  rhythmNotes: number;
+  /** 0 every kick, 1 every other kick (mode 1). */
+  rhythmSkip: number;
 };
 
 export type WandererState = {
@@ -360,7 +368,7 @@ export type SceneData = {
   keyOffset: number;
   swing: number;
   percussion: boolean;
-  drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow'>;
+  drone: Pick<DroneState, 'enabled' | 'octave' | 'fifth' | 'velocity' | 'retriggerBars' | 'follow' | 'rhythm' | 'rhythmLength' | 'rhythmNotes' | 'rhythmSkip'>;
   harmony: HarmonyState;
   motion: MotionState;
   advance: AdvanceRule;
@@ -397,6 +405,10 @@ export function captureScene(s: SceneSource): SceneData {
       velocity: s.drone.velocity,
       retriggerBars: s.drone.retriggerBars,
       follow: s.drone.follow,
+      rhythm: s.drone.rhythm,
+      rhythmLength: s.drone.rhythmLength,
+      rhythmNotes: s.drone.rhythmNotes,
+      rhythmSkip: s.drone.rhythmSkip,
     },
     harmony: { ...s.harmony, degrees: [...s.harmony.degrees], colors: [...s.harmony.colors] },
     motion: { preset: s.motion.preset, bass: { ...s.motion.bass }, pad: { ...s.motion.pad }, drums: { ...s.motion.drums } },
@@ -760,6 +772,10 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     velocity: 75,
     retriggerBars: 0,
     follow: false,
+    rhythm: 0,
+    rhythmLength: 70,
+    rhythmNotes: 0,
+    rhythmSkip: 0,
   },
   wanderers: [
     { name: 'Cutoff', enabled: true, cc: 74, channel: 0, min: 15, max: 105, cycleBars: 8, looseness: 50, phase: 0, smoothBeats: 4, opposes: -1, opposeAmount: 70 },
@@ -1224,6 +1240,7 @@ export function toEngineJson(s: BedState): string {
       altChords: droneAltChords(s),
       velocity: s.drone.velocity,
       retriggerBars: s.drone.retriggerBars,
+      rhythm: { mode: s.drone.rhythm, lengthPct: s.drone.rhythmLength, notes: s.drone.rhythmNotes, skip: s.drone.rhythmSkip },
     },
     pad: {
       enabled: s.solo ? s.solo === 'pad' : s.pad.enabled,
