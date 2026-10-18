@@ -5,7 +5,7 @@ import { MIDI_ACTIONS } from '../src/midicontrol';
 
 describe('orchestrated stop', () => {
   it('starts as the old stop-at-once, with a cut, a final kick and a Boom ready', () => {
-    expect(defaultEnding).toEqual({ style: 0, fade: 0, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 60 });
+    expect(defaultEnding).toEqual({ style: 0, fade: 0, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 60, holdBeats: 0 });
     expect(STOP_STYLE_NAMES).toHaveLength(4);
   });
 
@@ -15,7 +15,7 @@ describe('orchestrated stop', () => {
 
   it('sends the engine a bar-line style 1-3 and units it expects', () => {
     const j = JSON.parse(endingJson({ ...defaultEnding, style: 2, fade: 1, noiseLevel: 50 }));
-    expect(j).toEqual({ style: 2, fadeBars: 1, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 0.5 });
+    expect(j).toEqual({ style: 2, fadeBars: 1, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 0.5, holdBeats: 0 });
     expect(JSON.parse(endingJson({ ...defaultEnding, style: 0 })).style).toBe(1); // never "now": that is a plain stop
   });
 

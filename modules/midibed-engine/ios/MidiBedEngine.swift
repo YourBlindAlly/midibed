@@ -33,8 +33,18 @@ struct MidiBedEndRequest: Decodable {
   var fadeBars: Int         // 0 = cut on the bar line (notes and reverb ring out), 1 or 2 = fade over the last bars
   var finalHit: Bool        // a kick on the last downbeat
   var noise: Bool           // a transition noise on the last downbeat
+  var holdBeats: Double?    // the bass, pad and keys keep the last chord ringing this many beats after the last bar line
   var noiseShape: Int
   var noiseLevel: Double
+}
+
+/// A lane's breathing (reference: src/lanebreath.ts): mode 0 steady, 1 its own play/rest cycle, 2 only while the
+/// drums play, 3 only while the drums are out.
+struct MidiBedLaneBreathe: Decodable {
+  var mode: Int
+  var onBars: Int
+  var offBars: Int
+  var chance: Double        // percent
 }
 
 /// One lane of the loop player: which file, how many bars it spans, its level and balance, and whether it plays.
@@ -47,6 +57,7 @@ struct MidiBedLaneConfig: Decodable {
   var on: Bool
   var follow: Bool?         // the pitch follows the tempo (default true)
   var semis: Int?           // pitch shift in whole semitones (default 0)
+  var breathe: MidiBedLaneBreathe?
 }
 
 /// Patterns that change by themselves (kick excluded).
@@ -431,6 +442,7 @@ final class MidiBedEngine {
     var start: Bool
     var seconds: Double
     var repeats: Int = 1
+    var fade: Float = 0.03
   }
   private var pendingLoop: [PendingLoop] = []
 
@@ -461,6 +473,10 @@ final class MidiBedEngine {
   private var laneActive = [Bool](repeating: false, count: LoopPlayer.laneCount)
   private var laneStart = [Int](repeating: 0, count: LoopPlayer.laneCount)
   private var lanePath = [String](repeating: "", count: LoopPlayer.laneCount)
+  // Loop lane breathing: each lane's own rest/play rule (alt = resting).
+  private var laneRT = [RuleRuntime](repeating: RuleRuntime(), count: LoopPlayer.laneCount)
+  // Orchestrated stop: beats the last chord rings after the final bar line (0 = none).
+  private var endHoldBeats = 0.0
   // Orchestrated stop: the bar line (absolute tick) the music ends on, its plan, and the fade factor.
   private var endTick = -1
   private var endPlan: MidiBedEndRequest?
@@ -847,6 +863,7 @@ final class MidiBedEngine {
       self.endTick = -1
       self.endPlan = nil
       self.endFade = 1
+      self.endHoldBeats = 0
       self.ended = false
       self.running = false
       self.pendingLoop.removeAll()
@@ -1367,9 +1384,37 @@ final class MidiBedEngine {
       pendingLoop.append(PendingLoop(time: time, lane: i, start: false, seconds: 0))
       laneActive[i] = false
     }
-    // The held bass and pad notes end exactly on the bar line (not a lookahead early).
+    // The held bass and pad notes end exactly on the bar line (not a lookahead early), or, when the last chord
+    // is to ring on, after that many beats. A bass that was not holding anything (a rhythmic bass) and the keys
+    // play the last chord once so the ending is not left to the pad alone.
+    let hold = max(0, plan.holdBeats ?? 0)
+    let holdSecs = hold * 60.0 / max(20.0, min(300.0, cfg.bpm))
+    let releaseAt = time + holdSecs
+    if hold > 0 {
+      if droneOn(cfg), heldDrone.isEmpty {
+        let list = activeDroneChords(cfg)
+        if !list.isEmpty {
+          let ch = UInt8(max(0, min(15, cfg.drone.channel)))
+          let v = UInt8(max(1, min(127, cfg.drone.velocity)))
+          for n in list[chordIndex % list.count] {
+            let note = UInt8(max(0, min(127, n)))
+            pending.append(Pending(time: time, status: 0x90 | ch, d1: note, d2: v))
+            pending.append(Pending(time: releaseAt, status: 0x80 | ch, d1: note, d2: 0))
+          }
+        }
+      }
+      if let k = cfg.keys, k.enabled, !k.chords.isEmpty {
+        let ch = UInt8(max(0, min(15, k.channel)))
+        let v = UInt8(max(1, min(127, k.velocity)))
+        for n in k.chords[chordIndex % k.chords.count] {
+          let note = UInt8(max(0, min(127, n)))
+          pending.append(Pending(time: time, status: 0x90 | ch, d1: note, d2: v))
+          pending.append(Pending(time: time + min(holdSecs, 4.0), status: 0x80 | ch, d1: note, d2: 0))
+        }
+      }
+    }
     for h in heldDrone + heldPad {
-      pending.append(Pending(time: time, status: 0x80 | UInt8(h.channel), d1: UInt8(h.note), d2: 0))
+      pending.append(Pending(time: releaseAt, status: 0x80 | UInt8(h.channel), d1: UInt8(h.note), d2: 0))
     }
     heldDrone = []
     heldPad = []
@@ -1377,9 +1422,10 @@ final class MidiBedEngine {
     endTick = -1
     endPlan = nil
     endFade = 1
+    endHoldBeats = 0
     let cb = onEnding
     DispatchQueue.main.async { cb?(["barsLeft": 0, "reason": "end"]) }
-    queue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+    queue.asyncAfter(deadline: .now() + 1.0 + holdSecs) { [weak self] in
       guard let self = self, self.running, self.ended else { return }
       self.stopOnQueue(soft: true)
       let done = self.onEnded
@@ -1421,6 +1467,7 @@ final class MidiBedEngine {
       }
       self.endTick = target
       self.endPlan = plan
+      self.endHoldBeats = max(0, plan.holdBeats ?? 0)
       // A fill into the last bar line, when fills are on.
       if cfg.fill.enabled, !cfg.fill.palette.isEmpty { self.fillRequested = true }
       let left = (target - self.tickIndex) / barTicks
@@ -1443,7 +1490,8 @@ final class MidiBedEngine {
     for i in 0..<min(LoopPlayer.laneCount, cfg.lanes.count) {
       let lane = cfg.lanes[i]
       let ready = !lane.path.isEmpty && synth.loops.isReady(i)
-      if lane.on && ready {
+      let allowed = laneMayPlay(i, lane, cfg)
+      if lane.on && ready && allowed {
         let span = max(1, lane.bars) * barTicks
         if !laneActive[i] || (tick - laneStart[i]) % span == 0 {
           pendingLoop.append(PendingLoop(time: time, lane: i, start: true, seconds: loopSeconds(lane.bars, cfg), repeats: max(1, lane.repeats)))
@@ -1451,9 +1499,27 @@ final class MidiBedEngine {
           laneStart[i] = tick
         }
       } else if laneActive[i] {
-        pendingLoop.append(PendingLoop(time: time, lane: i, start: false, seconds: 0))
+        // A lane that is resting by its breathing eases out; one switched off or changed stops quickly.
+        let resting = lane.on && ready && !allowed
+        pendingLoop.append(PendingLoop(time: time, lane: i, start: false, seconds: 0, fade: resting ? 0.3 : 0.03))
         laneActive[i] = false
       }
+    }
+  }
+
+  /// The drums count as out in the intro, in any breakdown, and when none is switched on.
+  private func drumsAreOut(_ cfg: MidiBedConfig) -> Bool {
+    drumIntroLeft > 0 || drumRT.alt || !cfg.drums.contains { $0.enabled }
+  }
+
+  /// Must behave exactly like laneMayPlay in src/lanebreath.ts (which is unit-tested).
+  private func laneMayPlay(_ i: Int, _ lane: MidiBedLaneConfig, _ cfg: MidiBedConfig) -> Bool {
+    guard let br = lane.breathe else { return true }
+    switch br.mode {
+    case 1: return !(i < laneRT.count && laneRT[i].alt)
+    case 2: return !drumsAreOut(cfg)
+    case 3: return drumsAreOut(cfg)
+    default: return true
     }
   }
 
@@ -1482,7 +1548,7 @@ final class MidiBedEngine {
     var later: [PendingLoop] = []
     for p in pendingLoop {
       if p.time <= now {
-        if p.start { synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats) } else { synth.loops.stop(lane: p.lane) }
+        if p.start { synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats) } else { synth.loops.stop(lane: p.lane, fade: p.fade) }
       } else {
         later.append(p)
       }
@@ -1943,6 +2009,12 @@ final class MidiBedEngine {
       drumRT = RuleRuntime(alt: true, barsLeft: 0)
       drumLevels = [Double](repeating: 0, count: cfg.drums.count)
     }
+    // Each loop lane starts its breathing from the top of the scene.
+    laneRT = (0..<LoopPlayer.laneCount).map { i in
+      var rt = RuleRuntime()
+      if i < cfg.lanes.count, let br = cfg.lanes[i].breathe, br.mode == 1 { rt.barsLeft = max(0, br.onBars) }
+      return rt
+    }
     // Lead-ins the old scene had scheduled but not started are dropped (the new scene's own
     // scene-start sound, tag 0, is kept: it is due on this very bar line).
     pendingNoise.removeAll { $0.tag != 0 }
@@ -2155,6 +2227,11 @@ final class MidiBedEngine {
         }
       }
     }
+    // Loop lanes that breathe in their own cycle (the ones tied to the drums just follow drumRT in stepLanes).
+    for i in 0..<min(LoopPlayer.laneCount, cfg.lanes.count) {
+      guard let br = cfg.lanes[i].breathe, br.mode == 1 else { continue }
+      _ = stepRule(&laneRT[i], baseBars: br.onBars, altBars: br.offBars, chance: br.chance)
+    }
     // Lookahead: on the FINAL bar of a drum phase, settle the chance roll for the coming
     // change now (once), so a lead-in can rise into it. At the end of the normal phase
     // the change is a BREAK; at the end of a breakdown it is the RETURN (kick on the downbeat).
@@ -2214,7 +2291,8 @@ final class MidiBedEngine {
     guard let cfg = config, cfg.fade.cc > 0 else { return }
     let ch = max(0, min(15, rawChannel))
     guard let level = channelLevel(ch, cfg) else { return }
-    let lvl = level * endFade
+    // While the last chord is to ring on after the ending, the ending's fade does not take the pad and bass down.
+    let lvl = level * (endHoldBeats > 0 ? 1 : endFade)
     let v = Int((lvl * lvl * 127).rounded())
     if force || channelLastCC[ch] != v {
       channelLastCC[ch] = v

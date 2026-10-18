@@ -65,10 +65,10 @@ describe('lanes', () => {
     setLoopDir('file:///var/mobile/Documents/loops/');
     const lib = JSON.stringify([entry(), entry({ id: 'Set/short', file: 'Set__short.wav', bars: 1, repeats: 2 })]);
     const lanes = defaultLanes();
-    lanes[0] = { loop: 'Set/PL_Bongos_90', on: true, level: 80, pan: -50, bars: 0, follow: true, semis: 0 };
-    lanes[1] = { loop: 'Set/short', on: true, level: 100, pan: 0, bars: 0, follow: true, semis: 0 };
-    lanes[2] = { loop: 'Set/short', on: true, level: 100, pan: 0, bars: 2, follow: true, semis: 0 };
-    lanes[3] = { loop: 'gone', on: true, level: 100, pan: 0, bars: 0, follow: true, semis: 0 };
+    lanes[0] = { loop: 'Set/PL_Bongos_90', on: true, level: 80, pan: -50, bars: 0, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
+    lanes[1] = { loop: 'Set/short', on: true, level: 100, pan: 0, bars: 0, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
+    lanes[2] = { loop: 'Set/short', on: true, level: 100, pan: 0, bars: 2, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
+    lanes[3] = { loop: 'gone', on: true, level: 100, pan: 0, bars: 0, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
     const out = lanesForEngine(lanes, lib);
     expect(out[0].level).toBeCloseTo(0.8 * MATCH_FALLBACK); // an unmeasured file gets the flat match
     expect(out[0]).toMatchObject({ path: '/var/mobile/Documents/loops/Set__PL_Bongos_90.wav', bars: 4, repeats: 1, pan: -0.5, on: true });
@@ -122,7 +122,7 @@ describe('loudness matching', () => {
     setLoopDir('file:///x/loops/');
     const lib = JSON.stringify([entry({ peak: 0.82, rms: 0.158 })]);
     const lanes = defaultLanes();
-    lanes[0] = { loop: 'Set/PL_Bongos_90', on: true, level: 100, pan: 0, bars: 0, follow: true, semis: 0 };
+    lanes[0] = { loop: 'Set/PL_Bongos_90', on: true, level: 100, pan: 0, bars: 0, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
     const g = matchGain(0.82, 0.158);
     expect(lanesForEngine(lanes, lib)[0].level).toBeCloseTo(g);
     expect(lanesForEngine(lanes, lib, 50)[0].level).toBeCloseTo(g * 0.5);
@@ -262,9 +262,9 @@ describe('best fit length', () => {
     setLoopDir('file:///x/loops/');
     const lib = JSON.stringify([entry({ id: 'Fast/170', file: 'f.flac', bpm: 170, seconds: (16 * 60) / 170, bars: 4 })]);
     const lanes = defaultLanes();
-    lanes[0] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: -1, follow: true, semis: 0 };
-    lanes[1] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 0, follow: true, semis: 0 };
-    lanes[2] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 8, follow: true, semis: 0 };
+    lanes[0] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: -1, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
+    lanes[1] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 0, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
+    lanes[2] = { loop: 'Fast/170', on: true, level: 100, pan: 0, bars: 8, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
     const out = lanesForEngine(lanes, lib, 100, 88);
     expect(out[0].bars).toBe(2);
     expect(out[1].bars).toBe(4);
@@ -291,8 +291,8 @@ describe('keep the pitch (time-stretch)', () => {
   it('tells the engine which lanes keep their pitch', () => {
     const lib = JSON.stringify([{ id: 'S/x', name: 'x', folder: 'S', file: 'x.wav', seconds: 8, bpm: 120, bars: 4, repeats: 1 }]);
     const lanes = defaultLanes();
-    lanes[0] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: false, semis: 0 };
-    lanes[1] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: true, semis: 0 };
+    lanes[0] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: false, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
+    lanes[1] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
     const out = lanesForEngine(lanes, lib, 100, 80);
     expect(out[0].follow).toBe(false);
     expect(out[0].bars).toBe(4);
@@ -319,9 +319,9 @@ describe('pitch shift in semitones', () => {
 
   it('sends the shift, clamped to a whole number of semitones within an octave', () => {
     const lanes = defaultLanes();
-    lanes[0] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: true, semis: 3 };
-    lanes[1] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: false, semis: -40 };
-    lanes[2] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: true, semis: 2.6 };
+    lanes[0] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: true, semis: 3, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
+    lanes[1] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: false, semis: -40, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
+    lanes[2] = { loop: 'S/x', on: true, level: 100, pan: 0, bars: -1, follow: true, semis: 2.6, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
     const out = lanesForEngine(lanes, lib, 100, 120);
     expect(out.map((l) => l.semis).slice(0, 3)).toEqual([3, -12, 3]);
   });

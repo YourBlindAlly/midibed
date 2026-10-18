@@ -59,6 +59,7 @@ export const MIDI_ACTIONS: MidiActionDef[] = [
   { id: 'filterFocus', label: 'Which module the filter preset goes to', action: { type: 'filterFocus' } },
   { id: 'sceneChangeAt', label: 'When scene changes land', action: { type: 'sceneChangeAt' } },
   ...[0, 1, 2, 3].map((i) => ({ id: `lane${i + 1}`, label: `Loop lane ${i + 1} on or off`, action: { type: 'lane', index: i } as ShortcutAction })),
+  { id: 'keyboardActions', label: 'Keyboard shortcuts on or off', action: { type: 'keyboardActions' } },
 ];
 
 export function triggerKey(m: Pick<MidiMessage, 'kind' | 'channel' | 'number'>): string {

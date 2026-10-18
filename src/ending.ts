@@ -19,9 +19,11 @@ export type EndingState = {
   noiseShape: number;
   /** percent */
   noiseLevel: number;
+  /** Beats the bass, pad and keys keep playing the last chord after the final bar line (0 = they stop there). */
+  holdBeats: number;
 };
 
-export const defaultEnding: EndingState = { style: 0, fade: 0, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 60 };
+export const defaultEnding: EndingState = { style: 0, fade: 0, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 60, holdBeats: 0 };
 
 export const STOP_STYLE_NAMES = ['Stop now', 'End of this bar', 'End of the progression', 'End of the scene'];
 export const ENDING_FADE_NAMES = ['Cut on the bar line, notes ring out', 'Fade over the last bar', 'Fade over the last two bars'];
@@ -37,6 +39,7 @@ export function endingJson(e: EndingState): string {
     noise: !!e.noise,
     noiseShape: clamp(Math.round(e.noiseShape), 0, 4),
     noiseLevel: clamp(e.noiseLevel, 0, 100) / 100,
+    holdBeats: clamp(Math.round(e.holdBeats || 0), 0, 64),
   });
 }
 

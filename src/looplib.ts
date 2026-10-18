@@ -43,9 +43,15 @@ export type LaneState = {
   follow: boolean;
   /** pitch shift in whole semitones, -12 ... 12 (a shifted loop is time-stretched so it still fills its bars) */
   semis: number;
+  /** Breathing: 0 plays steadily, 1 its own cycle, 2 only with the drums, 3 only when the drums are out (see lanebreath.ts). */
+  breathe: number;
+  /** Cycle: bars playing, bars resting, and the chance (percent) that it rests when its turn comes. */
+  breatheOn: number;
+  breatheOff: number;
+  breatheChance: number;
 };
 
-export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1, follow: true, semis: 0 };
+export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
 export const SEMI_RANGE = 12;
 export const defaultLanes = (): LaneState[] => Array.from({ length: LANE_COUNT }, () => ({ ...defaultLane }));
 export const BAR_CHOICES = [-1, 0, 1, 2, 4, 8, 16];
@@ -180,6 +186,50 @@ export function addToLibrary(json: string, entries: LibraryLoop[]): string {
 export const NEAR_NAMES = ['Any tempo', 'Within 3 BPM of the tempo', 'Within 6 BPM of the tempo', 'Within 10 BPM of the tempo'];
 export const NEAR_BPM = [0, 3, 6, 10];
 
+// Which instrument a loop is, worked out from its name (the part after ' - ' first, then the whole name, then
+// its folder). The first rule that matches wins, so the more specific ones come first. 'Other' is last.
+const INSTRUMENT_RULES: [string, RegExp][] = [
+  ['Tambourine', /tamb|panderio|pandeiro|riq\b/i],
+  ['Shaker', /shak|maraca|canister|caxixi|seed|nuts n bolts|cabasa/i],
+  ['Guiro', /guiro/i],
+  ['Tabla', /tabla/i],
+  ['Bongos', /bongo/i],
+  ['Congas', /conga/i],
+  ['Djembe', /djembe/i],
+  ['Cajon', /cajun|cajon/i],
+  ['Udu', /\budu/i],
+  ['Kanjira', /kanjira/i],
+  ['Dumbek', /dumbek|darabou|doumbek/i],
+  ['Ghatam', /ghatam/i],
+  ['Dhol', /dhol|davul/i],
+  ['Taiko', /taiko/i],
+  ['Talking drum', /talking/i],
+  ['Frame drum', /frame/i],
+  ['Toms', /toms?(\b|_)/i],
+  ['Low drums', /subkick|lowdrum|lowdrive|sub ?bass/i],
+  ['Triangle', /triangle/i],
+  ['Bells and cymbals', /agogo|bell|cymb|\bzil/i],
+  ['Castanets', /castanet/i],
+  ['Whistle', /whistle/i],
+  ['Effects', /swish|efx|timeless/i],
+];
+
+export function instrumentOf(name: string, folder = ''): string {
+  const stem = name.includes(' - ') ? name.slice(name.lastIndexOf(' - ') + 3) : '';
+  for (const text of [stem, name, folder]) {
+    if (!text) continue;
+    for (const [instrument, re] of INSTRUMENT_RULES) if (re.test(text)) return instrument;
+  }
+  return 'Other';
+}
+
+/** The instruments found in the library, alphabetical, with 'Other' last. */
+export function instrumentList(lib: LibraryLoop[]): string[] {
+  const found = new Set(lib.map((l) => instrumentOf(l.name, l.folder)));
+  const named = Array.from(found).filter((n) => n !== 'Other').sort();
+  return found.has('Other') ? [...named, 'Other'] : named;
+}
+
 export type LoopFilter = {
   /** '' = every folder. */
   folder: string;
@@ -189,6 +239,8 @@ export type LoopFilter = {
   bpm: number;
   /** words that must all appear in the loop's name or folder (any case); '' = no filter */
   text: string;
+  /** an instrument from instrumentList (see instrumentOf); '' or left out = any */
+  instrument?: string;
 };
 
 /**
@@ -203,6 +255,7 @@ export function filterLoops(lib: LibraryLoop[], f: LoopFilter): LibraryLoop[] {
     .filter(Boolean);
   return lib.filter((l) => {
     if (f.folder && l.folder !== f.folder) return false;
+    if (f.instrument && instrumentOf(l.name, l.folder) !== f.instrument) return false;
     if (range > 0 && (l.bpm === null || Math.abs(l.bpm - f.bpm) > range)) return false;
     if (words.length > 0) {
       const hay = `${l.name} ${l.folder}`.toLowerCase();
@@ -259,7 +312,7 @@ export function lanesForEngine(
   libJson: string,
   master = 100,
   journeyBpm = 0,
-): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean; follow: boolean; semis: number }[] {
+): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean; follow: boolean; semis: number; breathe: { mode: number; onBars: number; offBars: number; chance: number } }[] {
   const lib = parseLibrary(libJson);
   return Array.from({ length: LANE_COUNT }, (_, i) => {
     const lane = lanes[i] ?? defaultLane;
@@ -270,7 +323,15 @@ export function lanesForEngine(
     const repeats = lane.bars > 0 ? 1 : fit ? fit.repeats : loop ? loop.repeats : 1;
     const gain = loop ? matchGain(loop.peak, loop.rms) : 1;
     const level = (Math.max(0, Math.min(150, lane.level)) / 100) * (Math.max(0, Math.min(150, master)) / 100) * gain;
-    return { path, bars, repeats, level, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', follow: lane.follow !== false, semis: Math.max(-SEMI_RANGE, Math.min(SEMI_RANGE, Math.round(lane.semis || 0))) };
+    return { path, bars, repeats, level, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', follow: lane.follow !== false,
+      semis: Math.max(-SEMI_RANGE, Math.min(SEMI_RANGE, Math.round(lane.semis || 0))),
+      breathe: {
+        mode: Math.max(0, Math.min(3, Math.round(lane.breathe || 0))),
+        onBars: Math.max(1, Math.min(64, Math.round(lane.breatheOn || 8))),
+        offBars: Math.max(1, Math.min(64, Math.round(lane.breatheOff || 4))),
+        chance: Math.max(1, Math.min(100, Math.round(lane.breatheChance || 100))),
+      },
+    };
   });
 }
 

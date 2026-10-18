@@ -53,7 +53,8 @@ import {
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
-import { BAR_CHOICES, LANE_COUNT, LibraryLoop, SEMI_RANGE, NEAR_NAMES, bestFit, filterLoops, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
+import { LANE_BREATHE_NAMES } from './src/lanebreath';
+import { BAR_CHOICES, LANE_COUNT, LibraryLoop, SEMI_RANGE, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -659,7 +660,16 @@ export default function App() {
 
   // Keyboard shortcuts (see src/shortcuts.ts). The same key twice within a moment counts once.
   const lastKey = useRef({ key: '', at: 0 });
+  // Typing into a text field must not run actions: while one has the focus, keys are left to it.
+  const isTyping = () => {
+    try {
+      return !!(TextInput as unknown as { State?: { currentlyFocusedInput?: () => unknown } }).State?.currentlyFocusedInput?.();
+    } catch {
+      return false;
+    }
+  };
   const onShortcutKey = (key: string, shift = false) => {
+    if (isTyping()) return;
     setLastKeyText(`${shift ? key.toUpperCase() : key}${shift ? ' (capital or shift)' : ''}`);
     if (!state.shortcuts) return;
     const now = Date.now();
@@ -746,6 +756,12 @@ export default function App() {
         const next = nextFilterFocus(state.filterFocus);
         patch({ filterFocus: next });
         announceLater(`Filter goes to: ${FILTER_FOCUS_NAMES[next].toLowerCase()}`, 150);
+        break;
+      }
+      case 'keyboardActions': {
+        const on = !state.shortcuts;
+        patch({ shortcuts: on });
+        announceLater(`Keyboard shortcuts ${on ? 'on' : 'off'}`, 100);
         break;
       }
       case 'stopStyle': {
@@ -869,11 +885,13 @@ export default function App() {
     setState((s) => resolveLaneIds(s));
   }, [state.loopLib]);
   const loopFolders = folderNames(loopLib);
+  const instruments = instrumentList(loopLib);
   const [laneBrowse, setLaneBrowse] = useState<number[]>([0, 0, 0, 0]);
   const [importNote, setImportNote] = useState('');
   // What the lane browser shows: how close to the tempo, and words the loop's name must contain.
   const [loopNear, setLoopNear] = useState(0);
   const [loopText, setLoopText] = useState('');
+  const [loopInstrument, setLoopInstrument] = useState('');
   const patchLane = (i: number, change: Partial<BedState['lanes'][number]>) =>
     setState((s) => ({ ...s, lanes: s.lanes.map((l, k) => (k === i ? { ...l, ...change } : l)) }));
   const importLoopFolder = async () => {
@@ -1434,6 +1452,17 @@ export default function App() {
               min={0}
               max={2}
               format={(v) => ENDING_FADE_NAMES[v] ?? ''}
+            />
+            <Stepper
+              label="Last chord rings for"
+              value={state.ending.holdBeats}
+              onChange={(v) => patch({ ending: { ...state.ending, holdBeats: v } })}
+              min={0}
+              max={32}
+              step={2}
+              bigStep={8}
+              format={(v) => (v === 0 ? 'off, everything stops on the last bar line' : `${v} beats`)}
+              hint="After the last bar line the bass, pad and keys keep playing the last chord for this many beats, then let go, instead of ending in silence. A good way into a transition"
             />
             <Toggle
               label="Final kick on the last downbeat"
@@ -2372,6 +2401,15 @@ export default function App() {
               format={(v) => NEAR_NAMES[v]}
               hint="Only loops whose own tempo is close to the journey tempo. Loops with no tempo in their name are left out while this is on"
             />
+            <Stepper
+              label="Instrument"
+              value={Math.max(0, instruments.indexOf(loopInstrument) + 1)}
+              onChange={(v) => setLoopInstrument(v <= 0 ? '' : instruments[Math.min(instruments.length, v) - 1] ?? '')}
+              min={0}
+              max={instruments.length}
+              format={(v) => (v === 0 ? 'Any instrument' : `${instruments[v - 1]}, ${loopLib.filter((l) => instrumentOf(l.name, l.folder) === instruments[v - 1]).length} loops`)}
+              hint="Only loops of this instrument, worked out from their names. Swipe up or down to choose, so you do not need to type"
+            />
             <View accessible={false} style={styles.nameBox}>
               <Text style={styles.note}>Name contains</Text>
               <TextInput
@@ -2386,8 +2424,8 @@ export default function App() {
                 onBlur={() => engine.reclaimKeys()}
               />
             </View>
-            <View accessible accessibilityLabel="Loops that match" accessibilityValue={{ text: `${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText }).length} of ${loopLib.length}` }}>
-              <Text style={styles.note}>{`${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText }).length} of ${loopLib.length} loops match`}</Text>
+            <View accessible accessibilityLabel="Loops that match" accessibilityValue={{ text: `${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument }).length} of ${loopLib.length}` }}>
+              <Text style={styles.note}>{`${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument }).length} of ${loopLib.length} loops match`}</Text>
             </View>
           </Section>
 
@@ -2395,7 +2433,7 @@ export default function App() {
             const lane = state.lanes[i];
             const browseIdx = Math.min(laneBrowse[i] ?? 0, loopFolders.length);
             const current = loopLib.find((l) => l.id === lane.loop);
-            let inFolder = filterLoops(loopLib, { folder: browseIdx === 0 ? '' : loopFolders[browseIdx - 1], near: loopNear, bpm: state.bpm, text: loopText });
+            let inFolder = filterLoops(loopLib, { folder: browseIdx === 0 ? '' : loopFolders[browseIdx - 1], near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument });
             // The loop already in the lane stays in the list even if the filter would hide it.
             if (current && !inFolder.some((l) => l.id === current.id)) inFolder = [current, ...inFolder];
             const loopIdx = Math.max(0, inFolder.findIndex((l) => l.id === lane.loop) + 1);
@@ -2445,6 +2483,22 @@ export default function App() {
                   }}
                   hint="Best fit picks the length, or half or double it, that needs the smallest speed change at this tempo. As the file says uses the length worked out from its name. Or choose the bars yourself"
                 />
+                <Stepper
+                  label={`Lane ${i + 1} breathing`}
+                  value={lane.breathe}
+                  onChange={(v) => patchLane(i, { breathe: v })}
+                  min={0}
+                  max={LANE_BREATHE_NAMES.length - 1}
+                  format={(v) => LANE_BREATHE_NAMES[v]}
+                  hint="Plays steadily, or rests by a rule. In a cycle it plays and rests by itself. With the drums plays only while the drums are playing; when the drums are out plays only while they are in an intro or a breakdown, so it fills the gap they leave. Changes land on bar lines"
+                />
+                {lane.breathe === 1 && (
+                  <>
+                    <Stepper label={`Lane ${i + 1} plays for`} value={lane.breatheOn} onChange={(v) => patchLane(i, { breatheOn: v })} min={1} max={64} bigStep={4} format={(v) => (v === 1 ? '1 bar' : `${v} bars`)} />
+                    <Stepper label={`Lane ${i + 1} then rests for`} value={lane.breatheOff} onChange={(v) => patchLane(i, { breatheOff: v })} min={1} max={64} bigStep={4} format={(v) => (v === 1 ? '1 bar' : `${v} bars`)} />
+                    <Stepper label={`Lane ${i + 1} chance of resting`} value={lane.breatheChance} onChange={(v) => patchLane(i, { breatheChance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} hint="When its playing turn ends, the chance that it really rests" />
+                  </>
+                )}
                 <Toggle
                   label={`Lane ${i + 1} pitch follows the tempo`}
                   value={lane.follow}
