@@ -54,8 +54,8 @@ final class MidiBedTestSynth {
     var channel: UInt8 = 0
   }
 
-  /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 shaker, 7 tom,
-  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
+  /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 sharp shaker (cabasa-like), 7 tom,
+  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 egg shaker, 15 seed shaker (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
   private struct DrumVoice {
     var active = false
@@ -175,7 +175,7 @@ final class MidiBedTestSynth {
   func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float)]) {
     for i in 0..<128 { drumPatches[i] = DrumPatch() }
     for d in list where d.note >= 0 && d.note < 128 {
-      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(13, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
+      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(15, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
     }
   }
 
@@ -466,7 +466,7 @@ final class MidiBedTestSynth {
         case 42, 44: v.kind = 4
         case 46: v.kind = 5
         case 54: v.kind = 9
-        case 70, 82: v.kind = 6
+        case 70, 82: v.kind = 14
         default: v.kind = 8
         }
       }
@@ -943,6 +943,42 @@ final class MidiBedTestSynth {
           let env = 1 - expf(-t / attack)
           s = (drums[i].lp * 1.58 * expf(-t * 26 / D) + jingle * 0.158 * expf(-t * 14 / D)) * env
           alive = t <= 0.45 * D + 0.05
+        case 14: // egg shaker: a round, warm swish with a soft rise, a long tail and a loose grain (scratchpad shaker_check.py)
+          let fLo = 650 * f
+          let fHi = (1300 + 2400 * tone) * f
+          let r = expf(-2 * Float.pi * fLo / sr)
+          let a = 1 - expf(-2 * Float.pi * fHi / sr)
+          let attack = max(0.004, 0.022 - 0.016 * snap)
+          drums[i].xPrev2 += 0.02 * (nextNoise() - drums[i].xPrev2)
+          let grain = max(0.2, 0.72 + 0.7 * drums[i].xPrev2)
+          let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
+          drums[i].xPrev = noise
+          drums[i].hpPrev = hp
+          drums[i].lp += a * (hp - drums[i].lp)
+          drums[i].lp2 += a * (drums[i].lp - drums[i].lp2)
+          drums[i].hp2Prev += a * (drums[i].lp2 - drums[i].hp2Prev)
+          let env = (1 - expf(-t / attack)) * (0.65 * expf(-t * 16 / D) + 0.35 * expf(-t * 6 / D))
+          s = drums[i].hp2Prev * env * grain * 4.6
+          alive = t <= 0.8 * D + 0.1
+        case 15: // seed shaker (maraca): a soft pre-stroke, then the main stroke 32 ms later, grainy and mid-bright
+          let fLo = 900 * f
+          let fHi = (1700 + 2400 * tone) * f
+          let r = expf(-2 * Float.pi * fLo / sr)
+          let a = 1 - expf(-2 * Float.pi * fHi / sr)
+          let attack = max(0.003, 0.012 - 0.008 * snap)
+          drums[i].xPrev2 += 0.05 * (nextNoise() - drums[i].xPrev2)
+          let grain = min(1.4, 0.6 + 0.9 * fabsf(drums[i].xPrev2) * 3)
+          let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
+          drums[i].xPrev = noise
+          drums[i].hpPrev = hp
+          drums[i].lp += a * (hp - drums[i].lp)
+          drums[i].lp2 += a * (drums[i].lp - drums[i].lp2)
+          drums[i].hp2Prev += a * (drums[i].lp2 - drums[i].hp2Prev)
+          let e1 = (1 - expf(-t / attack)) * expf(-t * 28 / D) * 0.45
+          let t2 = t - 0.032
+          let e2: Float = t2 > 0 ? (1 - expf(-t2 / attack)) * expf(-t2 * 13 / D) : 0
+          s = drums[i].hp2Prev * (e1 + e2) * grain * 2.5
+          alive = t <= 0.5 * D + 0.1
         case 13: // jingle tambourine: six ringing jingles that rattle, three quick re-strikes and a soft skin thump (scratchpad jingle.py)
           let jscale = (0.75 + 0.5 * tone) * f
           var ex: Float = 0

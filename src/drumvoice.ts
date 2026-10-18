@@ -7,7 +7,7 @@
  * Only the built-in sound uses this. A drum sent to another app is just its note and channel, as before.
  */
 // New types go at the END so a saved type number keeps its meaning (the native switch uses the same numbers).
-export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Shaker', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine'];
+export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Sharp shaker (cabasa-like)', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine', 'Egg shaker', 'Seed shaker (maraca)'];
 
 export type DrumVoiceSettings = {
   voice: number; // index into DRUM_TYPES
@@ -26,7 +26,7 @@ export function voiceForName(name: string): number {
   if (n.includes('kick')) return 0;
   if (n.includes('snare')) return 1;
   if (n.includes('hat')) return 4;
-  if (n.includes('shaker')) return 6;
+  if (n.includes('shaker')) return 14; // the egg shaker; the sharp one (6) is still there as a choice
   if (n.includes('tamb')) return 9;
   if (n.includes('low') && n.includes('tom')) return 10;
   if (n.includes('mid') && n.includes('tom')) return 11;

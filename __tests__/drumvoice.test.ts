@@ -9,7 +9,7 @@ describe('built-in drum sounds', () => {
       Kick: 'Kick',
       Snare: 'Snare',
       Hat: 'Closed hat',
-      Shaker: 'Shaker',
+      Shaker: 'Egg shaker',
       Tambourine: 'Tambourine',
       'Low tom': 'Low tom',
       'Mid tom': 'Mid tom',
@@ -32,7 +32,7 @@ describe('built-in drum sounds', () => {
     expect(switchScene(away, 0).drums[3]).toMatchObject({ voice: 3, decay: 180 });
     const old = migrateState({ drums: [{ name: 'Kick', note: 40 }] });
     expect(old.drums[0]).toMatchObject({ note: 40, voice: 0, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 });
-    expect(old.drums[3].voice).toBe(6);
+    expect(old.drums[3].voice).toBe(14);
     // the four new drums arrive switched off, with their own sounds
     expect(old.drums.slice(4).map((d) => [d.name, d.enabled, d.voice])).toEqual([
       ['Tambourine', false, 9],
@@ -59,7 +59,7 @@ describe('built-in drum sounds', () => {
     const path = require('path');
     const swift: string = fs.readFileSync(path.join(__dirname, '..', 'modules', 'midibed-engine', 'ios', 'MidiBedTestSynth.swift'), 'utf8');
     const doc = swift.slice(swift.indexOf('/// One drum hit.'), swift.indexOf('private struct DrumVoice'));
-    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 shaker', '7 tom', '8 wood block', '9 tambourine', '10 low tom', '11 mid tom', '12 high tom', '13 jingle tambourine'].forEach((s) => expect(doc).toContain(s));
-    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'shaker', 'tom', 'wood block', 'tambourine', 'low tom', 'mid tom', 'high tom', 'jingle tambourine']);
+    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 sharp shaker', '7 tom', '8 wood block', '9 tambourine', '10 low tom', '11 mid tom', '12 high tom', '13 jingle tambourine', '14 egg shaker', '15 seed shaker'].forEach((s) => expect(doc).toContain(s));
+    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'sharp shaker (cabasa-like)', 'tom', 'wood block', 'tambourine', 'low tom', 'mid tom', 'high tom', 'jingle tambourine', 'egg shaker', 'seed shaker (maraca)']);
   });
 });

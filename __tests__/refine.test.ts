@@ -173,3 +173,38 @@ describe('Keys: the electric piano sound', () => {
     expect(mod).toContain('Function("setKeysVoice")');
   });
 });
+
+describe('softer shakers', () => {
+  const { DRUM_TYPES, drumVoicesJson, voiceForName } = require('../src/drumvoice');
+
+  it('has an egg shaker and a seed shaker, and the old one is still a choice', () => {
+    expect(DRUM_TYPES[14]).toBe('Egg shaker');
+    expect(DRUM_TYPES[15]).toBe('Seed shaker (maraca)');
+    expect(DRUM_TYPES[6]).toMatch(/Sharp shaker/);
+    expect(voiceForName('Shaker')).toBe(14);
+    expect(defaultState.drums.find((d) => d.name === 'Shaker')!.voice).toBe(14);
+    const j = JSON.parse(drumVoicesJson([{ note: 82, channel: 9, voice: 15 }]));
+    expect(j[0].type).toBe(15);
+  });
+
+  it('settings saved with the sharp shaker move to the egg shaker once; a later choice of the sharp one is kept', () => {
+    const old: any = JSON.parse(JSON.stringify(defaultState));
+    old.drums[3].voice = 6;
+    delete old.drumSoundVersion;
+    expect(migrateState(old).drums[3].voice).toBe(14);
+    expect(migrateState(old).drumSoundVersion).toBe(1);
+    const chosen: any = JSON.parse(JSON.stringify(defaultState));
+    chosen.drums[3].voice = 6;
+    expect(migrateState(chosen).drums[3].voice).toBe(6);
+    // other drums are never touched
+    old.drums[0].voice = 6;
+    expect(migrateState(old).drums[0].voice).toBe(6);
+  });
+
+  it('the Swift synth plays both new sounds, and the table allows them', () => {
+    const swift = require('fs').readFileSync('modules/midibed-engine/ios/MidiBedTestSynth.swift', 'utf8');
+    expect(swift).toContain('case 14: // egg shaker');
+    expect(swift).toContain('case 15: // seed shaker');
+    expect(swift).toContain('min(15, d.kind)');
+  });
+});
