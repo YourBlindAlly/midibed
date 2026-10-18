@@ -208,3 +208,77 @@ describe('softer shakers', () => {
     expect(swift).toContain('min(15, d.kind)');
   });
 });
+
+describe('MidiDancer: a long last note that softens', () => {
+  const { cycleBars, soloBars } = require('../src/dancer');
+  const root = 62;
+  const mode = 1;
+  const base = { ...defaultDancer, enabled: true, density: 70 };
+  const plain = makePhrases(base, mode, root);
+
+  it('does nothing by default', () => {
+    expect(defaultDancer.lastHold).toBe(0);
+    expect(defaultDancer.fadeNotes).toBe(0);
+    expect(JSON.stringify(makePhrases({ ...base, lastHold: 0, fadeNotes: 0 }, mode, root))).toBe(JSON.stringify(plain));
+  });
+
+  it('holds the last note for the beats asked, without moving anything else or the span', () => {
+    const held = makePhrases({ ...base, lastHold: 8 }, mode, root);
+    held.forEach((p, i) => {
+      expect(p.span).toBe(plain[i].span);
+      expect(p.events.length).toBe(plain[i].events.length);
+      p.events.slice(0, -1).forEach((e, k) => expect(e).toEqual(plain[i].events[k]));
+      const last = p.events[p.events.length - 1];
+      const was = plain[i].events[plain[i].events.length - 1];
+      expect(last[0]).toBe(was[0]);
+      expect(last[2]).toBe(was[2]);
+      expect(last[1]).toBeGreaterThanOrEqual(was[1]);
+      // never past the quiet that follows: the next phrase can start cleanly
+      expect(last[0] + last[1]).toBeLessThanOrEqual(Math.max(was[0] + was[1], cycleBars(p.span, base.spaceMult) * 16 - 2));
+    });
+    // and at least 8 beats (32 sixteenths) where there is room for it
+    expect(held.some((p) => p.events[p.events.length - 1][1] >= 32)).toBe(true);
+  });
+
+  it('never shortens a note, and in solo mode with no rest it stays inside the phrase bars', () => {
+    const solo = { ...base, mode: 1, restBars: 0, lastHold: 16 };
+    makePhrases(solo, mode, root).forEach((p, i) => {
+      const last = p.events[p.events.length - 1];
+      const was = makePhrases({ ...solo, lastHold: 0 }, mode, root)[i].events.slice(-1)[0];
+      expect(last[1]).toBeGreaterThanOrEqual(was[1]);
+      expect(last[0] + last[1]).toBeLessThanOrEqual(Math.max(was[0] + was[1], soloBars(p.span, 0) * 16 - 2));
+    });
+  });
+
+  it('plays the final notes with less and less force, the last softest, and leaves the others alone', () => {
+    const soft = makePhrases({ ...base, fadeNotes: 3, fadeDepth: 40 }, mode, root);
+    soft.forEach((p, i) => {
+      const was = plain[i].events;
+      const n = p.events.length;
+      const k = Math.min(3, n);
+      for (let m = 0; m < n - k; m++) expect(p.events[m][3]).toBe(was[m][3]);
+      for (let j = 1; j <= k; j++) {
+        const e = p.events[n - k + j - 1];
+        const factor = 1 - (0.4 * j) / k;
+        expect(Math.abs(e[3] - Math.max(1, Math.round(was[n - k + j - 1][3] * factor)))).toBeLessThanOrEqual(1);
+      }
+      // notes, timing and lengths are unchanged
+      p.events.forEach((e, m) => expect(e.slice(0, 3)).toEqual(was[m].slice(0, 3)));
+    });
+    // the last note is the softest of the softened ones in general
+    const ratios = soft.map((p, i) => p.events[p.events.length - 1][3] / plain[i].events[plain[i].events.length - 1][3]);
+    ratios.forEach((r) => expect(r).toBeLessThan(0.7));
+  });
+
+  it('copes with a phrase shorter than the number of notes to soften, and is saved per scene', () => {
+    const tiny = makePhrases({ ...base, density: 0, fadeNotes: 6, fadeDepth: 90 }, mode, root);
+    tiny.forEach((p) => p.events.forEach((e) => expect(e[3]).toBeGreaterThanOrEqual(1)));
+    const s = { ...defaultState, dancer: { ...defaultState.dancer, lastHold: 6, fadeNotes: 2, fadeDepth: 55 } };
+    const there = switchScene(switchScene(s, 1), 0);
+    expect([there.dancer.lastHold, there.dancer.fadeNotes, there.dancer.fadeDepth]).toEqual([6, 2, 55]);
+    const old: any = JSON.parse(JSON.stringify(defaultState));
+    delete old.dancer.lastHold;
+    for (const sc of old.scenes) delete sc.dancer.lastHold;
+    expect(migrateState(old).scenes[1].dancer.lastHold).toBe(0);
+  });
+});

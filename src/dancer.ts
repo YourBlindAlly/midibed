@@ -62,6 +62,12 @@ export type DancerState = {
   start: number; // 0 downbeat, 1 anywhere in the bar
   /** 0 the contour decides (as before), 1 any note of the scale, 2 spread out so the phrases of the pool start on different notes. */
   startNote: number;
+  /** Beats the last note of a phrase is held for at least (0 = as the phrase made it). It rings on into the response space, never into the next phrase. */
+  lastHold: number;
+  /** How many of the final notes are played progressively softer (0 = off): the last one is the softest. This changes each note's velocity, so it is not a volume fade. */
+  fadeNotes: number;
+  /** Percent the very last note is softer than a normal note (the notes before it step down toward it). */
+  fadeDepth: number;
   /** Percent chance that a short note is nudged to a nearby note of the mode that the pentatonic scale leaves out (0 = never). */
   colour: number;
   spaceMult: number; // 1-4, response space = this many times the bars the phrase takes
@@ -118,6 +124,9 @@ export const defaultDancer: DancerState = {
   start: 1,
   startNote: 2,
   colour: 0,
+  lastHold: 0,
+  fadeNotes: 0,
+  fadeDepth: 40,
   spaceMult: 1,
   pick: 1,
   mode: 0,
@@ -273,7 +282,33 @@ export function makePhrase(d: DancerState, mode: number, root: number, rng: () =
     });
   }
 
-  return { span: Math.max(1, Math.ceil(end / 16)), events };
+  const span = Math.max(1, Math.ceil(end / 16));
+
+  // A long last note: held for at least lastHold beats, but never past the quiet that follows the phrase
+  // (the response space, or the rest in solo mode), so it cannot run into the next phrase. The phrase's own
+  // span, and so the gap for the player, is unchanged.
+  const holdSteps = clamp(Math.round(d.lastHold ?? 0), 0, 32) * 4;
+  if (holdSteps > 0 && events.length > 0) {
+    const last = events[events.length - 1];
+    const cycle = d.mode === 1 ? soloBars(span, d.restBars) : cycleBars(span, d.spaceMult);
+    const room = Math.max(last[1], cycle * 16 - last[0] - 2);
+    last[1] = Math.max(last[1], Math.min(holdSteps, room));
+  }
+
+  // Softer final notes: each of the last few notes is played at a lower velocity than the one before, the last
+  // the softest, so the playing eases off by itself without any volume fade.
+  const softCount = clamp(Math.round(d.fadeNotes ?? 0), 0, 6);
+  const softDepth = clamp(d.fadeDepth ?? 0, 0, 90) / 100;
+  if (softCount > 0 && softDepth > 0 && events.length > 0) {
+    const n = events.length;
+    const k = Math.min(softCount, n);
+    for (let j = 1; j <= k; j++) {
+      const e = events[n - k + j - 1];
+      e[3] = clamp(Math.round(e[3] * (1 - (softDepth * j) / k)), 1, 127);
+    }
+  }
+
+  return { span, events };
 }
 
 /** The pool of phrases the engine picks from. The same settings always give the same pool. */

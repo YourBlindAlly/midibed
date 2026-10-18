@@ -1824,6 +1824,29 @@ export default function App() {
               </>
             )}
             <Stepper label="Longest phrase" value={state.dancer.maxBars} onChange={(v) => patchDancer({ maxBars: v })} min={1} max={4} format={(v) => `${v} ${v === 1 ? 'bar' : 'bars'}`} />
+            <Stepper
+              label="Last note holds for at least"
+              value={state.dancer.lastHold}
+              onChange={(v) => patchDancer({ lastHold: v })}
+              min={0}
+              max={32}
+              step={1}
+              bigStep={4}
+              format={(v) => (v === 0 ? 'as the phrase made it' : `${v} ${v === 1 ? 'beat' : 'beats'}`)}
+              hint="Makes the last note of each phrase long. It rings on into the quiet after the phrase, and stops before the next phrase can start"
+            />
+            <Stepper
+              label="Soften the last notes"
+              value={state.dancer.fadeNotes}
+              onChange={(v) => patchDancer({ fadeNotes: v })}
+              min={0}
+              max={6}
+              format={(v) => (v === 0 ? 'off' : `the last ${v} ${v === 1 ? 'note' : 'notes'}`)}
+              hint="The final notes are played with less and less force, the very last the softest, so the sound eases off and its attack softens. This changes each note's velocity; it is not a volume fade"
+            />
+            {state.dancer.fadeNotes > 0 && (
+              <Stepper label="How much softer" value={state.dancer.fadeDepth} onChange={(v) => patchDancer({ fadeDepth: v })} min={10} max={90} step={5} format={(v) => `the last note ${v} percent softer`} />
+            )}
             <Stepper label="Phrase starts" value={state.dancer.start} onChange={(v) => patchDancer({ start: v })} min={0} max={START_NAMES.length - 1} format={(v) => START_NAMES[v]} />
             <Stepper
               label="Phrases begin on"
