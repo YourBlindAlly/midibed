@@ -16,6 +16,7 @@ type Native = {
   setDrumVoices(json: string): void;
   setBassVoice(json: string): void;
   setFX(json: string): void;
+  setKeysVoice(json: string): void;
   setFilter(json: string): void;
   setOutputMode(mode: number): void;
   probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number; peak: number; rms: number } | null>;
@@ -158,6 +159,8 @@ export const engine = {
   /** The built-in bass voice on/off and its settings. */
   setBassVoice: (json: string) => native?.setBassVoice(json),
   setFX: (json: string) => native?.setFX(json),
+  /** The Keys' electric piano type and sound controls (see src/keysvoice.ts). */
+  setKeysVoice: (json: string) => native?.setKeysVoice(json),
   /** The built-in sound's filter presets (see src/filters.ts). */
   setFilter: (json: string) => native?.setFilter(json),
   /** How the built-in sound leaves the phone (see src/outputmode.ts). */

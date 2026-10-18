@@ -1,5 +1,6 @@
 import { BASS_NOTES_NAMES, BASS_RHYTHM_NAMES, BASS_SKIP_NAMES, COLOR_STEP_NAMES } from './src/bassrhythm';
-import { KEYS_RHYTHMS, KeysState, keysPatternText } from './src/keys';
+import { KEYS_FOLLOW_NAMES, KEYS_RHYTHMS, KEYS_SKIP_NAMES, KeysState, keysPatternText } from './src/keys';
+import { KEYS_PRESETS, KEYS_TYPE_NAMES, applyKeysPreset, keysVoiceJson, setKeysVoice } from './src/keysvoice';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -74,6 +75,7 @@ import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion,
 import {
   CONTOUR_NAMES,
   DANCER_MODE_NAMES,
+  START_NOTE_NAMES,
   DancerState,
   VIBRATO_MODE_NAMES,
   PICK_NAMES,
@@ -584,6 +586,14 @@ export default function App() {
     const t = setTimeout(() => engine.setBassVoice(bassJson), 80);
     return () => clearTimeout(t);
   }, [bassJson, ready]);
+
+  // The Keys' electric piano: send its type and sound controls whenever they change.
+  const keysVoiceJsonText = keysVoiceJson(state.keysVoice);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setKeysVoice(keysVoiceJsonText), 80);
+    return () => clearTimeout(t);
+  }, [keysVoiceJsonText, ready]);
 
   // The built-in effects (Ugly FX): send the settings whenever they or the tempo change (the delay follows the tempo).
   const fxJson = uglyFxJson(state.fx, state.bpm);
@@ -1688,6 +1698,18 @@ export default function App() {
                   A rhythmic electric piano that comps the chords of the harmony loop, in time with the bed. The pad stays smooth and sustained; the keys are where the rhythm is. Pick a pattern, or use the generator to spread hits over steps like the drums. Saved in each scene, except the channel.
                 </Text>
                 <Stepper
+                  label="Keys play"
+                  value={state.keys.follow}
+                  onChange={(v) => patchKeys({ follow: v })}
+                  min={0}
+                  max={KEYS_FOLLOW_NAMES.length - 1}
+                  format={(v) => KEYS_FOLLOW_NAMES[v]}
+                  hint="Its own pattern, or locked to a drum: a chord on each kick hit, between the kick hits, or on the snare. It follows that drum's pattern, even when the drum is out in a breakdown"
+                />
+                {(state.keys.follow === 1 || state.keys.follow === 3) && (
+                  <Stepper label="Keys use" value={state.keys.followSkip} onChange={(v) => patchKeys({ followSkip: v })} min={0} max={KEYS_SKIP_NAMES.length - 1} format={(v) => KEYS_SKIP_NAMES[v]} />
+                )}
+                <Stepper
                   label="Keys pattern"
                   value={state.keys.rhythm}
                   onChange={(v) => patchKeys({ rhythm: v })}
@@ -1803,6 +1825,25 @@ export default function App() {
             )}
             <Stepper label="Longest phrase" value={state.dancer.maxBars} onChange={(v) => patchDancer({ maxBars: v })} min={1} max={4} format={(v) => `${v} ${v === 1 ? 'bar' : 'bars'}`} />
             <Stepper label="Phrase starts" value={state.dancer.start} onChange={(v) => patchDancer({ start: v })} min={0} max={START_NAMES.length - 1} format={(v) => START_NAMES[v]} />
+            <Stepper
+              label="Phrases begin on"
+              value={state.dancer.startNote}
+              onChange={(v) => patchDancer({ startNote: v })}
+              min={0}
+              max={START_NOTE_NAMES.length - 1}
+              format={(v) => START_NOTE_NAMES[v]}
+              hint="Which note a phrase starts on. The contour setting tends to start every phrase around the same note. Spread out gives each phrase in the set its own starting note, and the same note is never played twice running when it picks at random"
+            />
+            <Stepper
+              label="Passing notes"
+              value={state.dancer.colour}
+              onChange={(v) => patchDancer({ colour: v })}
+              min={0}
+              max={60}
+              step={5}
+              format={(v) => (v === 0 ? 'none, only the scale' : `${v} percent of the short notes`)}
+              hint="Now and then a short note moves to a close note of the scene's mode that the pentatonic scale leaves out, so the line gains a few more notes that still fit the root and the mode. Held notes and the last note of a phrase stay on the scale"
+            />
             {state.dancer.mode === 0 ? (
               <Stepper label="Response space" value={state.dancer.spaceMult} onChange={(v) => patchDancer({ spaceMult: v })} min={1} max={4} format={(v) => (v === 1 ? 'as long as the phrase' : `${v} times the phrase`)} hint="Counted in whole bars, from the bar line before the phrase starts" />
             ) : (
@@ -2214,6 +2255,30 @@ export default function App() {
               ))}
             </>
           )}
+            {part === 'keys' && (
+              <Section inner title="Keys: electric piano sound">
+                <Text style={styles.note}>
+                  The built-in electric piano. Pick a preset, or shape it: the type, how bright, the tremolo, how long notes ring and how much hard playing bites. If it sounds too sharp, lower the tone and the velocity response.
+                </Text>
+                <Stepper
+                  label="Electric piano preset"
+                  value={state.keysVoice.preset}
+                  onChange={(v) => patch({ keysVoice: applyKeysPreset(state.keysVoice, v) })}
+                  min={0}
+                  max={KEYS_PRESETS.length - 1}
+                  format={(v) => KEYS_PRESETS[v].name}
+                  hint="Sets every electric piano setting at once. Changing any setting yourself makes it Custom"
+                />
+                <Stepper label="Electric piano type" value={state.keysVoice.type} onChange={(v) => patch({ keysVoice: setKeysVoice(state.keysVoice, { type: v }) })} min={0} max={KEYS_TYPE_NAMES.length - 1} format={(v) => KEYS_TYPE_NAMES[v]} hint="Rhodes is round with a tine ping. Wurlitzer is reedy and barks. Mellow is soft and slow. Vibes and bells are glassy" />
+                <Stepper label="Tone" value={state.keysVoice.tone} onChange={(v) => patch({ keysVoice: setKeysVoice(state.keysVoice, { tone: v }) })} min={0} max={100} step={5} format={(v) => `${v} percent bright`} hint="Lower is rounder and softer" />
+                <Stepper label="Velocity response" value={state.keysVoice.velSens} onChange={(v) => patch({ keysVoice: setKeysVoice(state.keysVoice, { velSens: v }) })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'none, every note the same' : `${v} percent`)} hint="How much playing harder makes notes louder and sharper. Lower keeps the sound even and less strident" />
+                <Stepper label="Tremolo depth" value={state.keysVoice.tremolo} onChange={(v) => patch({ keysVoice: setKeysVoice(state.keysVoice, { tremolo: v }) })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'off' : `${v} percent`)} />
+                <Stepper label="Tremolo speed" value={state.keysVoice.tremRate} onChange={(v) => patch({ keysVoice: setKeysVoice(state.keysVoice, { tremRate: v }) })} min={10} max={100} step={5} format={(v) => `${(v / 10).toFixed(1)} hertz`} />
+                <Stepper label="Notes ring for" value={state.keysVoice.decay} onChange={(v) => patch({ keysVoice: setKeysVoice(state.keysVoice, { decay: v }) })} min={30} max={300} step={10} bigStep={50} format={(v) => `${v} percent of normal`} />
+                <Stepper label="Soft start" value={state.keysVoice.attack} onChange={(v) => patch({ keysVoice: setKeysVoice(state.keysVoice, { attack: v }) })} min={0} max={150} step={2} bigStep={10} format={(v) => (v === 0 ? 'instant' : `${v} milliseconds`)} />
+                <Stepper label="Release" value={state.keysVoice.release} onChange={(v) => patch({ keysVoice: setKeysVoice(state.keysVoice, { release: v }) })} min={20} max={1000} step={10} bigStep={100} format={(v) => `${v} milliseconds`} hint="How quickly a note dies away after its key is let go" />
+              </Section>
+            )}
             <Section inner title={`${partName}: Ugly FX`}>
               <Stepper
                 label={`${partName} pan`}

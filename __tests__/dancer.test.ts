@@ -134,7 +134,7 @@ describe('settings', () => {
     const on = { ...defaultState, dancer: { ...defaultState.dancer, enabled: true } };
     const j = JSON.parse(toEngineJson(on)).dancer;
     expect(j.enabled).toBe(true);
-    expect(j.phrases).toHaveLength(8);
+    expect(j.phrases).toHaveLength(12);
     expect(j.channel).toBe(3);
     expect(toEngineJson(on)).toBe(toEngineJson(on));
   });

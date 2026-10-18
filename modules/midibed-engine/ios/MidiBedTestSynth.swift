@@ -46,6 +46,8 @@ final class MidiBedTestSynth {
     var gate = false
     var note: Int = 0
     var phase: Float = 0
+    var phaseB: Float = 0 // the body modulator's own phase
+    var phaseT: Float = 0 // the tine modulator's own phase
     var t: Float = 0      // seconds since the note began
     var rel: Float = 1    // release gain
     var velocity: Float = 0
@@ -102,6 +104,11 @@ final class MidiBedTestSynth {
   private var keysVoices: UnsafeMutablePointer<KeysVoice>
   private let keysCount = 12
   private var keysTremPhase: Float = 0
+  private var keysLP: Float = 0
+  /// The electric piano's controls (written from the control side, read on the audio thread): type 0 Rhodes,
+  /// 1 Wurlitzer, 2 Mellow, 3 Vibes and bells; tone 0...1; tremolo depth 0...1; tremolo rate Hz; decay scale;
+  /// attack seconds; velocity response 0...1; release seconds. The same order as keysVoiceValues in src/keysvoice.ts.
+  private let keysParams = UnsafeMutablePointer<Float>.allocate(capacity: 8)
   private let padCount = 16
   private let drumCount = 8
 
@@ -172,6 +179,11 @@ final class MidiBedTestSynth {
     }
   }
 
+  /// Control side: the electric piano's type and controls (see keysParams).
+  func configureKeys(_ values: [Float]) {
+    for i in 0..<min(8, values.count) { keysParams[i] = values[i] }
+  }
+
   /// Control side: filter presets per part (bass, pad, MidiDancer, drums). mode 0 puts a part back on its
   /// normal filter (CC 74 and 71), gliding there. `glide` is the time to arrive, in seconds.
   func setFilterTargets(glide: Float, parts: [(mode: Int, hz: Float, res: Float)]) {
@@ -216,6 +228,7 @@ final class MidiBedTestSynth {
     drumPatches.initialize(repeating: DrumPatch(), count: 128)
     keysVoices = UnsafeMutablePointer<KeysVoice>.allocate(capacity: keysCount)
     keysVoices.initialize(repeating: KeysVoice(), count: keysCount)
+    keysParams.initialize(from: [0, 0.4, 0.2, 4.8, 1.0, 0.002, 0.6, 0.12], count: 8)
     expTarget = UnsafeMutablePointer<Float>.allocate(capacity: 16)
     expTarget.initialize(repeating: 1, count: 16)
     expCurrent = UnsafeMutablePointer<Float>.allocate(capacity: 16)
@@ -246,6 +259,7 @@ final class MidiBedTestSynth {
     drums.deallocate()
     drumPatches.deallocate()
     keysVoices.deallocate()
+    keysParams.deallocate()
     expTarget.deallocate()
     expCurrent.deallocate()
     noiseRing.deallocate()
@@ -476,7 +490,7 @@ final class MidiBedTestSynth {
           }
         }
       }
-      keysVoices[kslot] = KeysVoice(active: true, gate: true, note: note, phase: 0, t: 0, rel: 1, velocity: velocity, channel: channel)
+      keysVoices[kslot] = KeysVoice(active: true, gate: true, note: note, phase: 0, phaseB: 0, phaseT: 0, t: 0, rel: 1, velocity: velocity, channel: channel)
       return
     }
     padAgeCounter += 1
@@ -739,7 +753,30 @@ final class MidiBedTestSynth {
     let attack = 1 - expf(-dt / 0.9)
     let release = 1 - expf(-dt / 1.6)
     let expSmooth = 1 - expf(-dt / 0.03)
-    let keysRelease = expf(-dt / 0.12)
+    // The electric piano's settings for this buffer. Each type is a recipe of two modulators on a sine carrier: the
+    // body (a ratio, a start and a velocity-driven index that dies away) and the tine (a ratio and a quick ping).
+    let kType = max(0, min(3, Int(keysParams[0].rounded())))
+    let kTone = max(0, min(1, keysParams[1]))
+    let kTremDepth = max(0, min(1, keysParams[2]))
+    let kTremRate = max(0.1, keysParams[3])
+    let kDecay = max(0.2, keysParams[4])
+    let kAttack = max(0, keysParams[5])
+    let kVelSens = max(0, min(1, keysParams[6]))
+    let keysRelease = expf(-dt / max(0.02, keysParams[7]))
+    var kbr: Float = 1, kbb: Float = 0.9, kbv: Float = 1.6, kbd: Float = 1.5
+    var ktr: Float = 14, ktb: Float = 0.35, ktv: Float = 0.9, ktd: Float = 25
+    var kad: Float = 1, ksus: Float = 0.25
+    switch kType {
+    case 1: // Wurlitzer: reedy, a bark from a second-harmonic modulator, a shorter ring
+      kbr = 1; kbb = 1.3; kbv = 1.4; kbd = 2.2; ktr = 2; ktb = 0.4; ktv = 0.8; ktd = 9; kad = 1.5; ksus = 0.15
+    case 2: // Mellow: soft, little tine, a longer ring
+      kbr = 1; kbb = 0.35; kbv = 0.7; kbd = 1.2; ktr = 14; ktb = 0.08; ktv = 0.15; ktd = 30; kad = 0.8; ksus = 0.30
+    case 3: // Vibes and bells: inharmonic modulators, a long glassy ring
+      kbr = 3.5; kbb = 0.7; kbv = 1.0; kbd = 0.9; ktr = 7.1; ktb = 0.3; ktv = 0.5; ktd = 12; kad = 0.6; ksus = 0.40
+    default: break
+    }
+    let kIndexScale = 0.35 + 1.3 * kTone
+    let kLPcoef = 1 - expf(-2 * Float.pi * (800 + kTone * kTone * 12000) / sr)
 
     // The loop player renders a whole buffer at once (false: nothing is playing).
     let haveLoops = loops.renderBlock(frames: frameCount)
@@ -784,31 +821,39 @@ final class MidiBedTestSynth {
         }
       }
 
-      // The electric piano. A slow tremolo (about 4.8 Hz, a tenth deep) is the classic suitcase shimmer.
-      keysTremPhase += 4.8 * dt
+      // The electric piano, then a soft low-pass and the tremolo on the part.
+      keysTremPhase += kTremRate * dt
       if keysTremPhase >= 1 { keysTremPhase -= 1 }
-      let keysTrem = 0.9 + 0.1 * sinf(2 * Float.pi * keysTremPhase)
+      let keysTrem = 1 - 0.5 * kTremDepth + 0.5 * kTremDepth * sinf(2 * Float.pi * keysTremPhase)
+      var keysRaw: Float = 0
       for i in 0..<keysCount where keysVoices[i].active {
         let kn = keysVoices[i].note
         let kf = 440 * powf(2, Float(kn - 69) / 12)
         let kt = keysVoices[i].t
-        let kv = keysVoices[i].velocity
+        let kv = 0.5 + (keysVoices[i].velocity - 0.5) * kVelSens
         keysVoices[i].phase += kf * dt
         if keysVoices[i].phase >= 1 { keysVoices[i].phase -= 1 }
-        let kph = keysVoices[i].phase
-        let decayRate = min(5, max(1.2, 2.2 * (1 + Float(kn - 60) / 36)))
+        keysVoices[i].phaseB += kf * kbr * dt
+        if keysVoices[i].phaseB >= 1 { keysVoices[i].phaseB -= 1 }
+        keysVoices[i].phaseT += kf * ktr * dt
+        if keysVoices[i].phaseT >= 1 { keysVoices[i].phaseT -= 1 }
+        let decayRate = min(5, max(1.2, 2.2 * (1 + Float(kn - 60) / 36))) / kDecay * kad
         let tineScale = min(1, max(0.2, 1 - Float(kn - 72) / 36))
-        let kamp = 0.75 * expf(-kt * decayRate) + 0.25 * expf(-kt * decayRate * 0.25)
-        let bodyIndex = (0.9 + 1.6 * kv) * expf(-kt * decayRate * 1.5)
-        let tineIndex = (0.35 + 0.9 * kv) * expf(-kt * 25) * tineScale
+        let kamp = (1 - ksus) * expf(-kt * decayRate) + ksus * expf(-kt * decayRate * 0.25)
+        let bodyIndex = (kbb + kbv * kv) * kIndexScale * expf(-kt * decayRate * kbd)
+        let tineIndex = (ktb + ktv * kv) * kIndexScale * expf(-kt * ktd) * tineScale
         let twoPi = 2 * Float.pi
-        let ky = sinf(twoPi * kph + bodyIndex * sinf(twoPi * kph) + tineIndex * sinf(twoPi * 14 * kph))
+        let modBody = bodyIndex * sinf(twoPi * keysVoices[i].phaseB)
+        let modTine = tineIndex * sinf(twoPi * keysVoices[i].phaseT)
+        let ky = sinf(twoPi * keysVoices[i].phase + modBody + modTine)
         if !keysVoices[i].gate { keysVoices[i].rel *= keysRelease }
         keysVoices[i].t += dt
-        partKeys += ky * kamp * keysVoices[i].rel * (0.35 + 0.65 * kv) * 0.2 * expCurrent[Int(keysVoices[i].channel)]
+        let ka: Float = kAttack > 0 ? min(1, kt / kAttack) : 1
+        keysRaw += ky * kamp * ka * keysVoices[i].rel * (0.35 + 0.65 * kv) * 0.2 * expCurrent[Int(keysVoices[i].channel)]
         if kamp * keysVoices[i].rel < 0.0003 { keysVoices[i].active = false }
       }
-      partKeys *= keysTrem
+      keysLP += kLPcoef * (keysRaw - keysLP)
+      partKeys = keysLP * keysTrem
 
       for i in 0..<drumCount where drums[i].active {
         let t = drums[i].t

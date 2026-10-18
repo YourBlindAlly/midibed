@@ -12,7 +12,7 @@ export type KeysRhythm = { name: string; steps: number; hits: number[] };
 // Index 0 is the generator (hits, steps and rotation are the player's own); the rest are fixed patterns.
 // New patterns go at the END so a saved number keeps its meaning.
 export const KEYS_RHYTHMS: KeysRhythm[] = [
-  { name: 'Generator (hits, steps, rotation)', steps: 16, hits: [] },
+  { name: 'Euclidean generator (hits, steps, rotation)', steps: 16, hits: [] },
   { name: 'Offbeat stabs', steps: 16, hits: [2, 6, 10, 14] },
   { name: 'Charleston', steps: 16, hits: [0, 6] },
   { name: 'Skank on 2 and 4', steps: 16, hits: [4, 12] },
@@ -25,7 +25,19 @@ export const KEYS_RHYTHMS: KeysRhythm[] = [
   { name: 'Eighth notes', steps: 16, hits: [0, 2, 4, 6, 8, 10, 12, 14] },
   { name: 'Two-bar answer', steps: 32, hits: [0, 6, 10, 16, 22] },
   { name: 'Two-bar lilt', steps: 32, hits: [0, 3, 8, 14, 19, 24, 30] },
+  // Sparser patterns, for keys that stay in the background.
+  { name: 'Once a bar', steps: 16, hits: [0] },
+  { name: 'Beats 1 and 3', steps: 16, hits: [0, 8] },
+  { name: 'Beat 3 only', steps: 16, hits: [8] },
+  { name: 'The and of 2', steps: 16, hits: [6] },
+  { name: 'Slow offbeats', steps: 16, hits: [6, 14] },
+  { name: 'Once in two bars', steps: 32, hits: [0] },
+  { name: 'Two-bar slow', steps: 32, hits: [0, 22] },
 ];
+
+/** What the keys play along with: their own pattern, or a drum's hits. */
+export const KEYS_FOLLOW_NAMES = ['Its own pattern', 'On the kick', 'Between the kicks', 'On the snare'];
+export const KEYS_SKIP_NAMES = ['Every hit', 'Every other hit'];
 
 export function clampKeysRhythm(i: number): number {
   return Math.max(0, Math.min(KEYS_RHYTHMS.length - 1, Math.round(Number.isFinite(i) ? i : 0)));
@@ -69,6 +81,10 @@ export type KeysState = {
   voiceLead: boolean;
   /** Percent chance a hit plays the suspended (sus 4) version of its chord. */
   susChance: number;
+  /** 0 the pattern above; 1 on the kick's hits; 2 between the kick's hits; 3 on the snare's hits (see KEYS_FOLLOW_NAMES). */
+  follow: number;
+  /** 0 every hit of the drum, 1 every other hit (follow 1 and 3). */
+  followSkip: number;
 };
 
 export const defaultKeys: KeysState = {
@@ -95,6 +111,8 @@ export const defaultKeys: KeysState = {
   style: 0,
   voiceLead: true,
   susChance: 0,
+  follow: 0,
+  followSkip: 0,
 };
 
 /** The pattern as x and dots, for a screen reader (rotation applied; the generator shows its Euclidean spread). */

@@ -291,6 +291,8 @@ struct MidiBedKeysConfig: Decodable {
   var lengthPct: Double     // percent of the distance to the next hit that a chord rings
   var strumMs: Double       // between the notes of a chord, low to high
   var susChance: Double     // 0...1: a hit plays the sus 4 version of its chord
+  var follow: Int           // 0 its own pattern, 1 on the kick's hits, 2 between the kick's hits, 3 on the snare's hits
+  var followSkip: Int       // 1: every other hit of that drum (follow 1 and 3)
   var chords: [[Int]]       // MIDI notes per chord of the harmony loop
   var susChords: [[Int]]
 }
@@ -492,6 +494,7 @@ final class MidiBedEngine {
   // MidiDancer: bars left until the next call, and which phrase is next when going in turn.
   private var dancerWait = 0
   private var dancerTurn = 0
+  private var dancerLast = -1
 
   private struct HeldNote: Equatable {
     var channel: Int
@@ -790,6 +793,16 @@ final class MidiBedEngine {
 
   /// The built-in effects (UglyFX): the settings as one list of numbers in `UglyFXParam` order.
   /// Kept out of the main configuration so editing a knob never re-queues a scene.
+  /// The Keys' electric piano: type and sound controls (see src/keysvoice.ts for the order of the values).
+  func setKeysVoice(json: String) {
+    struct KeysVoiceConfig: Decodable { var values: [Double] }
+    guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(KeysVoiceConfig.self, from: data) else {
+      NSLog("MidiBedEngine: could not decode the keys voice")
+      return
+    }
+    queue.async { self.synth.configureKeys(c.values.map { Float($0) }) }
+  }
+
   func setFX(json: String) {
     struct FXConfig: Decodable { var values: [Double] }
     guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(FXConfig.self, from: data) else {
@@ -1230,13 +1243,36 @@ final class MidiBedEngine {
     guard let k = cfg.keys, k.enabled, !k.chords.isEmpty else { return }
     let steps = max(1, min(64, k.steps))
     let hits = max(0, min(steps, k.hits))
-    let pos = keysPosition(k, step: step)
-    let main = keysHit(k, position: pos, hits: hits, steps: steps)
+    var main = false
     var ghost = false
-    if !main, k.ghostHits > 0 {
-      let local = ((step % steps) + steps) % steps
-      let gpos = ((local - k.ghostRotation % steps) % steps + steps) % steps
-      ghost = euclidHit(position: gpos, hits: min(steps, k.ghostHits), steps: steps)
+    var pos = -1
+    var followGap: Int? = nil
+    var followRank = 0
+    if k.follow > 0 {
+      // Locked to a drum (same rules as the bass: on its hits, or halfway between them).
+      let role = k.follow == 3 ? "snare" : "kick"
+      if k.follow == 2 {
+        guard roleHit(cfg, role: role, step: step) == nil,
+          let after = roleDistance(cfg, role: role, from: step, back: false),
+          let before = roleDistance(cfg, role: role, from: step, back: true),
+          before >= after, before - after <= 1, before + after >= 2
+        else { return }
+        followGap = after
+      } else {
+        guard let rank = roleHit(cfg, role: role, step: step) else { return }
+        if k.followSkip == 1, rank % 2 == 1 { return }
+        followRank = rank
+        followGap = roleDistance(cfg, role: role, from: step, back: false) ?? 16
+      }
+      main = true
+    } else {
+      pos = keysPosition(k, step: step)
+      main = keysHit(k, position: pos, hits: hits, steps: steps)
+      if !main, k.ghostHits > 0 {
+        let local = ((step % steps) + steps) % steps
+        let gpos = ((local - k.ghostRotation % steps) % steps + steps) % steps
+        ghost = euclidHit(position: gpos, hits: min(steps, k.ghostHits), steps: steps)
+      }
     }
     guard main || ghost else { return }
     let sure = main && k.keepFirst && pos == 0
@@ -1244,8 +1280,11 @@ final class MidiBedEngine {
 
     var vel = Double(ghost ? k.ghostVelocity : k.velocity)
     if main, k.accentEvery > 1 {
-      var rank = 0
-      for j in 0..<pos where keysHit(k, position: j, hits: hits, steps: steps) { rank += 1 }
+      var rank = followRank
+      if k.follow == 0 {
+        rank = 0
+        for j in 0..<max(0, pos) where keysHit(k, position: j, hits: hits, steps: steps) { rank += 1 }
+      }
       let shifted = rank - max(0, k.accentOffset)
       if ((shifted % k.accentEvery) + k.accentEvery) % k.accentEvery == 0 { vel *= 1 + max(0, min(1, k.accentBoost)) }
     }
@@ -1261,7 +1300,7 @@ final class MidiBedEngine {
     let swing = (step % 2 == 1) ? max(0, min(1, cfg.swing)) * stepDur * 0.5 : 0
     let loose = k.looseMs > 0 ? Double.random(in: 0..<1, using: &rng) * k.looseMs / 1000 : 0
     let start = time + swing + loose
-    let gap = keysGap(k, from: step)
+    let gap = followGap ?? keysGap(k, from: step)
     let length = max(0.05, Double(gap) * stepDur * max(0.1, min(1.5, k.lengthPct / 100)) - 0.003)
     let strum = max(0, k.strumMs) / 1000
     let ch = UInt8(max(0, min(15, k.channel)))
@@ -1280,8 +1319,11 @@ final class MidiBedEngine {
   /// scene's evolving nudges) is used; its chance and looseness are ignored so the bass stays steady. Returns
   /// the hit's number within the pattern (0 for the first) or nil. The kick is the first drum whose role is
   /// "kick", switched on or not.
-  private func kickHit(_ cfg: MidiBedConfig, step: Int) -> Int? {
-    guard let i = cfg.drums.firstIndex(where: { $0.role == "kick" }) else { return nil }
+  private func kickHit(_ cfg: MidiBedConfig, step: Int) -> Int? { roleHit(cfg, role: "kick", step: step) }
+
+  /// The same for any drum role ("kick" or "snare"): the first drum with that role, switched on or not.
+  private func roleHit(_ cfg: MidiBedConfig, role: String, step: Int) -> Int? {
+    guard let i = cfg.drums.firstIndex(where: { $0.role == role }) else { return nil }
     let drum = cfg.drums[i]
     let steps = max(1, min(64, drum.steps))
     var hits = max(0, min(steps, drum.hits))
@@ -1299,8 +1341,10 @@ final class MidiBedEngine {
   }
 
   /// Steps from `step` to the next kick hit (forwards, or backwards when `back`), nil if the kick never plays.
-  private func kickDistance(_ cfg: MidiBedConfig, from step: Int, back: Bool) -> Int? {
-    for j in 1...64 where kickHit(cfg, step: back ? step - j : step + j) != nil { return j }
+  private func kickDistance(_ cfg: MidiBedConfig, from step: Int, back: Bool) -> Int? { roleDistance(cfg, role: "kick", from: step, back: back) }
+
+  private func roleDistance(_ cfg: MidiBedConfig, role: String, from step: Int, back: Bool) -> Int? {
+    for j in 1...64 where roleHit(cfg, role: role, step: back ? step - j : step + j) != nil { return j }
     return nil
   }
 
@@ -2055,6 +2099,8 @@ final class MidiBedEngine {
       dancerTurn += 1
     } else if d.pick == 1 {
       idx = Int.random(in: 0..<n, using: &rng)
+      // Never the same phrase twice running (when there is a choice).
+      if n > 1, idx == dancerLast { idx = (idx + 1 + Int.random(in: 0..<(n - 1), using: &rng)) % n }
     } else if d.pick == 3 {
       // Back and forth through the pool (it runs from sparse to busy in solo mode).
       let period = max(1, 2 * (n - 1))
@@ -2062,6 +2108,7 @@ final class MidiBedEngine {
       idx = t < n ? t : period - t
       dancerTurn += 1
     }
+    dancerLast = idx
     let phrase = d.phrases[idx]
     // The phrase's own bars, then the response space (the same again, times spaceMult).
     if d.mode == 1 {

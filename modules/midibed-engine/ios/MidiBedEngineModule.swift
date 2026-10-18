@@ -66,6 +66,10 @@ public class MidiBedEngineModule: Module {
       self.engine.setFX(json: json)
     }
 
+    Function("setKeysVoice") { (json: String) in
+      self.engine.setKeysVoice(json: json)
+    }
+
     Function("setScenes") { (json: String) in
       self.engine.setScenes(json: json)
     }

@@ -9,6 +9,7 @@ import { buildBassChords, buildPadChords, clampColor, clampMode, MAX_CHORDS } fr
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
 import { buildBassColorNotes } from './bassrhythm';
+import { KeysVoiceState, defaultKeysVoice } from './keysvoice';
 import { KEYS_RHYTHMS, KeysState, clampKeysRhythm, defaultKeys, keysMask } from './keys';
 import type { Layer } from './shortcuts';
 import { cycleBarsFromOldSpeed, phaseOffset, smoothBeatsFromOldSmooth } from './wander';
@@ -291,6 +292,8 @@ export type BedState = {
   dancer: DancerState;
   /** Keys: a rhythmic electric piano that comps the chords. Everything but the channel is saved per scene. */
   keys: KeysState;
+  /** The Keys' built-in electric piano: its type and sound controls. Global, not saved in a scene. */
+  keysVoice: KeysVoiceState;
   bpm: number;
   swing: number; // percent 0-100
   midiOut: boolean;
@@ -755,6 +758,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   soundFavs: stringifyFavMap({ synthone: favsFromPrograms(parseFavorites(getProfile('synthone').favorites ?? '')) }),
   dancer: defaultDancer,
   keys: defaultKeys,
+  keysVoice: defaultKeysVoice,
   journeyName: 'Journey 1',
   profiles: defaultProfileChoice,
   bpm: 88,
@@ -965,6 +969,8 @@ function keysForEngine(s: BedState) {
     lengthPct: k.length,
     strumMs: k.strumMs,
     susChance: k.susChance / 100,
+    follow: k.follow,
+    followSkip: k.followSkip,
     chords: keysChords(s),
     susChords: keysSusChords(s),
   };

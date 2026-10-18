@@ -7,6 +7,8 @@
  *
  * Time is in 16th-note steps from the bar line a call starts on; a bar is 16 steps.
  */
+import { MODE_INTERVALS, clampMode } from './chords';
+
 export type Scale = { name: string; intervals: number[]; note: string };
 
 // Canonical music-theory scales (no maker-specific handpan layouts). Index 0 is "Automatic"
@@ -38,6 +40,8 @@ export function resolveScale(scale: number, mode: number): number {
 
 export const CONTOUR_NAMES = ['Free', 'Rising', 'Falling', 'Arch'];
 export const START_NAMES = ['On the downbeat', 'Anywhere in the bar'];
+/** Which note a phrase begins on. */
+export const START_NOTE_NAMES = ['Where the contour leans', 'Any note of the scale', 'Spread out: each phrase starts on a different note'];
 export const PICK_NAMES = ['In turn', 'At random', 'The same one every time', 'Back and forth, sparse to busy'];
 export const DANCER_MODE_NAMES = ['Call and response', 'Solo, plays by itself'];
 export const VIBRATO_MODE_NAMES = ['Pitch bend', 'Mod wheel (CC 1)'];
@@ -56,6 +60,10 @@ export type DancerState = {
   velocity: number;
   maxBars: number; // 1-4, the longest a phrase may run
   start: number; // 0 downbeat, 1 anywhere in the bar
+  /** 0 the contour decides (as before), 1 any note of the scale, 2 spread out so the phrases of the pool start on different notes. */
+  startNote: number;
+  /** Percent chance that a short note is nudged to a nearby note of the mode that the pentatonic scale leaves out (0 = never). */
+  colour: number;
   spaceMult: number; // 1-4, response space = this many times the bars the phrase takes
   pick: number; // 0 in turn, 1 random, 2 the same one every time, 3 back and forth through the pool
   /** 0 call and response (a gap for the player), 1 solo (keeps playing by itself). */
@@ -108,6 +116,8 @@ export const defaultDancer: DancerState = {
   velocity: 70,
   maxBars: 2,
   start: 1,
+  startNote: 2,
+  colour: 0,
   spaceMult: 1,
   pick: 1,
   mode: 0,
@@ -135,7 +145,7 @@ export const defaultDancer: DancerState = {
 /** A phrase: `span` complete bars, and events [step, length in steps, MIDI note, velocity]. */
 export type Phrase = { span: number; events: number[][] };
 
-export const PHRASES_IN_POOL = 8;
+export const PHRASES_IN_POOL = 12;
 
 /** Small, fast, seedable random numbers (0 up to but not including 1). */
 export function mulberry32(seed: number): () => number {
@@ -170,7 +180,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
  * from the busyness (short notes against long) and rests; the phrase starts on the downbeat or
  * anywhere in its first bar, and is cut off if it would run past maxBars.
  */
-export function makePhrase(d: DancerState, mode: number, root: number, rng: () => number): Phrase {
+export function makePhrase(d: DancerState, mode: number, root: number, rng: () => number, startPos?: number): Phrase {
   const intervals = SCALES[resolveScale(d.scale, mode)].intervals;
   const tones = scaleTones(root, intervals, d.register, d.octaves);
   if (tones.length === 0) return { span: 1, events: [] };
@@ -181,7 +191,9 @@ export function makePhrase(d: DancerState, mode: number, root: number, rng: () =
   // Pitches, as positions in the tone list.
   const third = Math.max(0, Math.floor(top / 3));
   let pos =
-    d.contour === 1 ? Math.floor(rng() * (third + 1))
+    d.startNote === 1 ? Math.floor(rng() * (top + 1))
+    : d.startNote === 2 && startPos !== undefined ? clamp(Math.round(startPos), 0, top)
+    : d.contour === 1 ? Math.floor(rng() * (third + 1))
     : d.contour === 2 ? top - Math.floor(rng() * (third + 1))
     : d.contour === 3 ? clamp(Math.round(top / 2 + (rng() - 0.5) * third), 0, top)
     : Math.floor(rng() * (top + 1));
@@ -221,6 +233,21 @@ export function makePhrase(d: DancerState, mode: number, root: number, rng: () =
     end = cursor;
   }
 
+  // Passing notes: a short note is sometimes nudged to a close note of the mode that this (pentatonic) scale
+  // leaves out, so the line gains a few more notes that still belong to the root and the mode. Never the held
+  // last note, and the generator is not asked for a number unless this is on, so a phrase is unchanged when off.
+  const chance = clamp(d.colour ?? 0, 0, 100) / 100;
+  const modeIntervals = MODE_INTERVALS[clampMode(mode)];
+  const missing = modeIntervals.filter((iv) => !intervals.includes(iv));
+  if (chance > 0 && missing.length > 0 && intervals.length < 7) {
+    events.forEach((e, i) => {
+      if (i === events.length - 1 || e[1] > 2) return;
+      if (rng() >= chance) return;
+      const near = [-1, 1, -2, 2].map((dn) => e[2] + dn).filter((n) => missing.includes((((n - root) % 12) + 12) % 12));
+      if (near.length > 0) e[2] = near[0];
+    });
+  }
+
   // The last note lands on the 2nd or the 5th of the scale (the nearest one to where it was).
   if (events.length > 0) {
     const last = events[events.length - 1];
@@ -252,12 +279,21 @@ export function makePhrase(d: DancerState, mode: number, root: number, rng: () =
 /** The pool of phrases the engine picks from. The same settings always give the same pool. */
 export function makePhrases(d: DancerState, mode: number, root: number): Phrase[] {
   const out: Phrase[] = [];
+  // Spread out: the phrases start on different notes. The order is a seeded shuffle of the scale's tones, so
+  // the same settings still give the same phrases.
+  const toneCount = scaleTones(root, SCALES[resolveScale(d.scale, mode)].intervals, d.register, d.octaves).length;
+  const order = Array.from({ length: Math.max(1, toneCount) }, (_, k) => k);
+  const shuffle = mulberry32(Math.imul(Math.round(d.seed) + 1, 6007));
+  for (let k = order.length - 1; k > 0; k--) {
+    const j = Math.floor(shuffle() * (k + 1));
+    [order[k], order[j]] = [order[j], order[k]];
+  }
   for (let i = 0; i < PHRASES_IN_POOL; i++) {
     // In solo mode the pool runs from sparse to busy, so picking back and forth through it makes the
     // playing thin out and fill in over time. The last phrase is always at the density you set.
     const scale = d.mode === 1 ? 1 - (Math.max(0, Math.min(100, d.thin)) / 100) * (1 - i / (PHRASES_IN_POOL - 1)) : 1;
     const dd = scale === 1 ? d : { ...d, density: d.density * scale };
-    out.push(makePhrase(dd, mode, root, mulberry32(Math.imul(Math.round(d.seed) + 1, 7919) + i * 104729)));
+    out.push(makePhrase(dd, mode, root, mulberry32(Math.imul(Math.round(d.seed) + 1, 7919) + i * 104729), order[i % order.length]));
   }
   return out;
 }
