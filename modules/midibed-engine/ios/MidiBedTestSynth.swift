@@ -133,6 +133,16 @@ final class MidiBedTestSynth {
   /// 1 Wurlitzer, 2 Mellow, 3 Vibes and bells; tone 0...1; tremolo depth 0...1; tremolo rate Hz; decay scale;
   /// attack seconds; velocity response 0...1; release seconds. The same order as keysVoiceValues in src/keysvoice.ts.
   private let keysParams = UnsafeMutablePointer<Float>.allocate(capacity: 8)
+  /// The chord pad's sound shape: wave 0...1 (sawtooth, triangle, sine), detune in cents, drift 0...1, flange mix
+  /// 0...1, flange rate Hz, flange width 0...1, flange feedback 0...0.75. The order of padVoiceValues in src/padvoice.ts.
+  private let padParams = UnsafeMutablePointer<Float>.allocate(capacity: 8)
+  private var padDriftPhase: Float = 0
+  private let flangeBuf = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
+  private var flangeIdx = 0
+  private var flangePhase: Float = 0
+  /// Gain that keeps the pad's loudness the same as the wave goes from sawtooth through triangle to sine (steps of
+  /// 0.1; worked out offline, scratchpad pad_check.py).
+  private static let padWaveGains: [Float] = [1, 1.215, 1.4, 1.418, 1.251, 1.033, 0.991, 0.951, 0.913, 0.878, 0.845]
   private let padCount = 16
   private let drumCount = 8
 
@@ -203,6 +213,25 @@ final class MidiBedTestSynth {
     }
   }
 
+  /// Control side: the chord pad's sound shape (see padParams).
+  func configurePad(_ values: [Float]) {
+    for i in 0..<min(7, values.count) { padParams[i] = values[i] }
+  }
+
+  /// One oscillator of a pad voice: sawtooth at 0, triangle at 0.5, sine at 1, blended in between.
+  @inline(__always)
+  private func padOsc(_ p: Float, _ w: Float) -> Float {
+    let saw = p * 2 - 1
+    if w <= 0 { return saw }
+    let tri = 1 - 4 * abs(p - 0.5)
+    if w <= 0.5 {
+      let u = w * 2
+      return saw * (1 - u) + tri * u
+    }
+    let u = (w - 0.5) * 2
+    return tri * (1 - u) + (-cosf(2 * Float.pi * p)) * u
+  }
+
   /// Control side: the electric piano's type and controls (see keysParams).
   func configureKeys(_ values: [Float]) {
     for i in 0..<min(8, values.count) { keysParams[i] = values[i] }
@@ -255,6 +284,8 @@ final class MidiBedTestSynth {
     keysVoices = UnsafeMutablePointer<KeysVoice>.allocate(capacity: keysCount)
     keysVoices.initialize(repeating: KeysVoice(), count: keysCount)
     keysParams.initialize(from: [0, 0.4, 0.2, 4.8, 1.0, 0.002, 0.6, 0.12], count: 8)
+    padParams.initialize(from: [0, 8.7, 0, 0, 1.5, 0.4, 0.3, 0], count: 8)
+    flangeBuf.initialize(repeating: 0, count: 4096)
     expTarget = UnsafeMutablePointer<Float>.allocate(capacity: 16)
     expTarget.initialize(repeating: 1, count: 16)
     expCurrent = UnsafeMutablePointer<Float>.allocate(capacity: 16)
@@ -289,6 +320,8 @@ final class MidiBedTestSynth {
     drumPatches.deallocate()
     keysVoices.deallocate()
     keysParams.deallocate()
+    padParams.deallocate()
+    flangeBuf.deallocate()
     expTarget.deallocate()
     expCurrent.deallocate()
     noiseRing.deallocate()
@@ -879,6 +912,19 @@ final class MidiBedTestSynth {
     default: break
     }
     let kIndexScale = 0.35 + 1.3 * kTone
+    // The pad's sound shape for this buffer.
+    let pWave = max(0, min(1, padParams[0]))
+    let pGainPos = pWave * 10
+    let pGainI = min(9, Int(pGainPos))
+    let pWaveGain = MidiBedTestSynth.padWaveGains[pGainI] + (MidiBedTestSynth.padWaveGains[pGainI + 1] - MidiBedTestSynth.padWaveGains[pGainI]) * (pGainPos - Float(pGainI))
+    let pDetune = max(0, min(40, padParams[1]))
+    let pDrift = max(0, min(1, padParams[2]))
+    var pRatioA = powf(2, -pDetune / 2400)
+    var pRatioB = powf(2, pDetune / 2400)
+    let flMix = max(0, min(1, padParams[3]))
+    let flRate = max(0.1, padParams[4])
+    let flDepth = max(0, min(1, padParams[5]))
+    let flFeedback = max(0, min(0.75, padParams[6]))
     let kLPcoef = 1 - expf(-2 * Float.pi * (800 + kTone * kTone * 12000) / sr)
 
     // The loop player renders a whole buffer at once (false: nothing is playing).
@@ -908,13 +954,20 @@ final class MidiBedTestSynth {
         expCurrent[c] += (expTarget[c] - expCurrent[c]) * expSmooth
       }
 
+      if pDrift > 0 {
+        padDriftPhase += 0.11 * dt
+        if padDriftPhase >= 1 { padDriftPhase -= 1 }
+        let dNow = pDetune * (1 + pDrift * 0.8 * sinf(2 * Float.pi * padDriftPhase))
+        pRatioA = powf(2, -dNow / 2400)
+        pRatioB = powf(2, dNow / 2400)
+      }
       for i in 0..<padCount where pads[i].active {
         let f = 440 * powf(2, Float(pads[i].note - 69) / 12)
-        pads[i].phaseA += f * 0.998 * dt
+        pads[i].phaseA += f * pRatioA * dt
         if pads[i].phaseA >= 1 { pads[i].phaseA -= 1 }
-        pads[i].phaseB += f * 1.003 * dt
+        pads[i].phaseB += f * pRatioB * dt
         if pads[i].phaseB >= 1 { pads[i].phaseB -= 1 }
-        let saw = (pads[i].phaseA * 2 - 1) + (pads[i].phaseB * 2 - 1)
+        let saw = (padOsc(pads[i].phaseA, pWave) + padOsc(pads[i].phaseB, pWave)) * pWaveGain
         let fp = min(2, max(0, partOfChannel[Int(pads[i].channel)]))
         let v3 = saw - pads[i].ic2
         let v1 = fcA1[fp] * pads[i].ic1 + fcA2[fp] * v3
@@ -1201,6 +1254,24 @@ final class MidiBedTestSynth {
         partPad = 0
         partDancer = 0
         partKeys = 0
+      }
+      // A slow flange on the chord pad: a short modulated delay with feedback.
+      if flMix > 0.001 {
+        flangePhase += flRate * dt
+        if flangePhase >= 1 { flangePhase -= 1 }
+        let delaySamples = (0.5 + 5.5 * flDepth * (0.5 + 0.5 * sinf(2 * Float.pi * flangePhase))) * 0.001 * sr
+        var readPos = Float(flangeIdx) - delaySamples
+        if readPos < 0 { readPos += 4096 }
+        let i0 = Int(readPos) & 4095
+        let frac = readPos - Float(Int(readPos))
+        let i1 = (i0 + 1) & 4095
+        let wet = flangeBuf[i0] * (1 - frac) + flangeBuf[i1] * frac
+        flangeBuf[flangeIdx] = partPad + flFeedback * wet
+        flangeIdx = (flangeIdx + 1) & 4095
+        partPad = (partPad + flMix * wet) / (1 + flMix * 0.5)
+      } else {
+        flangeBuf[flangeIdx] = 0
+        flangeIdx = (flangeIdx + 1) & 4095
       }
       let partDrums: Float = on ? drumFiltered : 0
       var noiseOut: Float = 0

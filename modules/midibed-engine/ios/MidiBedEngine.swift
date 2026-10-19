@@ -813,6 +813,16 @@ final class MidiBedEngine {
 
   /// The built-in effects (UglyFX): the settings as one list of numbers in `UglyFXParam` order.
   /// Kept out of the main configuration so editing a knob never re-queues a scene.
+  /// The chord pad's sound shape (see src/padvoice.ts for the order of the values).
+  func setPadVoice(json: String) {
+    struct PadVoiceConfig: Decodable { var values: [Double] }
+    guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(PadVoiceConfig.self, from: data) else {
+      NSLog("MidiBedEngine: could not decode the pad voice")
+      return
+    }
+    queue.async { self.synth.configurePad(c.values.map { Float($0) }) }
+  }
+
   /// The Keys' electric piano: type and sound controls (see src/keysvoice.ts for the order of the values).
   func setKeysVoice(json: String) {
     struct KeysVoiceConfig: Decodable { var values: [Double] }

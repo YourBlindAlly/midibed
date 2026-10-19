@@ -70,6 +70,10 @@ public class MidiBedEngineModule: Module {
       self.engine.setKeysVoice(json: json)
     }
 
+    Function("setPadVoice") { (json: String) in
+      self.engine.setPadVoice(json: json)
+    }
+
     Function("setScenes") { (json: String) in
       self.engine.setScenes(json: json)
     }

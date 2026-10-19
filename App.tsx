@@ -1,5 +1,6 @@
 import { BASS_NOTES_NAMES, BASS_RHYTHM_NAMES, BASS_SKIP_NAMES, COLOR_STEP_NAMES } from './src/bassrhythm';
 import { KEYS_FOLLOW_NAMES, KEYS_RHYTHMS, KEYS_SKIP_NAMES, KeysState, keysPatternText } from './src/keys';
+import { PAD_PRESETS, applyPadPreset, padVoiceJson, setPadVoice } from './src/padvoice';
 import { KEYS_PRESETS, KEYS_TYPE_NAMES, applyKeysPreset, keysVoiceJson, setKeysVoice } from './src/keysvoice';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -68,7 +69,7 @@ import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from 
 import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, holdArmed, idForMidi, isDoublePress, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
 import { levelText, mixerMessages } from './src/mixer';
 import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
-import { ActionButton, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
+import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { RHYTHMS, rhythmDescribe, rhythmText } from './src/rhythms';
 import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion, onScene, testSweep } from './src/engine';
@@ -595,6 +596,14 @@ export default function App() {
     const t = setTimeout(() => engine.setKeysVoice(keysVoiceJsonText), 80);
     return () => clearTimeout(t);
   }, [keysVoiceJsonText, ready]);
+
+  // The chord pad's sound shape: send it whenever it changes.
+  const padVoiceJsonText = padVoiceJson(state.padVoice);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setPadVoice(padVoiceJsonText), 80);
+    return () => clearTimeout(t);
+  }, [padVoiceJsonText, ready]);
 
   // The built-in effects (Ugly FX): send the settings whenever they or the tempo change (the delay follows the tempo).
   const fxJson = uglyFxJson(state.fx, state.bpm);
@@ -1305,16 +1314,19 @@ export default function App() {
               <Text style={styles.note}>{advanceSentence}</Text>
             </View>
             </View>
+            <HelpContext.Provider value={{ notes: state.showNotes, hints: state.readHints }}>
             <SectionUiContext.Provider value={sectionUiValue}>
             <ScrollView key={tab} style={styles.fill} contentContainerStyle={styles.scroll}>
           <ActionButton label="Collapse all sections" hint="Closes every group on this screen, so you can open just the ones you want" onPress={() => patch({ sectionUi: JSON.stringify(collapseAll) })} />
           <ActionButton label="Expand all sections" onPress={() => patch({ sectionUi: JSON.stringify(expandAll) })} />
+          <Toggle label="Show explanations" value={state.showNotes} onChange={(v) => patch({ showNotes: v })} hint="The sentences of help text on the screens. Switch off to move through faster" />
+          <Toggle label="Read hints" value={state.readHints} onChange={(v) => patch({ readHints: v })} hint="The extra line VoiceOver speaks after a control, such as how to change it" />
           {tab === 'live' && (
             <>
           <Section title="Journey">
-            <Text style={styles.note}>
+            <Note>
               A journey is a set of scenes with its own key, tempo and sounds. Swipe to change journey; while playing it changes at the next bar.
-            </Text>
+            </Note>
             <Stepper
               label="Journey"
               value={state.activeJourney}
@@ -1362,9 +1374,9 @@ export default function App() {
                 announceLater('All notes off', 300);
               }}
             />
-            <Text style={styles.note}>
+            <Note>
               Quick on and off for each part, and solo to hear one part alone. Switching one fades it in or out using your fade times. On and off is saved in each scene; solo is never saved.
-            </Text>
+            </Note>
             <Toggle label="Bass drone layer" value={state.drone.enabled} onChange={(v) => patchDrone({ enabled: v })} />
             <Toggle label="Solo bass drone" value={state.solo === 'bass'} onChange={(v) => setSolo(v ? 'bass' : null)} hint="Hear only the bass drone. The others fade out and come back when you clear the solo" />
             <Toggle label="Chord pad layer" value={state.pad.enabled} onChange={(v) => patchPad({ enabled: v })} />
@@ -1514,9 +1526,9 @@ export default function App() {
           {tab === 'parts' && (
             <>
           <Section title="Part" fixed>
-            <Text style={styles.note}>
+            <Note>
               Choose a part. Every part shows the same headings in the same order: where it goes, sound, level and fade, what it plays, how it moves. Breathing, the chords and the key are on the Scene tab.
-            </Text>
+            </Note>
             <Stepper
               label="Part"
               value={partIdx}
@@ -1560,7 +1572,7 @@ export default function App() {
               <Stepper label="Loops MIDI channel" value={state.loops.channel} onChange={(v) => patchLoops({ channel: v })} min={0} max={15} format={channelText} />
             )}
             {part === 'drums' && (
-              <Text style={styles.note}>Each drum has its own note and channel, in its own section under what it plays, below.</Text>
+              <Note>Each drum has its own note and channel, in its own section under what it plays, below.</Note>
             )}
             <Toggle
               label={`${partName}: send to other apps`}
@@ -1703,9 +1715,9 @@ export default function App() {
             )}
             {part === 'keys' && (
               <>
-                <Text style={styles.note}>
+                <Note>
                   A rhythmic electric piano that comps the chords of the harmony loop, in time with the bed. The pad stays smooth and sustained; the keys are where the rhythm is. Pick a pattern, or use the generator to spread hits over steps like the drums. Saved in each scene, except the channel.
-                </Text>
+                </Note>
                 <Stepper
                   label="Keys play"
                   value={state.keys.follow}
@@ -1775,9 +1787,9 @@ export default function App() {
             )}
             {part === 'dancer' && (
               <>
-                <Text style={styles.note}>
+                <Note>
                   Plays short phrases of single notes on the key's scale. In call and response it plays a phrase, then stays quiet for as many whole bars as the phrase took up, so you can repeat or answer it. In solo mode it keeps playing by itself. Freeze does not pause it. Saved in each scene, except the channel.
-                </Text>
+                </Note>
                 <Stepper
                   label="MidiDancer mode"
                   value={state.dancer.mode}
@@ -1899,12 +1911,12 @@ export default function App() {
               </>
             )}
             {part === 'drums' && (
-              <Text style={styles.note}>
+              <Note>
                 Each drum is its own section below, with its note, channel and pattern. The master Percussion layer switch is on the Live tab and at the top of this page.
-              </Text>
+              </Note>
             )}
             {part === 'loops' && (
-              <Text style={styles.note}>The loop settings follow, in the next section.</Text>
+              <Note>The loop settings follow, in the next section.</Note>
             )}
           </Section>
 
@@ -2081,9 +2093,9 @@ export default function App() {
           {part === 'loops' && (
             <>
           <Section title="Loops: what it plays">
-            <Text style={styles.note}>
+            <Note>
               For an app that plays its own loops, like DrumJam. MidiBed does not send notes here. It picks a loop, then starts and stops it. Which loop, and whether it plays, is saved in each scene. Turn on "Send MIDI clock" on the Setup tab so the loops follow this tempo.
-            </Text>
+            </Note>
             <Stepper
               label="Loop program"
               value={state.loops.program}
@@ -2177,22 +2189,22 @@ export default function App() {
           )}
 
           <Section title={`${partName}: how it moves`}>
-            <Text style={styles.note}>
+            <Note>
               Filter movement on this part's channel. To teach a synth which control to move: put it in MIDI learn, touch the control, then press the test sweep button. Press Stop first so only the sweep is sent.
-            </Text>
+            </Note>
             {state.wanderers.map((w, i) => (onThisPart(w.channel) ? renderWanderer(w, i) : null))}
             {!state.wanderers.some((w) => onThisPart(w.channel)) && (
-              <Text style={styles.note}>No filter movement is set for this part's channel. Filter movements are matched to a part by their MIDI channel.</Text>
+              <Note>No filter movement is set for this part's channel. Filter movements are matched to a part by their MIDI channel.</Note>
             )}
             {state.wanderers.some((w) => !anyPartChannel(w.channel)) && (
-              <Text style={styles.note}>These filter movements are on a channel no part uses:</Text>
+              <Note>These filter movements are on a channel no part uses:</Note>
             )}
             {state.wanderers.map((w, i) => (!anyPartChannel(w.channel) ? renderWanderer(w, i) : null))}
           </Section>
           <Section title={`${partName}: level and fade`}>
-            <Text style={styles.note}>
+            <Note>
               The level is sent to the other app as a volume control when "Send levels to the apps" is on, on the Setup tab. Fades apply when you switch this part on or off and when you press Play.
-            </Text>
+            </Note>
             <Stepper
               label={`${partName} level`}
               value={state.mixer[part]}
@@ -2229,20 +2241,20 @@ export default function App() {
               </>
             )}
             {(part === 'dancer' || part === 'loops' || part === 'keys') && (
-              <Text style={styles.note}>This part has no fade of its own: switching it on or off is immediate.</Text>
+              <Note>This part has no fade of its own: switching it on or off is immediate.</Note>
             )}
           </Section>
 
 
           {part !== 'loops' && (
             <Section title={`${partName}: internal synth`}>
-              <Text style={styles.note}>MidiBed's own built-in sound for this part: its voice and the Ugly FX.</Text>
+              <Note>MidiBed's own built-in sound for this part: its voice and the Ugly FX.</Note>
           {part === 'bass' && (
             <>
               <Section inner title="Bass drone: built-in bass voice">
-                <Text style={styles.note}>
+                <Note>
                   A bass synth inside MidiBed, in the style of the Moog Taurus and the Cherry Audio Lowdown. Switch it on and the bass drone plays this sound through MidiBed's own audio, with no other app to start. Filter movement on the bass channel moves its cutoff and resonance. It needs the built-in test sound switched on, on the Setup tab.
-                </Text>
+                </Note>
                 <Toggle label="Use the built-in bass voice" value={state.bassVoice.enabled} onChange={(v) => patch({ bassVoice: { ...state.bassVoice, enabled: v } })} />
                 <Toggle
                   label="Built-in sound plays only the bass voice"
@@ -2297,11 +2309,38 @@ export default function App() {
               ))}
             </>
           )}
+            {part === 'pad' && (
+              <Section inner title="Chord pad: sound shape">
+                <Note>
+                  Gentle ways to give the built-in pad depth and slow movement. Everything here is subtle: a softer or purer wave, a slow breathing in the tuning, and an optional slow flange. Pick a preset or shape it yourself.
+                </Note>
+                <Stepper
+                  label="Pad sound preset"
+                  value={state.padVoice.preset}
+                  onChange={(v) => patch({ padVoice: applyPadPreset(state.padVoice, v) })}
+                  min={0}
+                  max={PAD_PRESETS.length - 1}
+                  format={(v) => PAD_PRESETS[v].name}
+                  hint="Sets every pad sound setting at once. Changing any setting yourself makes it Custom. Classic is the pad as it always was"
+                />
+                <Stepper label="Pad wave" value={state.padVoice.wave} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { wave: v }) })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'sawtooth, as before' : v === 50 ? 'soft triangle' : v === 100 ? 'pure sine' : `${v} percent of the way from sawtooth to sine`)} hint="Higher is softer and rounder; the level stays the same" />
+                <Stepper label="Pad detune" value={state.padVoice.detune} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { detune: v }) })} min={0} max={40} step={1} format={(v) => `${v} cents apart`} hint="How far apart the pad's two oscillators are tuned: more is wider and slower to beat" />
+                <Stepper label="Pad drift" value={state.padVoice.drift} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { drift: v }) })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'off' : `${v} percent`)} hint="The detune slowly breathes in and out, about every nine seconds, for gentle movement" />
+                <Stepper label="Pad flange" value={state.padVoice.flange} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { flange: v }) })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'off' : `${v} percent mixed in`)} hint="A slow whoosh of movement. Keep it low for depth" />
+                {state.padVoice.flange > 0 && (
+                  <>
+                    <Stepper label="Pad flange speed" value={state.padVoice.flangeRate} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { flangeRate: v }) })} min={1} max={60} step={1} format={(v) => `${(v / 10).toFixed(1)} hertz`} />
+                    <Stepper label="Pad flange width" value={state.padVoice.flangeDepth} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { flangeDepth: v }) })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+                    <Stepper label="Pad flange feedback" value={state.padVoice.flangeFeedback} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { flangeFeedback: v }) })} min={0} max={75} step={5} format={(v) => `${v} percent`} hint="More makes a stronger, more metallic whoosh" />
+                  </>
+                )}
+              </Section>
+            )}
             {part === 'keys' && (
               <Section inner title="Keys: electric piano sound">
-                <Text style={styles.note}>
+                <Note>
                   The built-in electric piano. Pick a preset, or shape it: the type, how bright, the tremolo, how long notes ring and how much hard playing bites. If it sounds too sharp, lower the tone and the velocity response.
-                </Text>
+                </Note>
                 <Stepper
                   label="Electric piano preset"
                   value={state.keysVoice.preset}
@@ -2372,7 +2411,7 @@ export default function App() {
           )}
 
           <Section title={`${partName}: external synth`}>
-            <Text style={styles.note}>Everything that sends this part to another app: which app, its MIDI port, its sounds, and a test note.</Text>
+            <Note>Everything that sends this part to another app: which app, its MIDI port, its sounds, and a test note.</Note>
             {partRole && (
               <View style={styles.group}>
                 <Stepper
@@ -2384,7 +2423,7 @@ export default function App() {
                   format={(v) => allProfiles()[v].name}
                   hint="Which app this part is sent to. It then shows real names and keeps that app's own sound favorites. Add apps that are not listed on the Setup tab."
                 />
-                <Text style={styles.note}>{partProfile.about}</Text>
+                <Note>{partProfile.about}</Note>
               </View>
             )}
             {part !== 'loops' && (
@@ -2431,29 +2470,29 @@ export default function App() {
               )}
           {soundSlot !== undefined && (
             <Section inner title={`${partName}: sound`}>
-              <Text style={styles.note}>
+              <Note>
                 Sends Bank Select and Program Change to this part's channel so you can step through sounds from here. The receiving app must be set to respond to program changes.
-              </Text>
+              </Note>
               {renderSlot(state.sounds[soundSlot], soundSlot)}
             </Section>
           )}
           {part === 'keys' && (
             <Section inner title="Keys: sound">
-              <Text style={styles.note}>
+              <Note>
                 The built-in sound is an electric piano (Rhodes style) with a soft tremolo. To use another app's electric piano or keyboard instead, switch off Play in the built-in sound under where it goes, and point that app at this channel.
-              </Text>
+              </Note>
             </Section>
           )}
           {part === 'dancer' && (
             <Section inner title="MidiDancer: sound">
-              <Text style={styles.note}>
+              <Note>
                 MidiDancer plays whatever sound its channel has in the other app. Choose the sound there, for example a ThumbJam slot on this channel.
-              </Text>
+              </Note>
             </Section>
           )}
           {part === 'loops' && (
             <Section inner title="Loops: sound">
-              <Text style={styles.note}>The loop choice (program, bank, favorites) is under what it plays, above.</Text>
+              <Note>The loop choice (program, bank, favorites) is under what it plays, above.</Note>
             </Section>
           )}
 
@@ -2464,9 +2503,9 @@ export default function App() {
           {tab === 'player' && (
             <>
           <Section title="Loop library">
-            <Text style={styles.note}>
+            <Note>
               {`${loopLib.length} ${loopLib.length === 1 ? 'loop' : 'loops'} in the library. Loops are copied into MidiBed's own storage and play in time with the bed.`}
-            </Text>
+            </Note>
             <ActionButton
               label="Add loops from a folder"
               hint="Choose a folder in the Files app. Every audio file inside it, including sub-folders, is copied in"
@@ -2684,9 +2723,9 @@ export default function App() {
           {tab === 'scene' && (
             <>
           <Section title="This scene">
-            <Text style={styles.note}>
+            <Note>
               Everything here belongs to the scene you are working on, which is the scene selected at the top. The scene buttons at the top change what is playing and what you are editing together. The part settings (bass, pad, drums, MidiDancer) are saved per scene too.
-            </Text>
+            </Note>
             <Stepper label="Swing" value={state.swing} onChange={(v) => patch({ swing: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
             <View accessible={false} style={styles.nameBox}>
               <Text style={styles.note}>Scene name (optional)</Text>
@@ -2706,9 +2745,9 @@ export default function App() {
           </Section>
 
           <Section title="Harmony">
-            <Text style={styles.note}>
+            <Note>
               The chord loop. The chord pad and the bass drone can follow it. Chords are built on the key note, in the mode you choose. The loop keeps time even if nothing is following it.
-            </Text>
+            </Note>
             <Stepper
               label="Key (root note)"
               value={state.drone.root}
@@ -2797,9 +2836,9 @@ export default function App() {
 
 
           <Section title="Scene tools">
-            <Text style={styles.note}>
+            <Note>
               Each scene remembers its drums, bass drone on/off and voicing, chord pad, harmony, swing, and filter movement. Tempo, key, outputs, fades and MIDI routing stay the same in every scene. Changes you make are saved into the current scene.
-            </Text>
+            </Note>
             <Stepper
               label="What to copy"
               value={copyWhat}
@@ -2851,9 +2890,9 @@ export default function App() {
           </Section>
 
           <Section title="Breathing">
-            <Text style={styles.note}>
+            <Note>
               Lets a scene change by itself, counted in bars from the start of the scene. A layer keeps its normal setting for a while, then changes for a while, then comes back. The chords and the key never change. A scene always starts in its normal state. Each scene has its own settings.
-            </Text>
+            </Note>
             <Stepper
               label="Breathing preset"
               value={state.motion.preset}
@@ -3003,9 +3042,9 @@ export default function App() {
           </Section>
 
           <Section title="Transitions in this scene">
-            <Text style={styles.note}>
+            <Note>
               The transition sounds themselves are set once, lower down on this tab. Here you choose whether this scene uses each one. A sound that is switched off on the Sound tab stays off everywhere.
-            </Text>
+            </Note>
             <Toggle label="Scene start sound in this scene" value={state.transitionUse.entrance} onChange={(v) => patchTransitionUse('entrance', v)} hint="Plays as this scene starts" />
             <Toggle label="Drums break sound in this scene" value={state.transitionUse.drumBreak} onChange={(v) => patchTransitionUse('drumBreak', v)} hint="Plays as the drums drop out in a breakdown" />
             <Toggle label="Drums return sound in this scene" value={state.transitionUse.drumReturn} onChange={(v) => patchTransitionUse('drumReturn', v)} hint="Plays as the drums come back" />
@@ -3013,9 +3052,9 @@ export default function App() {
           </Section>
 
           <Section title="Transition sounds">
-            <Text style={styles.note}>
+            <Note>
               Sounds made inside MidiBed from noise, to mark a change. A lead-in (Wave, Wind) starts before the change and rises into it. Thunder, Boom and Crash play on the change itself. These settings are the same in every scene; each scene can switch them off under Transitions in this scene. They play through MidiBed's own sound, even when the built-in test sound is off, and their level is set here in MidiBed. Noise sounds are much louder than the Boom at the same level, so they usually need a lower setting.
-            </Text>
+            </Note>
             <Stepper
               label="Shortest lead-in"
               value={state.transitionMinEighths}
@@ -3035,7 +3074,7 @@ export default function App() {
             const t = state.transitions[which];
             return (
               <Section key={which} title={`${word} sound`}>
-                <Text style={styles.note}>{about}</Text>
+                <Note>{about}</Note>
                 <Toggle label={`${word} sound`} value={t.on} onChange={(v) => patchTransition(which, { on: v })} />
                 {t.on && (
                   <>
@@ -3071,9 +3110,9 @@ export default function App() {
           })}
 
           <Section title="Recurring sound">
-            <Text style={styles.note}>
+            <Note>
               A sound that comes round now and then inside a scene: every few bars, or at the end of each chord loop. It skips the first loop of a scene, which is where the scene start sound belongs. The settings are the same in every scene; each scene can switch it off under Transitions in this scene. If the rise is longer than the gap between sounds, a later sound joins its sweep part-way.
-            </Text>
+            </Note>
             <Toggle label="Recurring sound" value={state.recurring.on} onChange={(v) => patchRecurring({ on: v })} />
             {state.recurring.on && (
               <>
@@ -3117,17 +3156,17 @@ export default function App() {
           {tab === 'setup' && (
             <>
           <Section title="Keyboard shortcuts">
-            <Text style={styles.note}>
+            <Note>
               Keys from a keyboard, or a braille display that types like one (such as the Hable One). They work while MidiBed is on screen: iOS does not deliver keys to an app in the background. The magic tap and the three-finger swipes still work as before. While you type in a text field the keys go there instead.
-            </Text>
+            </Note>
             <Toggle label="Keyboard shortcuts" value={state.shortcuts} onChange={(v) => patch({ shortcuts: v })} />
             <View accessible accessibilityLabel="Last key received" accessibilityValue={{ text: lastKeyText }}>
               <Text style={styles.note}>{`Last key received: ${lastKeyText}`}</Text>
             </View>
             {SHORTCUT_HELP.map((line) => (
-              <Text key={line} style={styles.note}>
+              <Note key={line}>
                 {line}
-              </Text>
+              </Note>
             ))}
           </Section>
 
@@ -3240,9 +3279,9 @@ export default function App() {
               hint="On: every note of the built-in sound lands on its exact sample, so steady patterns are tight and even. The music then runs a short moment (about a tenth of a second) behind the clock, and apps you send MIDI to are kept in step with it. Off: the older way, notes play as soon as they arrive, with a few milliseconds of unevenness"
             />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
-            <Text style={styles.note}>
+            <Note>
               Each part can have its own MIDI source, set on the Parts tab under where it goes. The sources are called MidiBed, MidiBed Bass, MidiBed Pad, MidiBed Dancer, MidiBed Keys, MidiBed Drums and MidiBed Loops.
-            </Text>
+            </Note>
             <Toggle label="Send MIDI clock" value={state.clock} onChange={(v) => patch({ clock: v })} hint="Lets other apps, like DrumJam, follow this tempo while playing" />
             <Toggle
               label="Keep the clock running while stopped"
@@ -3260,7 +3299,7 @@ export default function App() {
           </Section>
 
           <Section title="Ugly FX: shared reverb and delay">
-            <Text style={styles.note}>These effects are in MidiBed's own sound only. Each part's amounts are on the Parts tab.</Text>
+            <Note>These effects are in MidiBed's own sound only. Each part's amounts are on the Parts tab.</Note>
             <Stepper
               label="Reverb size"
               value={state.fx.size}
@@ -3306,9 +3345,9 @@ export default function App() {
           </Section>
 
           <Section title="Levels and fades">
-            <Text style={styles.note}>
+            <Note>
               Each part's own level and fade times are on the Parts tab. These two settings apply to all parts.
-            </Text>
+            </Note>
             <Toggle
               label="Send levels to the apps"
               value={state.mixer.send}
@@ -3339,11 +3378,11 @@ export default function App() {
           </Section>
 
           <Section title="My apps">
-            <Text style={styles.note}>
+            <Note>
               Which app each part is sent to is chosen on the Parts tab, under where it goes. Add a synth or drum app that is not in the list here and it gets its own sound favorites.
-            </Text>
+            </Note>
             <View style={styles.nameBox}>
-              <Text style={styles.note}>Your own apps. Add a synth or drum app that is not in the list and it gets its own sound favorites.</Text>
+              <Note>Your own apps. Add a synth or drum app that is not in the list and it gets its own sound favorites.</Note>
               <TextInput
                 style={styles.nameInput}
                 value={newAppName}
@@ -3390,6 +3429,7 @@ export default function App() {
           )}
             </ScrollView>
             </SectionUiContext.Provider>
+            </HelpContext.Provider>
             <TabBar selected={tab} onSelect={(id) => selectTab(id)} />
           </View>
         </Pager>

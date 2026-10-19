@@ -14,6 +14,19 @@ export const colors = {
 
 const SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
 
+/**
+ * Whether the explanations are shown: the sentences of help text (Note) and the spoken hints that VoiceOver
+ * reads after a control. Both can be switched off, so moving through the screen is quicker.
+ */
+export const HelpContext = createContext<{ notes: boolean; hints: boolean }>({ notes: true, hints: true });
+
+/** A sentence of explanation. Not drawn at all when explanations are switched off. */
+export function Note({ children }: { children?: React.ReactNode }) {
+  const { notes } = useContext(HelpContext);
+  if (!notes) return null;
+  return <Text style={styles.note}>{children}</Text>;
+}
+
 type StepperProps = {
   label: string;
   value: number;
@@ -35,6 +48,7 @@ type StepperProps = {
  * The visible buttons are hidden from VoiceOver so each control is ONE stop.
  */
 export function Stepper({ label, value, onChange, min, max, step = 1, bigStep, format, hint }: StepperProps) {
+  const { hints } = useContext(HelpContext);
   const clamp = (v: number) => Math.max(min, Math.min(max, v));
   const text = format ? format(value) : String(value);
 
@@ -56,7 +70,7 @@ export function Stepper({ label, value, onChange, min, max, step = 1, bigStep, f
       accessibilityRole="adjustable"
       accessibilityLabel={label}
       accessibilityValue={{ text }}
-      accessibilityHint={hint ?? 'Swipe up or down to adjust'}
+      accessibilityHint={hints ? hint ?? 'Swipe up or down to adjust' : undefined}
       accessibilityActions={actions}
       onAccessibilityAction={(e) => {
         switch (e.nativeEvent.actionName) {
@@ -109,6 +123,7 @@ export function toggleAdjust(value: boolean, action: string): boolean {
 }
 
 export function Toggle({ label, value, onChange, hint }: ToggleProps) {
+  const { hints } = useContext(HelpContext);
   const flickHint = 'Swipe up for on, swipe down for off, or double tap to switch.';
   return (
     <Pressable
@@ -117,7 +132,7 @@ export function Toggle({ label, value, onChange, hint }: ToggleProps) {
       accessibilityRole="adjustable"
       accessibilityLabel={label}
       accessibilityValue={{ text: value ? 'On' : 'Off' }}
-      accessibilityHint={hint ? `${hint}. ${flickHint}` : flickHint}
+      accessibilityHint={hints ? (hint ? `${hint}. ${flickHint}` : flickHint) : undefined}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={(e) => {
         const next = toggleAdjust(value, e.nativeEvent.actionName);
@@ -134,13 +149,14 @@ export function Toggle({ label, value, onChange, hint }: ToggleProps) {
 }
 
 export function ActionButton({ label, onPress, hint }: { label: string; onPress: () => void; hint?: string }) {
+  const { hints } = useContext(HelpContext);
   return (
     <Pressable
       hitSlop={SLOP}
       style={styles.action}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint={hint}
+      accessibilityHint={hints ? hint : undefined}
       onPress={onPress}
     >
       <Text style={styles.actionText}>{label}</Text>
@@ -202,6 +218,7 @@ export function Section({
 }
 
 const styles = StyleSheet.create({
+  note: { color: colors.dim, fontSize: 15, marginTop: 6, marginBottom: 6 },
   sectionHead: { minHeight: 44, justifyContent: 'center' },
   inner: { marginTop: 6, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: colors.line },
   innerTitle: { color: colors.accent, fontSize: 16, fontWeight: '600', paddingVertical: 4 },

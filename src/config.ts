@@ -10,6 +10,7 @@ import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance'
 import { DancerState, defaultDancer, makePhrases } from './dancer';
 import { buildBassColorNotes } from './bassrhythm';
 import { KeysVoiceState, defaultKeysVoice } from './keysvoice';
+import { PadVoiceState, defaultPadVoice } from './padvoice';
 import { KEYS_RHYTHMS, KeysState, clampKeysRhythm, defaultKeys, keysMask } from './keys';
 import type { Layer } from './shortcuts';
 import { cycleBarsFromOldSpeed, phaseOffset, smoothBeatsFromOldSmooth } from './wander';
@@ -296,8 +297,14 @@ export type BedState = {
   keys: KeysState;
   /** The Keys' built-in electric piano: its type and sound controls. Global, not saved in a scene. */
   keysVoice: KeysVoiceState;
+  /** The chord pad's sound shape (wave, detune, drift, flange). Global, not saved in a scene. */
+  padVoice: PadVoiceState;
   /** 1 = the Shaker slot has been moved to the softer egg shaker once (settings saved before this keep the sharp one until migrateState changes it, once). */
   drumSoundVersion: number;
+  /** Show the sentences of explanation on the screens (Note). Global. */
+  showNotes: boolean;
+  /** Read the hints VoiceOver speaks after a control. Global. */
+  readHints: boolean;
   /** The built-in sound plays every note on its exact sample, using a short built-in delay so timing stays tight and even (the music runs about a tenth of a second behind the clock). Off = the old immediate way. Global. */
   tightTiming: boolean;
   bpm: number;
@@ -765,7 +772,10 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   dancer: defaultDancer,
   keys: defaultKeys,
   keysVoice: defaultKeysVoice,
+  padVoice: defaultPadVoice,
   drumSoundVersion: 1,
+  showNotes: true,
+  readHints: true,
   tightTiming: true,
   journeyName: 'Journey 1',
   profiles: defaultProfileChoice,
