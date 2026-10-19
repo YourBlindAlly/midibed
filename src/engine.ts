@@ -26,6 +26,7 @@ type Native = {
   applyConfig(json: string, queued: boolean): void;
   setScenes(json: string): void;
   sendControlChange(channel: number, cc: number, value: number, loops: boolean): void;
+  setSynthLevel(channel: number, value: number): void;
   sendNote(channel: number, note: number, velocity: number, durationMs: number): void;
   playTransitionNow(shape: number, color: number, beats: number, level: number): void;
   sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number, loops: boolean): void;
@@ -179,6 +180,8 @@ export const engine = {
   /** loops = out the loops app's own port (when it has one). */
   sendControlChange: (channel: number, cc: number, value: number, loops = false) =>
     native?.sendControlChange(channel, cc, value, loops),
+  /** A part's level for the built-in sound only (nothing goes out to other apps). */
+  setSynthLevel: (channel: number, value: number) => native?.setSynthLevel(channel, value),
   /** One note, for auditioning which channel and note a receiving app answers to. */
   sendNote: (channel: number, note: number, velocity = 100, durationMs = 250) =>
     native?.sendNote(channel, note, velocity, durationMs),

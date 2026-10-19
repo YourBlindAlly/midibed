@@ -30,8 +30,8 @@ type RoutingView = {
 const clamp = (v: number) => Math.max(0, Math.min(127, Math.round(v)));
 
 /** The control changes that set every part's level. `loopCC` is the loops app's own loop-volume control, if it has one. */
-export function mixerMessages(s: RoutingView, loopCC?: number): MixerMessage[] {
-  if (!s.mixer.send) return [];
+export function mixerMessages(s: RoutingView, loopCC?: number, always = false): MixerMessage[] {
+  if (!s.mixer.send && !always) return [];
   const out: MixerMessage[] = [];
   const seen = new Set<string>();
   const add = (part: MixerMessage['part'], channel: number, cc: number, loops = false) => {
@@ -47,6 +47,14 @@ export function mixerMessages(s: RoutingView, loopCC?: number): MixerMessage[] {
   for (const d of s.drums) add('drums', d.channel, 7);
   add('loops', s.loops.channel, loopCC ?? 7, true);
   return out;
+}
+
+/** The part levels for the built-in sound, which hears them whether or not "Send levels" is on (that switch is only about other apps). */
+export function synthLevelMessages(s: RoutingView): MixerMessage[] {
+  // 100 (the starting level) is full volume in the built-in sound, so nothing gets quieter until you turn a level down
+  return mixerMessages(s, undefined, true)
+    .filter((m) => !m.loops)
+    .map((m) => ({ ...m, value: clamp(m.value * 1.27) }));
 }
 
 export function levelText(v: number): string {

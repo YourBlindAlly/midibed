@@ -959,6 +959,13 @@ final class MidiBedEngine {
     }
   }
 
+  /// A part's level for the built-in sound only: a volume control change that is not sent to any other app.
+  func setSynthLevel(channel: Int, value: Int) {
+    queue.async {
+      self.synth.post(status: 0xB0 | UInt8(max(0, min(15, channel))), d1: 7, d2: UInt8(max(0, min(127, value))))
+    }
+  }
+
   /// Optional Bank Select (CC 0 / CC 32; pass a negative number to skip) then
   /// Program Change, so the receiving app switches sound.
   func sendProgramChange(channel: Int, program: Int, bankMSB: Int, bankLSB: Int, loops: Bool) {

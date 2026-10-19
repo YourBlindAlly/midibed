@@ -155,3 +155,15 @@ describe('Keys in the Swift engine and synth', () => {
     expect(fx).toContain('static let count = 28');
   });
 });
+
+describe('levels reach the built-in sound', () => {
+  it('are produced even when Send levels is off, with 100 as full volume', () => {
+    const { synthLevelMessages } = require('../src/mixer');
+    const s = { ...defaultState, mixer: { ...defaultState.mixer, send: false, keys: 50 } };
+    expect(mixerMessages(s)).toEqual([]);
+    const m = synthLevelMessages(s);
+    expect(m.find((x: any) => x.part === 'keys').value).toBe(64);
+    expect(m.find((x: any) => x.part === 'bass').value).toBe(127);
+    expect(m.some((x: any) => x.loops)).toBe(false);
+  });
+});

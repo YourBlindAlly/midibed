@@ -1223,6 +1223,7 @@ final class MidiBedTestSynth {
         drums[i].t += dt
         drumSum += s * drums[i].velocity * 0.45 * drums[i].level
       }
+      drumSum *= expCurrent[9] // the drums' level (CC 7 on the drum channel)
 
       let dv3 = drumSum - drumIc2
       let dv1 = fcA1[3] * drumIc1 + fcA2[3] * dv3

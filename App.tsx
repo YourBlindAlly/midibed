@@ -67,7 +67,7 @@ import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, holdArmed, idForMidi, isDoublePress, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
-import { levelText, mixerMessages } from './src/mixer';
+import { levelText, mixerMessages, synthLevelMessages } from './src/mixer';
 import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
@@ -658,6 +658,8 @@ export default function App() {
   // Mixer: send every part's level as a volume control (only when 'Send levels' is on).
   const sendMixerLevels = () => {
     const s = latest.current;
+    // the built-in sound always hears the levels; other apps only when "Send levels" is on
+    synthLevelMessages(s).forEach((m) => engine.setSynthLevel(m.channel, m.value));
     mixerMessages(s, getProfile(s.profiles.loops).loopVolumeCC).forEach((m) =>
       engine.sendControlChange(m.channel, m.cc, m.value, m.loops),
     );
@@ -2201,7 +2203,7 @@ export default function App() {
           </Section>
           <Section title={`${partName}: level and fade`}>
             <Note>
-              The level is sent to the other app as a volume control when "Send levels to the apps" is on, on the Setup tab. Fades apply when you switch this part on or off and when you press Play.
+              The level always sets this part's volume in the built-in sound. It is also sent to the other app as a volume control when "Send levels to the apps" is on, on the Setup tab. Fades apply when you switch this part on or off and when you press Play.
             </Note>
             <Stepper
               label={`${partName} level`}

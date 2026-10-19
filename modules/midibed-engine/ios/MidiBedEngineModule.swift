@@ -107,6 +107,10 @@ public class MidiBedEngineModule: Module {
       self.engine.sendControlChange(channel: channel, cc: cc, value: value, loops: loops)
     }
 
+    Function("setSynthLevel") { (channel: Int, value: Int) in
+      self.engine.setSynthLevel(channel: channel, value: value)
+    }
+
     Function("sendNote") { (channel: Int, note: Int, velocity: Int, durationMs: Int) in
       self.engine.sendNote(channel: channel, note: note, velocity: velocity, durationMs: durationMs)
     }
