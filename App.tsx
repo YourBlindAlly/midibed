@@ -1319,8 +1319,6 @@ export default function App() {
             <ScrollView key={tab} style={styles.fill} contentContainerStyle={styles.scroll}>
           <ActionButton label="Collapse all sections" hint="Closes every group on this screen, so you can open just the ones you want" onPress={() => patch({ sectionUi: JSON.stringify(collapseAll) })} />
           <ActionButton label="Expand all sections" onPress={() => patch({ sectionUi: JSON.stringify(expandAll) })} />
-          <Toggle label="Show explanations" value={state.showNotes} onChange={(v) => patch({ showNotes: v })} hint="The sentences of help text on the screens. Switch off to move through faster" />
-          <Toggle label="Read hints" value={state.readHints} onChange={(v) => patch({ readHints: v })} hint="The extra line VoiceOver speaks after a control, such as how to change it" />
           {tab === 'live' && (
             <>
           <Section title="Journey">
@@ -3155,6 +3153,10 @@ export default function App() {
           )}
           {tab === 'setup' && (
             <>
+          <Section title="Explanations">
+            <Toggle label="Show explanations" value={state.showNotes} onChange={(v) => patch({ showNotes: v })} hint="The sentences of help text on the screens. Switch off to move through faster" />
+            <Toggle label="Read hints" value={state.readHints} onChange={(v) => patch({ readHints: v })} hint="The extra line VoiceOver speaks after a control, such as how to change it" />
+          </Section>
           <Section title="Keyboard shortcuts">
             <Note>
               Keys from a keyboard, or a braille display that types like one (such as the Hable One). They work while MidiBed is on screen: iOS does not deliver keys to an app in the background. The magic tap and the three-finger swipes still work as before. While you type in a text field the keys go there instead.
