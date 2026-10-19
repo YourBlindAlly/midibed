@@ -75,6 +75,7 @@ import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion,
 import {
   CONTOUR_NAMES,
   DANCER_MODE_NAMES,
+  defaultDancer,
   START_NOTE_NAMES,
   DancerState,
   VIBRATO_MODE_NAMES,
@@ -1545,7 +1546,15 @@ export default function App() {
               <Stepper label="Keys MIDI channel" value={state.keys.channel} onChange={(v) => patchKeys({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the keys play on. Another app, or the built-in electric piano, hears them there" />
             )}
             {part === 'dancer' && (
-              <Stepper label="MidiDancer MIDI channel" value={state.dancer.channel} onChange={(v) => patchDancer({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel MidiDancer plays on" />
+              <>
+                <Stepper label="MidiDancer MIDI channel" value={state.dancer.channel} onChange={(v) => patchDancer({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel MidiDancer plays on" />
+                <Toggle
+                  label="MidiDancer plays the Keys' electric piano"
+                  value={state.dancer.channel === state.keys.channel}
+                  onChange={(v) => patchDancer({ channel: v ? state.keys.channel : defaultDancer.channel })}
+                  hint="Puts MidiDancer on the Keys' MIDI channel, so the built-in electric piano (its type, tone, effects and level) is the MidiDancer voice. Switch off 'send to other apps' under it if another app should not play it too. Off puts MidiDancer back on its own channel"
+                />
+              </>
             )}
             {part === 'loops' && (
               <Stepper label="Loops MIDI channel" value={state.loops.channel} onChange={(v) => patchLoops({ channel: v })} min={0} max={15} format={channelText} />
@@ -1981,6 +1990,16 @@ export default function App() {
               <Stepper label={`${d.name} decay`} value={d.decay} onChange={(v) => patchDrum(i, { decay: v })} min={25} max={300} step={5} bigStep={25} format={(v) => `${v} percent`} hint="How long the sound rings" />
               <Stepper label={`${d.name} tone`} value={d.tone} onChange={(v) => patchDrum(i, { tone: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="Darker or brighter" />
               <Stepper label={`${d.name} snap`} value={d.snap} onChange={(v) => patchDrum(i, { snap: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How much click, noise or attack the sound has" />
+              <Stepper
+                label={`${d.name} variation`}
+                value={d.variation}
+                onChange={(v) => patchDrum(i, { variation: v })}
+                min={0}
+                max={100}
+                step={10}
+                format={(v) => (v === 0 ? 'none, every hit the same' : v === 100 ? 'full, every hit a little different' : `${v} percent`)}
+                hint="Noisy sounds such as shakers and hats are made from random noise, so each hit is slightly different, which can make a steady pattern sound uneven. Lower this for tight, even hits"
+              />
               <Stepper label={`${d.name} sound level`} value={d.level} onChange={(v) => patchDrum(i, { level: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
               </Section>
               <Section title={`${d.name}: more settings`} id={`${d.name}: More settings`} inner>
@@ -3213,6 +3232,12 @@ export default function App() {
               max={OUTPUT_MODE_NAMES.length - 1}
               format={(v) => OUTPUT_MODE_NAMES[v]}
               hint="Stereo, or mono in both ears, or mono on the left or right side only, for a set-up where one side goes to the PA and the other is your monitor. Only MidiBed's own sound: other apps are not changed"
+            />
+            <Toggle
+              label="Sample-accurate timing"
+              value={state.tightTiming}
+              onChange={(v) => patch({ tightTiming: v })}
+              hint="On: every note of the built-in sound lands on its exact sample, so steady patterns are tight and even. The music then runs a short moment (about a tenth of a second) behind the clock, and apps you send MIDI to are kept in step with it. Off: the older way, notes play as soon as they arrive, with a few milliseconds of unevenness"
             />
             <Toggle label="Send MIDI" value={state.midiOut} onChange={(v) => patch({ midiOut: v })} hint="Sends to other apps as the MidiBed source" />
             <Text style={styles.note}>

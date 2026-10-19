@@ -9,7 +9,7 @@ describe('built-in drum sounds', () => {
       Kick: 'Kick',
       Snare: 'Snare',
       Hat: 'Closed hat',
-      Shaker: 'Egg shaker',
+      Shaker: 'Tube shaker',
       Tambourine: 'Tambourine',
       'Low tom': 'Low tom',
       'Mid tom': 'Mid tom',
@@ -17,12 +17,12 @@ describe('built-in drum sounds', () => {
     });
     // a hat slot can be made a clap, with its own settings
     const j = JSON.parse(drumVoicesJson([{ note: 42, channel: 9, voice: 3, tune: 2, decay: 150, tone: 20, snap: 80, level: 60 }]));
-    expect(j[0]).toEqual({ note: 42, channel: 9, type: 3, tune: 2, decay: 1.5, tone: 0.2, snap: 0.8, level: 0.6 });
+    expect(j[0]).toEqual({ note: 42, channel: 9, type: 3, tune: 2, decay: 1.5, tone: 0.2, snap: 0.8, level: 0.6, variation: 1 });
   });
 
   it('clamps everything into range', () => {
     const j = JSON.parse(drumVoicesJson([{ note: 300, channel: 40, voice: 99, tune: 99, decay: 1, tone: -5, snap: 500, level: 1000 }]));
-    expect(j[0]).toEqual({ note: 127, channel: 15, type: DRUM_TYPES.length - 1, tune: 12, decay: 0.25, tone: 0, snap: 1, level: 1 });
+    expect(j[0]).toEqual({ note: 127, channel: 15, type: DRUM_TYPES.length - 1, tune: 12, decay: 0.25, tone: 0, snap: 1, level: 1, variation: 1 });
   });
 
   it('is saved with the other settings and not in a scene', () => {
@@ -59,7 +59,7 @@ describe('built-in drum sounds', () => {
     const path = require('path');
     const swift: string = fs.readFileSync(path.join(__dirname, '..', 'modules', 'midibed-engine', 'ios', 'MidiBedTestSynth.swift'), 'utf8');
     const doc = swift.slice(swift.indexOf('/// One drum hit.'), swift.indexOf('private struct DrumVoice'));
-    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 sharp shaker', '7 tom', '8 wood block', '9 tambourine', '10 low tom', '11 mid tom', '12 high tom', '13 jingle tambourine', '14 egg shaker', '15 seed shaker'].forEach((s) => expect(doc).toContain(s));
-    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'sharp shaker (cabasa-like)', 'tom', 'wood block', 'tambourine', 'low tom', 'mid tom', 'high tom', 'jingle tambourine', 'egg shaker', 'seed shaker (maraca)']);
+    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 sharp shaker', '7 tom', '8 wood block', '9 tambourine', '10 low tom', '11 mid tom', '12 high tom', '13 jingle tambourine', '14 tube shaker', '15 seed shaker', '16 egg shaker'].forEach((s) => expect(doc).toContain(s));
+    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'sharp shaker (cabasa-like)', 'tom', 'wood block', 'tambourine', 'low tom', 'mid tom', 'high tom', 'jingle tambourine', 'tube shaker', 'seed shaker (maraca)', 'egg shaker (small)']);
   });
 });

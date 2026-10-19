@@ -21,6 +21,10 @@ final class MidiBedTestSynth {
     var status: UInt8 = 0
     var d1: UInt8 = 0
     var d2: UInt8 = 0
+    /// Engine-clock time (seconds) the event is to be heard at; 0 = as soon as possible.
+    var time: Double = 0
+    /// The flush count when it was posted (events from before a flush are dropped).
+    var epoch: Int = 0
   }
 
   private struct PadVoice {
@@ -55,7 +59,7 @@ final class MidiBedTestSynth {
   }
 
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 sharp shaker (cabasa-like), 7 tom,
-  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 egg shaker, 15 seed shaker (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
+  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
   private struct DrumVoice {
     var active = false
@@ -74,6 +78,9 @@ final class MidiBedTestSynth {
     var tone: Float = 0.5
     var snap: Float = 0.5
     var level: Float = 1
+    var s1: Float = 0   // spare filter state (the tube shaker's body)
+    var s2: Float = 0
+    var rng: UInt32 = 1 // this hit's own noise (see DrumPatch.variation)
   }
 
   /// A drum's settings, looked up by MIDI note on channel 10. Without one, the General MIDI note decides.
@@ -85,6 +92,8 @@ final class MidiBedTestSynth {
     var tone: Float = 0.5
     var snap: Float = 0.5
     var level: Float = 1
+    /// 0 = every hit uses the same noise (identical, tight and even), 1 = every hit a different noise.
+    var variation: Float = 1
   }
 
   private let engine = AVAudioEngine()
@@ -96,6 +105,21 @@ final class MidiBedTestSynth {
   private var ring: UnsafeMutablePointer<Event>
   private var readIndex = 0
   private var writeIndex = 0
+  // Sample-accurate scheduling. Events arrive in the ring with the time they are to be heard at; the audio
+  // thread keeps them in time order in `sched` and applies each on the exact frame (see render).
+  private var epoch = 0
+  private var epochSeen = 0
+  private let schedCapacity = 1024
+  private var sched: UnsafeMutablePointer<Event>
+  private var schedHead = 0
+  private var schedCount = 0
+  private var lastBufStart: Double = .infinity
+  private var timebase = mach_timebase_info_data_t(numer: 1, denom: 1)
+  /// Engine clock (ProcessInfo.systemUptime) minus the audio host clock, refreshed by the engine.
+  var clockOffset: Double = 0
+  /// How far ahead of 'now' the engine should time an event so it reaches the audio thread in time: a few
+  /// buffers. Set from the buffer size on every render; the engine adds it to every event's time.
+  var scheduleLead: Double = 0.08
 
   // Audio-thread-only state.
   private var pads: UnsafeMutablePointer<PadVoice>
@@ -172,10 +196,10 @@ final class MidiBedTestSynth {
   var keysChannel = -1
 
   /// Control side: the drums' sound settings, by MIDI note. Replaces the whole table.
-  func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float)]) {
+  func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float, variation: Float)]) {
     for i in 0..<128 { drumPatches[i] = DrumPatch() }
     for d in list where d.note >= 0 && d.note < 128 {
-      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(15, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level)
+      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(16, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level, variation: max(0, min(1, d.variation)))
     }
   }
 
@@ -220,6 +244,8 @@ final class MidiBedTestSynth {
     lock.initialize(to: os_unfair_lock_s())
     ring = UnsafeMutablePointer<Event>.allocate(capacity: capacity)
     ring.initialize(repeating: Event(), count: capacity)
+    sched = UnsafeMutablePointer<Event>.allocate(capacity: schedCapacity)
+    sched.initialize(repeating: Event(), count: schedCapacity)
     pads = UnsafeMutablePointer<PadVoice>.allocate(capacity: padCount)
     pads.initialize(repeating: PadVoice(), count: padCount)
     drums = UnsafeMutablePointer<DrumVoice>.allocate(capacity: drumCount)
@@ -249,11 +275,14 @@ final class MidiBedTestSynth {
     fcA3.initialize(repeating: 0, count: 4)
     fcK.initialize(repeating: 1, count: 4)
     fcMode.initialize(repeating: 0, count: 4)
+    mach_timebase_info(&timebase)
+    syncClock()
   }
 
   deinit {
     engine.stop()
     ring.deallocate()
+    sched.deallocate()
     lock.deallocate()
     pads.deallocate()
     drums.deallocate()
@@ -293,8 +322,8 @@ final class MidiBedTestSynth {
     fx.setSampleRate(sampleRate)
     loops.setSampleRate(sampleRate)
 
-    let node = AVAudioSourceNode(format: renderFormat ?? format) { [unowned self] _, _, frameCount, audioBufferList -> OSStatus in
-      self.render(frameCount: Int(frameCount), bufferList: audioBufferList)
+    let node = AVAudioSourceNode(format: renderFormat ?? format) { [unowned self] _, timestamp, frameCount, audioBufferList -> OSStatus in
+      self.render(frameCount: Int(frameCount), timestamp: timestamp, bufferList: audioBufferList)
       return noErr
     }
     sourceNode = node
@@ -366,19 +395,39 @@ final class MidiBedTestSynth {
   }
 
   /// Called from the control side with raw MIDI bytes.
-  func post(status: UInt8, d1: UInt8, d2: UInt8) {
+  /// Queue a MIDI event for the synth. `at` is the engine-clock time it should be heard at (0 = as soon as
+  /// possible); the audio thread applies it on that exact sample.
+  func post(status: UInt8, d1: UInt8, d2: UInt8, at: Double = 0) {
     os_unfair_lock_lock(lock)
     let next = (writeIndex + 1) % capacity
     if next != readIndex {
-      ring[writeIndex] = Event(status: status, d1: d1, d2: d2)
+      ring[writeIndex] = Event(status: status, d1: d1, d2: d2, time: at, epoch: epoch)
       writeIndex = next
     }
     os_unfair_lock_unlock(lock)
   }
 
-  /// Start one transition sound. `pre` seconds lead up to the bar line, `post` seconds
-  /// follow it; `offset` is how far into the lead-up to begin (a late trigger joins the
-  /// sweep part-way instead of starting from the beginning).
+  /// Drop every event that has been posted but not yet applied (used by Stop and Panic, so a note scheduled a
+  /// moment ahead cannot start after the notes have been cut).
+  func flush() {
+    os_unfair_lock_lock(lock)
+    epoch += 1
+    readIndex = writeIndex
+    os_unfair_lock_unlock(lock)
+  }
+
+  /// The audio host clock in seconds.
+  private func machSeconds(_ t: UInt64) -> Double {
+    Double(t) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
+  }
+
+  /// Measure the engine clock against the audio host clock (call it now and then from the control side).
+  func syncClock() {
+    let u = ProcessInfo.processInfo.systemUptime
+    let m = machSeconds(mach_absolute_time())
+    clockOffset = u - m
+  }
+
   func postNoise(shape: Int, color: Int, pre: Double, post: Double, offset: Double, level: Double) {
     os_unfair_lock_lock(lock)
     let next = (noiseWrite + 1) % noiseCapacity
@@ -394,10 +443,19 @@ final class MidiBedTestSynth {
 
   private func drainEvents() {
     guard os_unfair_lock_trylock(lock) else { return }
+    if epochSeen != epoch {
+      // A flush happened: forget what was waiting.
+      epochSeen = epoch
+      schedHead = 0
+      schedCount = 0
+    }
     while readIndex != writeIndex {
-      let e = ring[readIndex]
+      var e = ring[readIndex]
       readIndex = (readIndex + 1) % capacity
-      handle(e)
+      if e.epoch != epoch { continue }
+      // A time far from now means the clocks disagree: play it straight away rather than lose or delay it.
+      if e.time > 0, e.time - lastBufStart > 3.0 { e.time = 0 }
+      insertScheduled(e)
     }
     while noiseRead != noiseWrite {
       let c = noiseRing[noiseRead]
@@ -405,6 +463,26 @@ final class MidiBedTestSynth {
       startNoise(c)
     }
     os_unfair_lock_unlock(lock)
+  }
+
+  /// Keep `sched` in time order (events with the same time keep the order they arrived in).
+  private func insertScheduled(_ e: Event) {
+    if schedCount >= schedCapacity {
+      if schedHead > 0 {
+        let n = schedCount - schedHead
+        for k in 0..<n { sched[k] = sched[schedHead + k] }
+        schedCount = n
+        schedHead = 0
+      }
+      if schedCount >= schedCapacity { return }
+    }
+    var j = schedCount
+    while j > schedHead && sched[j - 1].time > e.time {
+      sched[j] = sched[j - 1]
+      j -= 1
+    }
+    sched[j] = e
+    schedCount += 1
   }
 
   private func handle(_ e: Event) {
@@ -446,6 +524,11 @@ final class MidiBedTestSynth {
     if channel == 9 {
       var v = DrumVoice(active: true, kind: 8, t: 0, velocity: velocity)
       let patch = drumPatches[max(0, min(127, note))]
+      // This hit's noise: always the same sequence when variation is 0, a fresh one each time when it is 1,
+      // and in between a share of the hits are fresh.
+      let fixedSeed: UInt32 = 0x9E37_79B9 ^ (UInt32(truncatingIfNeeded: note) &* 2_654_435_761)
+      let draw = (nextNoise() + 1) / 2
+      v.rng = (draw < (patch.valid ? patch.variation : 1)) ? ((noiseState &* 1_664_525 &+ 1_013_904_223) | 1) : (fixedSeed | 1)
       if patch.valid {
         v.kind = patch.kind
         v.tuneRatio = powf(2, patch.tune / 12)
@@ -529,6 +612,17 @@ final class MidiBedTestSynth {
   private func allNotesOff() {
     for i in 0..<padCount { pads[i].gate = false }
     for i in 0..<keysCount { keysVoices[i].gate = false }
+  }
+
+  /// A drum hit's own noise (see DrumVoice.rng): a different stream per hit, so hits can be made identical.
+  @inline(__always)
+  private func voiceNoise(_ i: Int) -> Float {
+    var s = drums[i].rng
+    s ^= s << 13
+    s ^= s >> 17
+    s ^= s << 5
+    drums[i].rng = s
+    return Float(Int32(bitPattern: s)) / Float(Int32.max)
   }
 
   @inline(__always)
@@ -729,12 +823,21 @@ final class MidiBedTestSynth {
     fcMode[p] = modeEff
   }
 
-  private func render(frameCount: Int, bufferList: UnsafeMutablePointer<AudioBufferList>) {
+  private func render(frameCount: Int, timestamp: UnsafePointer<AudioTimeStamp>, bufferList: UnsafeMutablePointer<AudioBufferList>) {
+    let sr = sampleRate
+    let dt = 1 / sr
+    // When this buffer is heard, on the engine's clock, so events can land on their exact sample. Without a valid
+    // host time every event is simply applied at once.
+    var bufStart = Double.infinity
+    if timestamp.pointee.mFlags.contains(.hostTimeValid) {
+      bufStart = machSeconds(timestamp.pointee.mHostTime) + clockOffset
+    }
+    lastBufStart = bufStart
+    let secPerFrame = 1.0 / Double(sr)
+    scheduleLead = min(0.4, max(0.06, 3.5 * Double(frameCount) * secPerFrame))
     drainEvents()
 
     let abl = UnsafeMutableAudioBufferListPointer(bufferList)
-    let sr = sampleRate
-    let dt = 1 / sr
     let on = enabled
 
     // 12 dB/oct resonant state-variable filter (TPT). Normal: a low-pass, cutoff 60 Hz ... 3.6 kHz exponential
@@ -779,9 +882,21 @@ final class MidiBedTestSynth {
     let kLPcoef = 1 - expf(-2 * Float.pi * (800 + kTone * kTone * 12000) / sr)
 
     // The loop player renders a whole buffer at once (false: nothing is playing).
-    let haveLoops = loops.renderBlock(frames: frameCount)
+    let haveLoops = loops.renderBlock(frames: frameCount, bufStart: bufStart, secPerFrame: secPerFrame)
 
     for frame in 0..<frameCount {
+      // Apply the events whose time has come, on this exact frame.
+      if schedHead < schedCount {
+        let frameTime = bufStart + Double(frame) * secPerFrame
+        while schedHead < schedCount, sched[schedHead].time <= frameTime {
+          handle(sched[schedHead])
+          schedHead += 1
+        }
+        if schedHead == schedCount {
+          schedHead = 0
+          schedCount = 0
+        }
+      }
       // Each part's mono signal, so the effects (UglyFX) can treat the parts separately.
       var partBass: Float = 0
       var partPad: Float = 0
@@ -861,7 +976,7 @@ final class MidiBedTestSynth {
         let f = drums[i].tuneRatio
         let tone = drums[i].tone
         let snap = drums[i].snap
-        let noise = nextNoise()
+        let noise = voiceNoise(i)
         var s: Float = 0
         var alive = true
         switch drums[i].kind {
@@ -943,13 +1058,15 @@ final class MidiBedTestSynth {
           let env = 1 - expf(-t / attack)
           s = (drums[i].lp * 1.58 * expf(-t * 26 / D) + jingle * 0.158 * expf(-t * 14 / D)) * env
           alive = t <= 0.45 * D + 0.05
-        case 14: // egg shaker: a round, warm swish with a soft rise, a long tail and a loose grain (scratchpad shaker_check.py)
-          let fLo = 650 * f
+        case 14: // tube shaker: the round swish with more body, a low band added (scratchpad shaker2_check.py)
+          let fLo = 380 * f
           let fHi = (1300 + 2400 * tone) * f
+          let fBody = 900 * f
           let r = expf(-2 * Float.pi * fLo / sr)
           let a = 1 - expf(-2 * Float.pi * fHi / sr)
-          let attack = max(0.004, 0.022 - 0.016 * snap)
-          drums[i].xPrev2 += 0.02 * (nextNoise() - drums[i].xPrev2)
+          let ab = 1 - expf(-2 * Float.pi * fBody / sr)
+          let attack = max(0.006, 0.026 - 0.016 * snap)
+          drums[i].xPrev2 += 0.02 * (voiceNoise(i) - drums[i].xPrev2)
           let grain = max(0.2, 0.72 + 0.7 * drums[i].xPrev2)
           let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
           drums[i].xPrev = noise
@@ -957,8 +1074,10 @@ final class MidiBedTestSynth {
           drums[i].lp += a * (hp - drums[i].lp)
           drums[i].lp2 += a * (drums[i].lp - drums[i].lp2)
           drums[i].hp2Prev += a * (drums[i].lp2 - drums[i].hp2Prev)
-          let env = (1 - expf(-t / attack)) * (0.65 * expf(-t * 16 / D) + 0.35 * expf(-t * 6 / D))
-          s = drums[i].hp2Prev * env * grain * 4.6
+          drums[i].s1 += ab * (hp - drums[i].s1)
+          drums[i].s2 += ab * (drums[i].s1 - drums[i].s2)
+          let env = (1 - expf(-t / attack)) * (0.65 * expf(-t * 15 / D) + 0.35 * expf(-t * 6 / D))
+          s = (drums[i].hp2Prev + 0.9 * drums[i].s2) * env * grain * 3.0
           alive = t <= 0.8 * D + 0.1
         case 15: // seed shaker (maraca): a soft pre-stroke, then the main stroke 32 ms later, grainy and mid-bright
           let fLo = 900 * f
@@ -966,7 +1085,7 @@ final class MidiBedTestSynth {
           let r = expf(-2 * Float.pi * fLo / sr)
           let a = 1 - expf(-2 * Float.pi * fHi / sr)
           let attack = max(0.003, 0.012 - 0.008 * snap)
-          drums[i].xPrev2 += 0.05 * (nextNoise() - drums[i].xPrev2)
+          drums[i].xPrev2 += 0.05 * (voiceNoise(i) - drums[i].xPrev2)
           let grain = min(1.4, 0.6 + 0.9 * fabsf(drums[i].xPrev2) * 3)
           let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
           drums[i].xPrev = noise
@@ -979,6 +1098,23 @@ final class MidiBedTestSynth {
           let e2: Float = t2 > 0 ? (1 - expf(-t2 / attack)) * expf(-t2 * 13 / D) : 0
           s = drums[i].hp2Prev * (e1 + e2) * grain * 2.5
           alive = t <= 0.5 * D + 0.1
+        case 16: // small egg shaker: short, light and soft, hardly any tail (scratchpad shaker2_check.py)
+          let fLo = 1300 * f
+          let fHi = (1900 + 2300 * tone) * f
+          let r = expf(-2 * Float.pi * fLo / sr)
+          let a = 1 - expf(-2 * Float.pi * fHi / sr)
+          let attack = max(0.0025, 0.009 - 0.006 * snap)
+          drums[i].xPrev2 += 0.06 * (voiceNoise(i) - drums[i].xPrev2)
+          let grain = min(1.3, 0.7 + 1.6 * fabsf(drums[i].xPrev2))
+          let hp = noise - drums[i].xPrev + r * drums[i].hpPrev
+          drums[i].xPrev = noise
+          drums[i].hpPrev = hp
+          drums[i].lp += a * (hp - drums[i].lp)
+          drums[i].lp2 += a * (drums[i].lp - drums[i].lp2)
+          drums[i].hp2Prev += a * (drums[i].lp2 - drums[i].hp2Prev)
+          let env = (1 - expf(-t / attack)) * (0.8 * expf(-t * 40 / D) + 0.2 * expf(-t * 14 / D))
+          s = drums[i].hp2Prev * env * grain * 4.0
+          alive = t <= 0.3 * D + 0.08
         case 13: // jingle tambourine: six ringing jingles that rattle, three quick re-strikes and a soft skin thump (scratchpad jingle.py)
           let jscale = (0.75 + 0.5 * tone) * f
           var ex: Float = 0

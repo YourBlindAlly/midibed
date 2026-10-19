@@ -334,6 +334,7 @@ struct MidiBedConfig: Decodable {
   var frozen: Bool          // stop the bed changing by itself (breathing, recurring sound, auto-advance)
   var filterHold: Bool      // hold the filter wanderers where they are
   var sceneChangeAt: Int    // when a queued scene change lands: 0 next bar, 1 end of the progression, 2 end of the scene
+  var tightTiming: Bool?    // sample-accurate timing for the built-in sound (default true)
   var advance: MidiBedAdvance
   var drums: [MidiBedDrumConfig]
   var drone: MidiBedDroneConfig
@@ -437,6 +438,24 @@ final class MidiBedEngine {
     var port: Int = 0 // 1 = the loops app's own MIDI source (when the loops use their own port)
   }
   private var pending: [Pending] = []
+
+  /// MIDI waiting to be sent: with tight timing every event is heard a short, fixed time after it is made (so the
+  /// built-in sound can place it on an exact sample), and what goes out as MIDI is held for the same time so
+  /// other apps stay in step with it.
+  private struct DelayedMIDI {
+    var time: Double
+    var seq: Int
+    var status: UInt8
+    var d1: UInt8
+    var d2: UInt8
+    var ports: [Int]
+  }
+  private var delayedMIDI: [DelayedMIDI] = []
+  private var midiSeq = 0
+  private var lastClockSync: Double = 0
+  /// While a tick is being made, that tick's own time: anything sent straight from it (a bass note started on a bar
+  /// line, say) lands on the tick, exactly like the notes queued with a time.
+  private var eventTime: Double? = nil
 
   private struct PendingLoop {
     var time: Double
@@ -740,6 +759,7 @@ final class MidiBedEngine {
       var tone: Double
       var snap: Double
       var level: Double
+      var variation: Double?
     }
     guard let data = json.data(using: .utf8), let list = try? JSONDecoder().decode([DrumVoiceConfig].self, from: data) else {
       NSLog("MidiBedEngine: could not decode drum voices")
@@ -747,7 +767,7 @@ final class MidiBedEngine {
     }
     queue.async {
       self.synth.configureDrums(
-        list.map { (note: $0.note, kind: $0.type, tune: Float($0.tune), decay: Float($0.decay), tone: Float($0.tone), snap: Float($0.snap), level: Float($0.level)) })
+        list.map { (note: $0.note, kind: $0.type, tune: Float($0.tune), decay: Float($0.decay), tone: Float($0.tone), snap: Float($0.snap), level: Float($0.level), variation: Float($0.variation ?? 1)) })
     }
   }
 
@@ -838,6 +858,8 @@ final class MidiBedEngine {
       self.loopsPlaying = false
       self.lastLoopSelect = []
       let startNow = ProcessInfo.processInfo.systemUptime
+      self.synth.syncClock()
+      self.lastClockSync = startNow
       self.nextTickTime = startNow + 0.05
       // The clock was already running while stopped: start on its next pulse, so the pulses carry on
       // at the same steady spacing and the follower stays locked (no gap, no hiccup).
@@ -890,6 +912,8 @@ final class MidiBedEngine {
         self.idleNextPulse = self.nextTickTime + Double((4 - self.tickIndex % 4) % 4) * tickDur
       }
       self.pending.removeAll()
+      self.delayedMIDI.removeAll()
+      self.synth.flush()
       self.pendingNoise.removeAll()
       self.pendingIsAuto = false
       self.fillStartTick = 0
@@ -990,6 +1014,7 @@ final class MidiBedEngine {
       emit(0xF8, 0, 0)
       idleNextPulse += interval
     }
+    drainDelayedMIDI(now: now)
   }
 
   /// Panic: end every sounding note and cancel any waiting to start, on every port. If the transport is
@@ -997,6 +1022,8 @@ final class MidiBedEngine {
   func panic() {
     queue.async {
       self.pending.removeAll { ($0.status & 0xF0) == 0x90 && $0.d2 > 0 }
+      self.delayedMIDI.removeAll { ($0.status & 0xF0) == 0x90 && $0.d2 > 0 }
+      self.synth.flush()
       self.heldDrone.removeAll()
       self.heldPad.removeAll()
       self.silence()
@@ -1037,6 +1064,7 @@ final class MidiBedEngine {
     let tickDur = 60.0 / (max(20.0, min(300.0, cfg.bpm)) * Double(ticksPerBeat))
     let barTicks = ticksPerBeat * beatsPerBar
     while nextTickTime <= now {
+      eventTime = nextTickTime
       // A queued scene switch lands exactly on a bar line, and the pad's chord
       // loop restarts from its first chord there.
       if tickIndex % barTicks == 0 { stepAdvance(atTick: tickIndex) }
@@ -1059,11 +1087,17 @@ final class MidiBedEngine {
       tickIndex += 1
       nextTickTime += tickDur
     }
+    eventTime = nil
 
     let live = config ?? cfg
     updateWanderers(now: now, cfg: live)
     updateFades(now: now, cfg: live)
+    if now - lastClockSync > 0.25 {
+      synth.syncClock()
+      lastClockSync = now
+    }
     drainPending(now: now)
+    drainDelayedMIDI(now: now)
     drainLoops(now: now)
     drainNoise(now: now)
   }
@@ -1592,7 +1626,10 @@ final class MidiBedEngine {
     var later: [PendingLoop] = []
     for p in pendingLoop {
       if p.time <= now {
-        if p.start { synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats) } else { synth.loops.stop(lane: p.lane, fade: p.fade) }
+        // With tight timing the lane starts or stops on the exact sample the bar line falls on, the same lead after
+        // its time as the notes (so a loop and the drums land together).
+        let at = (config?.tightTiming ?? true) ? p.time + synth.scheduleLead : 0
+        if p.start { synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats, at: at) } else { synth.loops.stop(lane: p.lane, fade: p.fade, at: at) }
       } else {
         later.append(p)
       }
@@ -1838,8 +1875,9 @@ final class MidiBedEngine {
   private func drainNoise(now: Double) {
     guard !pendingNoise.isEmpty else { return }
     var later: [PendingNoise] = []
+    let noiseLead = (config?.tightTiming ?? true) ? synth.scheduleLead : 0
     for n in pendingNoise {
-      if n.time <= now {
+      if n.time + noiseLead <= now {
         synth.postNoise(shape: n.shape, color: n.color, pre: n.pre, post: n.post, offset: n.offset, level: n.level)
       } else {
         later.append(n)
@@ -2647,8 +2685,22 @@ final class MidiBedEngine {
       if p.time <= now { due.append(p) } else { later.append(p) }
     }
     pending = later
-    due.sort { $0.time < $1.time }
-    for p in due { emit(p.status, p.d1, p.d2, port: p.port) }
+    // Time order, and events with the same time keep the order they were made in (note-off before note-on).
+    let order = due.indices.sorted { due[$0].time < due[$1].time || (due[$0].time == due[$1].time && $0 < $1) }
+    for k in order { emit(due[k].status, due[k].d1, due[k].d2, port: due[k].port, at: due[k].time) }
+  }
+
+  /// Send the held MIDI whose time has come.
+  private func drainDelayedMIDI(now: Double) {
+    guard !delayedMIDI.isEmpty else { return }
+    var due: [DelayedMIDI] = []
+    var later: [DelayedMIDI] = []
+    for m in delayedMIDI {
+      if m.time <= now { due.append(m) } else { later.append(m) }
+    }
+    delayedMIDI = later
+    due.sort { $0.time < $1.time || ($0.time == $1.time && $0.seq < $1.seq) }
+    for m in due { sendMIDI(m.status, m.d1, m.d2, to: m.ports) }
   }
 
   /// End every note we know is sounding (a note-off to every port), then all-notes-off and all-sound-off
@@ -2680,7 +2732,10 @@ final class MidiBedEngine {
     }
   }
 
-  private func emit(_ status: UInt8, _ d1: UInt8, _ d2: UInt8, port: Int = 0) {
+  /// Send one message. `when` is the engine-clock time it was meant for (a note's own time); without it, now. With
+  /// tight timing the message is heard (and sent as MIDI) a short fixed lead after that time: the built-in sound
+  /// then plays it on its exact sample, and the MIDI is held back by the same lead so everything stays in step.
+  private func emit(_ status: UInt8, _ d1: UInt8, _ d2: UInt8, port: Int = 0, at when: Double? = nil) {
     // Remember which notes are sounding (see `sounding`).
     if port != 1 {
       let kind = status & 0xF0
@@ -2691,11 +2746,25 @@ final class MidiBedEngine {
         sounding.remove(key)
       }
     }
+    let now = ProcessInfo.processInfo.systemUptime
+    // The lead only applies while something drains the held MIDI: the transport running, or the idle clock.
+    let tight = (config?.tightTiming ?? true) && (running || idleTimer != nil)
+    let lead = tight ? synth.scheduleLead : 0
+    let playAt = (when ?? eventTime ?? now) + lead
+    let holdMIDI = lead > 0 && playAt > now + 0.001
+    func deliver(_ targets: [Int]) {
+      if holdMIDI {
+        midiSeq += 1
+        delayedMIDI.append(DelayedMIDI(time: playAt, seq: midiSeq, status: status, d1: d1, d2: d2, ports: targets))
+      } else {
+        sendMIDI(status, d1, d2, to: targets)
+      }
+    }
     let loopsOwn = config?.loops.ownPort ?? false
     // System messages (clock, start, stop) are for other apps only. With the loops on their own port
     // they go out that source only.
     if status >= 0xF0 {
-      if config?.midiOut ?? true { sendMIDI(status, d1, d2, to: loopsOwn ? [1] : [0]) }
+      if config?.midiOut ?? true { deliver(loopsOwn ? [1] : [0]) }
       return
     }
     // Loop messages go out the loops source when it has one; everything else by its MIDI channel.
@@ -2706,14 +2775,15 @@ final class MidiBedEngine {
     let kind = status & 0xF0
     let release = kind == 0x80 || (kind == 0x90 && d2 == 0) || (kind == 0xB0 && (d1 == 123 || d1 == 120))
     let allowMIDI = port == 1 ? (config?.outputs.loops.midi ?? true) : channelMidi[ch]
-    if (config?.midiOut ?? true) && (allowMIDI || release) { sendMIDI(status, d1, d2, to: targets) }
+    if (config?.midiOut ?? true) && (allowMIDI || release) { deliver(targets) }
     // Loop messages are for the loops app, not the built-in sound.
     if port == 1 { return }
-    if (config?.synthOut ?? true) && (channelSynth[ch] || release) { synth.post(status: status, d1: d1, d2: d2) }
+    let synthTime = tight ? playAt : 0
+    if (config?.synthOut ?? true) && (channelSynth[ch] || release) { synth.post(status: status, d1: d1, d2: d2, at: synthTime) }
     // Note-offs and all-notes-off must always reach the synth even if the
     // switch was just turned off, or a pad could hang. It ignores them harmlessly.
     else if (status & 0xF0) == 0x80 || ((status & 0xF0) == 0xB0 && d1 == 123) {
-      synth.post(status: status, d1: d1, d2: d2)
+      synth.post(status: status, d1: d1, d2: d2, at: synthTime)
     }
   }
 

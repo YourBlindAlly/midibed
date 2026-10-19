@@ -55,6 +55,12 @@ final class LoopPlayer {
     var level: Float = 1
     var pan: Float = 0
     var fadeSec: Float = 0.01
+    // Scheduled commands (engine-clock times): a start (the loop begins again from the top) and a stop (fade out).
+    var startPending = false
+    var startAt: Double = 0
+    var stopPending = false
+    var stopAt: Double = 0
+    var stopFade: Float = 0.03
   }
 
   private var lanes = [Lane](repeating: Lane(), count: LoopPlayer.laneCount)
@@ -107,6 +113,8 @@ final class LoopPlayer {
       lanes[lane].playing = false
       lanes[lane].gain = 0
       lanes[lane].target = 0
+      lanes[lane].startPending = false
+      lanes[lane].stopPending = false
     }
     os_unfair_lock_unlock(lock)
     if same || path.isEmpty { return }
@@ -159,29 +167,57 @@ final class LoopPlayer {
     considerStretch(lane)
   }
 
-  /// Start from the top. `seconds` is how long the loop's bars last at the current tempo.
-  func start(lane: Int, seconds: Double, repeats: Int = 1) {
+  /// Start from the top. `seconds` is how long the loop's bars last at the current tempo. With `at` (an
+  /// engine-clock time, see MidiBedTestSynth.syncClock) the start happens on that exact sample; 0 = now.
+  func start(lane: Int, seconds: Double, repeats: Int = 1, at: Double = 0) {
     guard lane >= 0, lane < LoopPlayer.laneCount else { return }
     os_unfair_lock_lock(lock)
     if lanes[lane].raw != nil, seconds > 0.05 {
       lanes[lane].wantSeconds = seconds
       lanes[lane].wantRepeats = max(1, repeats)
+      if at > 0 {
+        lanes[lane].startPending = true
+        lanes[lane].startAt = at
+      } else {
+        lanes[lane].startPending = false
+        applyCommand(lane, 1)
+      }
+    }
+    os_unfair_lock_unlock(lock)
+  }
+
+  /// Fade out and stop, at once or (with `at`) at that engine-clock time.
+  func stop(lane: Int, fade: Float = 0.03, at: Double = 0) {
+    guard lane >= 0, lane < LoopPlayer.laneCount else { return }
+    os_unfair_lock_lock(lock)
+    if at > 0 {
+      lanes[lane].stopPending = true
+      lanes[lane].stopAt = at
+      lanes[lane].stopFade = max(0.005, fade)
+    } else {
+      lanes[lane].startPending = false
+      lanes[lane].stopPending = false
+      lanes[lane].stopFade = max(0.005, fade)
+      applyCommand(lane, 2)
+    }
+    os_unfair_lock_unlock(lock)
+  }
+
+  /// A scheduled command takes effect (the lock is held). 1 start from the top, 2 fade out.
+  private func applyCommand(_ lane: Int, _ kind: Int) {
+    if kind == 1 {
+      lanes[lane].startPending = false
+      guard lanes[lane].raw != nil else { return }
       lanes[lane].pos = 0
       lanes[lane].posFrames = 0
       lanes[lane].playing = true
       lanes[lane].target = lanes[lane].level
       lanes[lane].fadeSec = 0.008
+    } else {
+      lanes[lane].stopPending = false
+      lanes[lane].target = 0
+      lanes[lane].fadeSec = max(0.005, lanes[lane].stopFade)
     }
-    os_unfair_lock_unlock(lock)
-  }
-
-  /// Fade out and stop.
-  func stop(lane: Int, fade: Float = 0.03) {
-    guard lane >= 0, lane < LoopPlayer.laneCount else { return }
-    os_unfair_lock_lock(lock)
-    lanes[lane].target = 0
-    lanes[lane].fadeSec = max(0.005, fade)
-    os_unfair_lock_unlock(lock)
   }
 
   func stopAll(fade: Float = 0.03) {
@@ -243,18 +279,23 @@ final class LoopPlayer {
 
   // MARK: Audio thread
 
-  /// Render `frames` samples of every lane into the shared output blocks (stereo). Returns false when
-  /// nothing is playing (or the lock was busy), so the caller can skip adding it.
-  func renderBlock(frames: Int) -> Bool {
+  /// Render `frames` samples of every lane into the shared output blocks (stereo). `bufStart` is the engine-clock
+  /// time of the block's first frame (infinity when unknown) and `secPerFrame` the length of one frame: a start or
+  /// stop scheduled for a time inside this block happens on its exact frame. Returns false when nothing is
+  /// playing (or the lock was busy), so the caller can skip adding it.
+  func renderBlock(frames: Int, bufStart: Double = .infinity, secPerFrame: Double = 1.0 / 44100) -> Bool {
     guard frames > 0, frames <= blockCapacity, os_unfair_lock_trylock(lock) else { return false }
     defer { os_unfair_lock_unlock(lock) }
     var rendered = false
-    for lane in 0..<LoopPlayer.laneCount where lanes[lane].playing {
-      // The stretched copy if there is one (while a new one is being made the old one plays at a slightly
-      // adjusted speed), otherwise the file itself.
-      let source: Buf? = lanes[lane].stretched != nil ? lanes[lane].stretched : lanes[lane].raw
-      guard let b = source else {
-        lanes[lane].playing = false
+    for lane in 0..<LoopPlayer.laneCount {
+      // Commands due in this block, as frame offsets (-1 = none).
+      var startOff = -1
+      var stopOff = -1
+      if lanes[lane].startPending { startOff = LoopPlayer.offset(lanes[lane].startAt, bufStart, secPerFrame, frames) }
+      if lanes[lane].stopPending { stopOff = LoopPlayer.offset(lanes[lane].stopAt, bufStart, secPerFrame, frames) }
+      if !lanes[lane].playing && startOff < 0 {
+        // A stop for a lane that is not playing has nothing to do; do not keep it waiting.
+        if stopOff >= 0 { lanes[lane].stopPending = false }
         continue
       }
       if !rendered {
@@ -264,44 +305,92 @@ final class LoopPlayer {
         }
         rendered = true
       }
-      let n = Double(b.frames)
-      // Switching between the file and its stretched copy keeps the place within the loop.
-      if lanes[lane].posFrames != b.frames {
-        if lanes[lane].posFrames > 0 { lanes[lane].pos = lanes[lane].pos * n / Double(lanes[lane].posFrames) }
-        lanes[lane].posFrames = b.frames
+      // Up to two commands split the block into pieces.
+      var firstOff = frames
+      var firstKind = 0
+      var secondOff = frames
+      var secondKind = 0
+      if startOff >= 0 {
+        firstOff = startOff
+        firstKind = 1
       }
-      var pos = lanes[lane].pos
-      // File frames per output sample: the buffer's frames, times its repeats in the period, over the
-      // output samples in the period. For a copy stretched to exactly the period this is rate / sampleRate.
-      let step = n * Double(max(1, lanes[lane].wantRepeats)) / max(0.05, lanes[lane].wantSeconds) / Double(sampleRate)
-      var gain = lanes[lane].gain
-      let target = lanes[lane].target
-      let coef: Float = 1 - expf(-1 / (sampleRate * max(0.002, lanes[lane].fadeSec)))
-      let pan = lanes[lane].pan
-      let gl: Float = pan > 0 ? 1 - pan : 1
-      let gr: Float = pan < 0 ? 1 + pan : 1
-      for i in 0..<frames {
-        gain += (target - gain) * coef
-        var i0 = Int(pos)
-        if i0 >= b.frames { i0 = 0; pos -= n }
-        var i1 = i0 + 1
-        if i1 >= b.frames { i1 = 0 }
-        let f = Float(pos - Double(i0))
-        let sl = b.l[i0] + (b.l[i1] - b.l[i0]) * f
-        let sr = b.r[i0] + (b.r[i1] - b.r[i0]) * f
-        outL[i] += sl * gain * gl
-        outR[i] += sr * gain * gr
-        pos += step
-        if pos >= n { pos -= n }
+      if stopOff >= 0 {
+        if stopOff < firstOff {
+          secondOff = firstOff
+          secondKind = firstKind
+          firstOff = stopOff
+          firstKind = 2
+        } else {
+          secondOff = stopOff
+          secondKind = 2
+        }
       }
-      lanes[lane].pos = pos
-      lanes[lane].gain = gain
-      if target == 0 && gain < 0.0005 {
-        lanes[lane].playing = false
-        lanes[lane].gain = 0
+      renderPiece(lane, 0, firstOff)
+      if firstKind != 0 {
+        applyCommand(lane, firstKind)
+        renderPiece(lane, firstOff, secondOff)
+        if secondKind != 0 {
+          applyCommand(lane, secondKind)
+          renderPiece(lane, secondOff, frames)
+        }
       }
     }
     return rendered
+  }
+
+  /// The frame a scheduled time falls on within a block, 0 if it is already past, -1 if it is after the block.
+  private static func offset(_ at: Double, _ bufStart: Double, _ secPerFrame: Double, _ frames: Int) -> Int {
+    if bufStart.isInfinite || at <= bufStart { return 0 }
+    let k = Int((at - bufStart) / secPerFrame)
+    return k < frames ? k : -1
+  }
+
+  /// Render one lane over frames `from` up to (not including) `to`, adding to the shared blocks.
+  private func renderPiece(_ lane: Int, _ from: Int, _ to: Int) {
+    guard to > from, lanes[lane].playing else { return }
+    // The stretched copy if there is one (while a new one is being made the old one plays at a slightly
+    // adjusted speed), otherwise the file itself.
+    let source: Buf? = lanes[lane].stretched != nil ? lanes[lane].stretched : lanes[lane].raw
+    guard let b = source else {
+      lanes[lane].playing = false
+      return
+    }
+    let n = Double(b.frames)
+    // Switching between the file and its stretched copy keeps the place within the loop.
+    if lanes[lane].posFrames != b.frames {
+      if lanes[lane].posFrames > 0 { lanes[lane].pos = lanes[lane].pos * n / Double(lanes[lane].posFrames) }
+      lanes[lane].posFrames = b.frames
+    }
+    var pos = lanes[lane].pos
+    // File frames per output sample: the buffer's frames, times its repeats in the period, over the
+    // output samples in the period. For a copy stretched to exactly the period this is rate / sampleRate.
+    let step = n * Double(max(1, lanes[lane].wantRepeats)) / max(0.05, lanes[lane].wantSeconds) / Double(sampleRate)
+    var gain = lanes[lane].gain
+    let target = lanes[lane].target
+    let coef: Float = 1 - expf(-1 / (sampleRate * max(0.002, lanes[lane].fadeSec)))
+    let pan = lanes[lane].pan
+    let gl: Float = pan > 0 ? 1 - pan : 1
+    let gr: Float = pan < 0 ? 1 + pan : 1
+    for i in from..<to {
+      gain += (target - gain) * coef
+      var i0 = Int(pos)
+      if i0 >= b.frames { i0 = 0; pos -= n }
+      var i1 = i0 + 1
+      if i1 >= b.frames { i1 = 0 }
+      let f = Float(pos - Double(i0))
+      let sl = b.l[i0] + (b.l[i1] - b.l[i0]) * f
+      let sr = b.r[i0] + (b.r[i1] - b.r[i0]) * f
+      outL[i] += sl * gain * gl
+      outR[i] += sr * gain * gr
+      pos += step
+      if pos >= n { pos -= n }
+    }
+    lanes[lane].pos = pos
+    lanes[lane].gain = gain
+    if target == 0 && gain < 0.0005 {
+      lanes[lane].playing = false
+      lanes[lane].gain = 0
+    }
   }
 
   /// The block rendered by the last `renderBlock` call (valid until the next one).

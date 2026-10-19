@@ -7,7 +7,7 @@
  * Only the built-in sound uses this. A drum sent to another app is just its note and channel, as before.
  */
 // New types go at the END so a saved type number keeps its meaning (the native switch uses the same numbers).
-export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Sharp shaker (cabasa-like)', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine', 'Egg shaker', 'Seed shaker (maraca)'];
+export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Sharp shaker (cabasa-like)', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine', 'Tube shaker', 'Seed shaker (maraca)', 'Egg shaker (small)'];
 
 export type DrumVoiceSettings = {
   voice: number; // index into DRUM_TYPES
@@ -16,9 +16,11 @@ export type DrumVoiceSettings = {
   tone: number; // percent, 0..100 (brighter)
   snap: number; // percent, 0..100 (noise / click / attack, depending on the type)
   level: number; // percent, 0..100
+  /** percent, 0..100: how much each hit differs from the last. 0 = every hit is exactly the same sound (tight and even); 100 = every hit a little different, as a real shaker is. */
+  variation: number;
 };
 
-export const defaultDrumVoice: DrumVoiceSettings = { voice: 0, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 };
+export const defaultDrumVoice: DrumVoiceSettings = { voice: 0, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 };
 
 /** Sound type for a drum by its role name, used to give the four starting drums sensible sounds. */
 export function voiceForName(name: string): number {
@@ -51,6 +53,7 @@ export function drumVoicesJson(
       tone: clamp(d.tone ?? 50, 0, 100) / 100,
       snap: clamp(d.snap ?? 50, 0, 100) / 100,
       level: clamp(d.level ?? 100, 0, 100) / 100,
+      variation: clamp(d.variation ?? 100, 0, 100) / 100,
     })),
   );
 }

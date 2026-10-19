@@ -65,6 +65,8 @@ export type DrumState = {
   tone: number;
   snap: number;
   level: number;
+  /** How much each hit differs from the last, percent (see drumvoice.ts). Global like the other sound controls. */
+  variation: number;
 };
 
 /** Patterns that change by themselves (scene-owned; the kick is never changed). */
@@ -296,6 +298,8 @@ export type BedState = {
   keysVoice: KeysVoiceState;
   /** 1 = the Shaker slot has been moved to the softer egg shaker once (settings saved before this keep the sharp one until migrateState changes it, once). */
   drumSoundVersion: number;
+  /** The built-in sound plays every note on its exact sample, using a short built-in delay so timing stays tight and even (the music runs about a tenth of a second behind the clock). Off = the old immediate way. Global. */
+  tightTiming: boolean;
   bpm: number;
   swing: number; // percent 0-100
   midiOut: boolean;
@@ -392,7 +396,7 @@ export type SceneData = {
   advance: AdvanceRule;
   transitionUse: TransitionUse;
   pad: Omit<PadState, 'channel'>;
-  drums: Omit<DrumState, 'name' | 'note' | 'channel' | 'voice' | 'tune' | 'decay' | 'tone' | 'snap' | 'level'>[];
+  drums: Omit<DrumState, 'name' | 'note' | 'channel' | 'voice' | 'tune' | 'decay' | 'tone' | 'snap' | 'level' | 'variation'>[];
   wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'cycleBars' | 'looseness' | 'phase' | 'smoothBeats' | 'opposes' | 'opposeAmount'>[];
   loops: Pick<LoopsState, 'enabled' | 'program' | 'sendBank' | 'bankMSB' | 'bankLSB'>;
 };
@@ -762,6 +766,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   keys: defaultKeys,
   keysVoice: defaultKeysVoice,
   drumSoundVersion: 1,
+  tightTiming: true,
   journeyName: 'Journey 1',
   profiles: defaultProfileChoice,
   bpm: 88,
@@ -785,15 +790,15 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     favorites: '',
   },
   drums: ([
-    { name: 'Kick', enabled: true, note: 36, channel: 9, steps: 16, hits: 4, rotation: 0, velocity: 100, probability: 100, humanize: 20, voice: 0, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
-    { name: 'Snare', enabled: true, note: 38, channel: 9, steps: 16, hits: 2, rotation: 4, velocity: 90, probability: 100, humanize: 25, voice: 1, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
-    { name: 'Hat', enabled: true, note: 42, channel: 9, steps: 16, hits: 11, rotation: 0, velocity: 70, probability: 90, humanize: 50, voice: 4, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
-    { name: 'Shaker', enabled: true, note: 82, channel: 9, steps: 5, hits: 3, rotation: 0, velocity: 60, probability: 80, humanize: 40, voice: 14, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
+    { name: 'Kick', enabled: true, note: 36, channel: 9, steps: 16, hits: 4, rotation: 0, velocity: 100, probability: 100, humanize: 20, voice: 0, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 },
+    { name: 'Snare', enabled: true, note: 38, channel: 9, steps: 16, hits: 2, rotation: 4, velocity: 90, probability: 100, humanize: 25, voice: 1, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 },
+    { name: 'Hat', enabled: true, note: 42, channel: 9, steps: 16, hits: 11, rotation: 0, velocity: 70, probability: 90, humanize: 50, voice: 4, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 60 },
+    { name: 'Shaker', enabled: true, note: 82, channel: 9, steps: 5, hits: 3, rotation: 0, velocity: 60, probability: 80, humanize: 40, voice: 14, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 40 },
     // More drums, off to begin with. Any slot can be any built-in sound (see drumvoice.ts).
-    { name: 'Tambourine', enabled: false, note: 54, channel: 9, steps: 16, hits: 4, rotation: 2, velocity: 60, probability: 80, humanize: 40, voice: 9, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
-    { name: 'Low tom', enabled: false, note: 45, channel: 9, steps: 16, hits: 3, rotation: 6, velocity: 80, probability: 70, humanize: 30, voice: 10, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
-    { name: 'Mid tom', enabled: false, note: 47, channel: 9, steps: 16, hits: 3, rotation: 3, velocity: 78, probability: 70, humanize: 30, voice: 11, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
-    { name: 'High tom', enabled: false, note: 50, channel: 9, steps: 16, hits: 2, rotation: 10, velocity: 76, probability: 70, humanize: 30, voice: 12, tune: 0, decay: 100, tone: 50, snap: 50, level: 100 },
+    { name: 'Tambourine', enabled: false, note: 54, channel: 9, steps: 16, hits: 4, rotation: 2, velocity: 60, probability: 80, humanize: 40, voice: 9, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 50 },
+    { name: 'Low tom', enabled: false, note: 45, channel: 9, steps: 16, hits: 3, rotation: 6, velocity: 80, probability: 70, humanize: 30, voice: 10, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 },
+    { name: 'Mid tom', enabled: false, note: 47, channel: 9, steps: 16, hits: 3, rotation: 3, velocity: 78, probability: 70, humanize: 30, voice: 11, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 },
+    { name: 'High tom', enabled: false, note: 50, channel: 9, steps: 16, hits: 2, rotation: 10, velocity: 76, probability: 70, humanize: 30, voice: 12, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 },
   ] as Omit<DrumState, keyof typeof drumExtras>[]).map((d) => ({ ...d, ...drumExtras })),
   drone: {
     enabled: true,
@@ -1394,6 +1399,7 @@ export function toEngineJson(s: BedState): string {
         level: s.recurring.level / 100,
       },
     },
+    tightTiming: s.tightTiming,
     harmony: { barsPerChord: s.harmony.barsPerChord, count: s.harmony.count },
     fill: {
       // Fills are drums: with the drum layer muted (or another part soloed) they stay silent too.

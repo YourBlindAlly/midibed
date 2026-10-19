@@ -178,8 +178,9 @@ describe('softer shakers', () => {
   const { DRUM_TYPES, drumVoicesJson, voiceForName } = require('../src/drumvoice');
 
   it('has an egg shaker and a seed shaker, and the old one is still a choice', () => {
-    expect(DRUM_TYPES[14]).toBe('Egg shaker');
+    expect(DRUM_TYPES[14]).toBe('Tube shaker');
     expect(DRUM_TYPES[15]).toBe('Seed shaker (maraca)');
+    expect(DRUM_TYPES[16]).toBe('Egg shaker (small)');
     expect(DRUM_TYPES[6]).toMatch(/Sharp shaker/);
     expect(voiceForName('Shaker')).toBe(14);
     expect(defaultState.drums.find((d) => d.name === 'Shaker')!.voice).toBe(14);
@@ -187,7 +188,7 @@ describe('softer shakers', () => {
     expect(j[0].type).toBe(15);
   });
 
-  it('settings saved with the sharp shaker move to the egg shaker once; a later choice of the sharp one is kept', () => {
+  it('settings saved with the sharp shaker move to the tube shaker once; a later choice of the sharp one is kept', () => {
     const old: any = JSON.parse(JSON.stringify(defaultState));
     old.drums[3].voice = 6;
     delete old.drumSoundVersion;
@@ -203,9 +204,10 @@ describe('softer shakers', () => {
 
   it('the Swift synth plays both new sounds, and the table allows them', () => {
     const swift = require('fs').readFileSync('modules/midibed-engine/ios/MidiBedTestSynth.swift', 'utf8');
-    expect(swift).toContain('case 14: // egg shaker');
+    expect(swift).toContain('case 14: // tube shaker');
     expect(swift).toContain('case 15: // seed shaker');
-    expect(swift).toContain('min(15, d.kind)');
+    expect(swift).toContain('case 16: // small egg shaker');
+    expect(swift).toContain('min(16, d.kind)');
   });
 });
 
@@ -280,5 +282,88 @@ describe('MidiDancer: a long last note that softens', () => {
     delete old.dancer.lastHold;
     for (const sc of old.scenes) delete sc.dancer.lastHold;
     expect(migrateState(old).scenes[1].dancer.lastHold).toBe(0);
+  });
+});
+
+describe('tight, even timing', () => {
+  const fs = require('fs');
+  const swift = (n: string) => fs.readFileSync(`modules/midibed-engine/ios/${n}`, 'utf8');
+
+  it('is on by default, global, saved, and sent to the engine', () => {
+    expect(defaultState.tightTiming).toBe(true);
+    expect(JSON.parse(toEngineJson(defaultState)).tightTiming).toBe(true);
+    expect(JSON.parse(toEngineJson({ ...defaultState, tightTiming: false })).tightTiming).toBe(false);
+    expect(switchScene({ ...defaultState, tightTiming: false }, 1).tightTiming).toBe(false);
+    const old: any = JSON.parse(JSON.stringify(defaultState));
+    delete old.tightTiming;
+    expect(migrateState(old).tightTiming).toBe(true);
+    expect(fs.readFileSync('App.tsx', 'utf8')).toContain('label="Sample-accurate timing"');
+  });
+
+  it('the synth applies each event on its exact sample, and a flush drops what is waiting', () => {
+    const s = swift('MidiBedTestSynth.swift');
+    expect(s).toContain('private func insertScheduled(');
+    expect(s).toContain('let frameTime = bufStart + Double(frame) * secPerFrame');
+    expect(s).toContain('func flush()');
+    expect(s).toContain('func syncClock()');
+    expect(s).toContain('var scheduleLead');
+    expect(s).toContain('mHostTime');
+    expect(s).toContain('loops.renderBlock(frames: frameCount, bufStart: bufStart, secPerFrame: secPerFrame)');
+  });
+
+  it('the engine times every event, holds MIDI back by the same lead, and clears both on stop and panic', () => {
+    const e = swift('MidiBedEngine.swift');
+    expect(e).toContain('private func drainDelayedMIDI(');
+    expect(e).toContain('emit(due[k].status, due[k].d1, due[k].d2, port: due[k].port, at: due[k].time)');
+    expect(e).toContain('self.delayedMIDI.removeAll()');
+    expect(e).toContain('self.synth.flush()');
+    expect(e).toContain('synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats, at: at)');
+    expect(e).toContain('var tightTiming: Bool?');
+  });
+
+  it('the loop player starts and stops lanes on an exact frame', () => {
+    const l = swift('LoopPlayer.swift');
+    expect(l).toContain('private func renderPiece(');
+    expect(l).toContain('func start(lane: Int, seconds: Double, repeats: Int = 1, at: Double = 0)');
+    expect(l).toContain('func stop(lane: Int, fade: Float = 0.03, at: Double = 0)');
+  });
+});
+
+describe('drum hit variation', () => {
+  const { drumVoicesJson } = require('../src/drumvoice');
+
+  it('the shaker, hat and tambourine start with some, the others with full variation, and it is a fraction for the engine', () => {
+    const v = Object.fromEntries(defaultState.drums.map((d) => [d.name, d.variation]));
+    expect(v).toMatchObject({ Kick: 100, Snare: 100, Hat: 60, Shaker: 40, Tambourine: 50 });
+    const j = JSON.parse(drumVoicesJson(defaultState.drums));
+    expect(j.find((x: any) => x.note === 82).variation).toBeCloseTo(0.4);
+  });
+
+  it('is global like the other sound controls, and older settings get the defaults', () => {
+    const live = { ...defaultState, drums: defaultState.drums.map((d, i) => (i === 3 ? { ...d, variation: 0 } : d)) };
+    expect(switchScene(live, 1).drums[3].variation).toBe(0);
+    const old: any = JSON.parse(JSON.stringify(defaultState));
+    for (const d of old.drums) delete d.variation;
+    expect(migrateState(old).drums[3].variation).toBe(40);
+  });
+
+  it('every hit has its own noise stream in the synth, and the screen has the control', () => {
+    const s = require('fs').readFileSync('modules/midibed-engine/ios/MidiBedTestSynth.swift', 'utf8');
+    expect(s).toContain('private func voiceNoise(_ i: Int)');
+    expect(s).toContain('let noise = voiceNoise(i)');
+    expect(require('fs').readFileSync('App.tsx', 'utf8')).toContain('variation`}');
+  });
+});
+
+describe('MidiDancer on the keys sound', () => {
+  it('sharing the keys channel is all it takes, and the screen has a switch for it', () => {
+    const s = { ...defaultState, dancer: { ...defaultState.dancer, channel: defaultState.keys.channel } };
+    const j = JSON.parse(toEngineJson(s));
+    expect(j.dancer.channel).toBe(j.keys.channel);
+    const app = require('fs').readFileSync('App.tsx', 'utf8');
+    expect(app).toContain("MidiDancer plays the Keys' electric piano");
+    const synth = require('fs').readFileSync('modules/midibed-engine/ios/MidiBedTestSynth.swift', 'utf8');
+    // any note on the keys channel, whoever sent it, uses the electric piano voices
+    expect(synth).toContain('if Int(channel) == keysChannel {');
   });
 });
