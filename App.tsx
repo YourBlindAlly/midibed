@@ -4,7 +4,7 @@ import { PAD_PRESETS, applyPadPreset, padVoiceJson, setPadVoice } from './src/pa
 import { KEYS_PRESETS, KEYS_TYPE_NAMES, applyKeysPreset, keysVoiceJson, setKeysVoice } from './src/keysvoice';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -72,7 +72,7 @@ import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, 
 import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { RHYTHMS, rhythmDescribe, rhythmText } from './src/rhythms';
-import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion, onScene, testSweep } from './src/engine';
+import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion, onRecording, onScene, testSweep } from './src/engine';
 import {
   CONTOUR_NAMES,
   DANCER_MODE_NAMES,
@@ -221,6 +221,37 @@ export default function App() {
         setState((s) => switchScene(s, e.index));
         if (latest.current.announce) announceLater(sceneLabel(latest.current, e.index), 100);
       }
+    });
+  }, []);
+
+  // Recording a take as a MIDI file (Setup > Record a MIDI file).
+  const [recState, setRecState] = useState<'off' | 'armed' | 'recording'>('off');
+  const [recNote, setRecNote] = useState('');
+  const [recPath, setRecPath] = useState<string | null>(null);
+  useEffect(() => {
+    return onRecording((e) => {
+      if (e.state === 'armed') {
+        setRecState('armed');
+        setRecNote('Waiting for Play. The file will start on the first bar.');
+      } else if (e.state === 'recording') {
+        setRecState('recording');
+        setRecNote('Recording.');
+      } else {
+        setRecState('off');
+        if (e.state === 'saved') {
+          setRecPath(e.path);
+          setRecNote(`Saved, ${e.bars} ${e.bars === 1 ? 'bar' : 'bars'}.`);
+        } else if (e.state === 'empty') {
+          setRecNote('Nothing was played, so no file was saved.');
+        } else if (e.state === 'failed') {
+          setRecNote('The file could not be saved.');
+        } else {
+          setRecNote('Recording cancelled.');
+        }
+      }
+      AccessibilityInfo.announceForAccessibility(
+        e.state === 'saved' ? `Saved, ${e.bars} bars` : e.state === 'armed' ? 'Recording armed' : e.state === 'recording' ? 'Recording' : e.state === 'empty' ? 'Nothing recorded' : 'Recording off',
+      );
     });
   }, []);
 
@@ -3265,6 +3296,27 @@ export default function App() {
             </View>
           </Section>
 
+          <Section title="Record a MIDI file">
+            <Note>
+              Records what the parts play (bass, pad, keys, MidiDancer, drums) as a MIDI file with a track for each part, at the journey's tempo, starting exactly on a bar line. Drop it into your recording program on a bar line, with the tempo set the same, and it lines up. Start recording before you press Play, and the file begins at the first bar. The file is also kept in the Files app, under MidiBed.
+            </Note>
+            <ActionButton
+              label={recState === 'off' ? 'Start recording' : recState === 'armed' ? 'Cancel recording' : 'Stop recording and save'}
+              onPress={() => (recState === 'off' ? engine.startRecording() : engine.stopRecording())}
+            />
+            <View accessible accessibilityLabel="Recording status" accessibilityValue={{ text: recNote || 'Not recording' }}>
+              <Text style={styles.note}>{recNote || 'Not recording.'}</Text>
+            </View>
+            {recPath && (
+              <ActionButton
+                label="Share the last recording"
+                hint="Opens the share sheet: AirDrop, Files, Dropbox, mail"
+                onPress={() => {
+                  Share.share({ url: encodeURI(`file://${recPath}`) }).catch(() => {});
+                }}
+              />
+            )}
+          </Section>
           <Section title="Output">
             <Toggle label="Announce breathing changes" value={state.announce} onChange={(v) => patch({ announce: v })} hint="Speaks a short message when a bass, pad or drum change happens by itself" />
             <Stepper

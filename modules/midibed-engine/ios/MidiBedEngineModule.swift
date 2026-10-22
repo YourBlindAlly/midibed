@@ -8,7 +8,7 @@ public class MidiBedEngineModule: Module {
   public func definition() -> ModuleDefinition {
     Name("MidiBedEngine")
 
-    Events("onBeat", "onMotion", "onScene", "onMidiIn", "onEnding", "onEnded")
+    Events("onBeat", "onMotion", "onScene", "onMidiIn", "onEnding", "onEnded", "onRecording")
 
     // The screen-wide container that receives VoiceOver's three-finger page swipe.
     View(MidiBedPagerView.self) {
@@ -35,6 +35,9 @@ public class MidiBedEngineModule: Module {
       self.engine.onEnded = { [weak self] in
         self?.sendEvent("onEnded", [:])
       }
+      self.engine.onRecording = { [weak self] body in
+        self?.sendEvent("onRecording", body)
+      }
     }
 
     Function("setDrumVoices") { (json: String) in
@@ -44,6 +47,14 @@ public class MidiBedEngineModule: Module {
     // Length, sample rate and channels of an audio file (for the loop library); nil if it cannot be read.
     AsyncFunction("probeLoop") { (path: String) -> [String: Any]? in
       return MidiBedEngine.probeLoop(path: path)
+    }
+
+    Function("startRecording") {
+      self.engine.startRecording()
+    }
+
+    Function("stopRecording") {
+      self.engine.stopRecording()
     }
 
     Function("setOutputMode") { (mode: Int) in

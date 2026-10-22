@@ -457,6 +457,12 @@ final class MidiBedEngine {
   /// line, say) lands on the tick, exactly like the notes queued with a time.
   private var eventTime: Double? = nil
 
+  // Recording a take as a MIDI file (MidiRecorder.swift). 0 off, 1 waiting for Play, 2 recording.
+  private let recorder = MidiRecorder()
+  private var recState = 0
+  /// Called on the main queue when recording starts, waits, stops or is saved: {state, path, bars}.
+  var onRecording: (([String: Any?]) -> Void)?
+
   private struct PendingLoop {
     var time: Double
     var lane: Int
@@ -879,6 +885,11 @@ final class MidiBedEngine {
         while t < startNow + 0.02 { t += interval }
         self.nextTickTime = t
       }
+      if self.recState == 1 {
+        self.recorder.reset(startTime: self.nextTickTime, bpm: max(20.0, min(300.0, self.config?.bpm ?? 90)))
+        self.recState = 2
+        self.emitRecording("recording")
+      }
       self.updateIdleClock()
       self.lastWandererTime = self.nextTickTime
       self.sceneStartTime = self.nextTickTime
@@ -900,11 +911,88 @@ final class MidiBedEngine {
     queue.async { self.stopOnQueue(soft: false) }
   }
 
+  // MARK: Recording a take as a MIDI file
+
+  private func emitRecording(_ state: String, path: String? = nil, bars: Int = 0) {
+    let body: [String: Any?] = ["state": state, "path": path, "bars": bars]
+    let cb = onRecording
+    DispatchQueue.main.async { cb?(body) }
+  }
+
+  /// Start a take. While playing it begins on the next bar line; while stopped it waits for Play and begins on
+  /// the first bar line, so bar 1 of the file is bar 1 of the music.
+  func startRecording() {
+    queue.async {
+      guard self.recState == 0 else { return }
+      if self.running, let cfg = self.config {
+        let barTicks = self.ticksPerBeat * self.beatsPerBar
+        let tickDur = 60.0 / (max(20.0, min(300.0, cfg.bpm)) * Double(self.ticksPerBeat))
+        let startTick = ((self.tickIndex + barTicks - 1) / barTicks) * barTicks
+        let startTime = self.nextTickTime + Double(startTick - self.tickIndex) * tickDur
+        self.recorder.reset(startTime: startTime, bpm: max(20.0, min(300.0, cfg.bpm)))
+        self.recState = 2
+        self.emitRecording("recording")
+      } else {
+        self.recState = 1
+        self.emitRecording("armed")
+      }
+    }
+  }
+
+  /// End the take and save the file (or cancel, if it was only waiting for Play).
+  func stopRecording() {
+    queue.async {
+      if self.recState == 1 {
+        self.recState = 0
+        self.emitRecording("off")
+      } else if self.recState == 2 {
+        self.finishRecording()
+      }
+    }
+  }
+
+  /// Write the take to Documents/recordings and tell the screen. Runs on the engine queue.
+  private func finishRecording() {
+    guard recState == 2 else { return }
+    recState = 0
+    let cfg = config
+    // After an orchestrated ending the file ends with the music, not with the quiet second the engine waits.
+    var endTime = nextTickTime
+    if ended, let last = recorder.events.map({ $0.time }).max() { endTime = last }
+    var names: [Int: String] = [:]
+    func label(_ ch: Int, _ text: String) { names[ch] = names[ch].map { $0 + " + " + text } ?? text }
+    if let c = cfg {
+      label(c.drone.channel, "Bass drone")
+      label(c.pad.channel, "Chord pad")
+      if let k = c.keys { label(k.channel, "Keys") }
+      label(c.dancer.channel, "MidiDancer")
+      for d in c.drums { if names[d.channel] == nil || !(names[d.channel] ?? "").contains("Drums") { label(d.channel, "Drums") } }
+    }
+    guard let made = recorder.fileData(endTime: endTime, beatsPerBar: beatsPerBar, names: names) else {
+      emitRecording("empty")
+      return
+    }
+    do {
+      let docs = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+      let dir = docs.appendingPathComponent("recordings", isDirectory: true)
+      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+      let f = DateFormatter()
+      f.locale = Locale(identifier: "en_US_POSIX")
+      f.dateFormat = "yyyy-MM-dd HH-mm-ss"
+      let url = dir.appendingPathComponent("MidiBed take \(f.string(from: Date())).mid")
+      try made.data.write(to: url, options: .atomic)
+      emitRecording("saved", path: url.path, bars: made.bars)
+    } catch {
+      emitRecording("failed")
+    }
+  }
+
   /// `soft`: the end of an orchestrated stop. Notes are released one by one and all-notes-off is sent, but
   /// NOT all-sound-off (CC 120), so a synth lets its release and reverb ring out.
   private func stopOnQueue(soft: Bool) {
     do {
       guard self.running else { return }
+      if self.recState == 2 { self.finishRecording() }
       self.endTick = -1
       self.endPlan = nil
       self.endFade = 1
@@ -1100,6 +1188,7 @@ final class MidiBedEngine {
         }
       }
       guard let current = config else { break }
+      if recState == 2 { recorder.tempo(max(20.0, min(300.0, current.bpm)), at: nextTickTime) }
       processTick(tickIndex, at: nextTickTime, tickDur: tickDur, cfg: current)
       tickIndex += 1
       nextTickTime += tickDur
@@ -2753,6 +2842,9 @@ final class MidiBedEngine {
   /// tight timing the message is heard (and sent as MIDI) a short fixed lead after that time: the built-in sound
   /// then plays it on its exact sample, and the MIDI is held back by the same lead so everything stays in step.
   private func emit(_ status: UInt8, _ d1: UInt8, _ d2: UInt8, port: Int = 0, at when: Double? = nil) {
+    if recState == 2 && port != 1 && status < 0xF0 {
+      recorder.add(time: when ?? eventTime ?? ProcessInfo.processInfo.systemUptime, status: status, d1: d1, d2: d2)
+    }
     // Remember which notes are sounding (see `sounding`).
     if port != 1 {
       let kind = status & 0xF0

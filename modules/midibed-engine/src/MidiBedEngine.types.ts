@@ -25,6 +25,13 @@ export type EndingPayload = {
   reason: 'set' | 'tick' | 'end';
 };
 
+/** Recording a take as a MIDI file: waiting for Play (armed), recording, stopped (off), saved with its file path, or nothing was played (empty). */
+export type RecordingPayload = {
+  state: 'armed' | 'recording' | 'off' | 'saved' | 'empty' | 'failed';
+  path: string | null;
+  bars: number;
+};
+
 /** A press from a MIDI controller: a note on, a control change or a program change. */
 export type MidiInPayload = {
   kind: 'cc' | 'note' | 'pc';

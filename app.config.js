@@ -19,6 +19,9 @@ module.exports = {
         // engine keeps running (silent when muted) for the app's whole life.
         UIBackgroundModes: ['audio'],
         ITSAppUsesNonExemptEncryption: false,
+        // Lets the Files app show MidiBed's folder, so recorded MIDI files can be picked up from there.
+        UIFileSharingEnabled: true,
+        LSSupportsOpeningDocumentsInPlace: true,
       },
     },
     web: {},

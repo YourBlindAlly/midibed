@@ -1,4 +1,4 @@
-import type { BeatPayload, EndingPayload, MidiInPayload, MotionPayload, SceneEventPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
+import type { BeatPayload, EndingPayload, MidiInPayload, MotionPayload, RecordingPayload, SceneEventPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
 
 /**
  * Thin wrapper over the native module with a silent fallback so the UI still
@@ -27,6 +27,8 @@ type Native = {
   setScenes(json: string): void;
   sendControlChange(channel: number, cc: number, value: number, loops: boolean): void;
   setSynthLevel(channel: number, value: number): void;
+  startRecording(): void;
+  stopRecording(): void;
   sendNote(channel: number, note: number, velocity: number, durationMs: number): void;
   playTransitionNow(shape: number, color: number, beats: number, level: number): void;
   sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number, loops: boolean): void;
@@ -36,6 +38,7 @@ type Native = {
   addListener(name: 'onMidiIn', cb: (e: MidiInPayload) => void): unknown;
   addListener(name: 'onEnding', cb: (e: EndingPayload) => void): unknown;
   addListener(name: 'onEnded', cb: (e: Record<string, never>) => void): unknown;
+  addListener(name: 'onRecording', cb: (e: RecordingPayload) => void): unknown;
 };
 
 let native: Native | null = null;
@@ -130,6 +133,23 @@ export function onEnded(cb: () => void): () => void {
   };
 }
 
+const recordingSubscribers = new Set<(e: RecordingPayload) => void>();
+let recordingHooked = false;
+
+/** A MIDI-file recording started, waited, stopped or was saved. One native listener, fanned out. */
+export function onRecording(cb: (e: RecordingPayload) => void): () => void {
+  if (native && !recordingHooked) {
+    recordingHooked = true;
+    native.addListener('onRecording', (e) => {
+      recordingSubscribers.forEach((fn) => fn(e));
+    });
+  }
+  recordingSubscribers.add(cb);
+  return () => {
+    recordingSubscribers.delete(cb);
+  };
+}
+
 const midiInSubscribers = new Set<(e: MidiInPayload) => void>();
 let midiInHooked = false;
 
@@ -175,6 +195,10 @@ export const engine = {
   requestEnd: (json: string) => native?.requestEnd(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */
   reclaimKeys: () => native?.reclaimKeyFocus(),
+  /** Record what the parts play as a MIDI file: starts on a bar line (or at Play, if stopped). */
+  startRecording: () => native?.startRecording(),
+  /** End the take; the file is saved and announced through onRecording. */
+  stopRecording: () => native?.stopRecording(),
   /** queued = wait for the next bar line while playing (scene switches). */
   applyConfig: (json: string, queued = false) => native?.applyConfig(json, queued),
   /** loops = out the loops app's own port (when it has one). */
