@@ -209,9 +209,10 @@ struct MidiBedTransitionConfig: Decodable {
 /// Auto-advance: after `bars` bars (0 = never) the scene moves on by itself. mode 1 next scene,
 /// 2 a chosen scene (`target`), 3 a random other scene.
 struct MidiBedAdvance: Decodable {
-  var mode: Int
+  var mode: Int          // 0 stay, 1 next, 2 chosen, 3 random, 4 end the piece
   var bars: Int
   var target: Int
+  var ending: MidiBedEndRequest?   // mode 4: the ending to play when the bars are up
 }
 
 /// MidiDancer: a pool of phrases built on the JS side (src/dancer.ts). A phrase is `span` complete
@@ -522,6 +523,8 @@ final class MidiBedEngine {
   // Orchestrated stop: the bar line (absolute tick) the music ends on, its plan, and the fade factor.
   private var endTick = -1
   private var endPlan: MidiBedEndRequest?
+  /// The ending was set up by a scene that ends the piece (advance mode 4), not by the Stop button.
+  private var endFromAdvance = false
   private var endFade = 1.0
   private var ended = false
   // Evolving patterns: per drum, how far the hit count and rotation have been nudged, and how many nudges so far.
@@ -1065,6 +1068,7 @@ final class MidiBedEngine {
       if self.reaperRecording { self.sendReaperSignal(start: false) }
       self.endTick = -1
       self.endPlan = nil
+      self.endFromAdvance = false
       self.endFade = 1
       self.endHoldBeats = 0
       self.ended = false
@@ -1314,7 +1318,7 @@ final class MidiBedEngine {
         performEnding(at: time, tickDur: tickDur, cfg: cfg)
         return
       }
-      if (endTick - tick) % barTicks == 0 {
+      if (endTick - tick) % barTicks == 0, !endFromAdvance || (endTick - tick) / barTicks <= 4 {
         let left = (endTick - tick) / barTicks
         let cb = onEnding
         DispatchQueue.main.async { cb?(["barsLeft": left, "reason": "tick"]) }
@@ -1675,6 +1679,7 @@ final class MidiBedEngine {
     ended = true
     endTick = -1
     endPlan = nil
+    endFromAdvance = false
     endFade = 1
     endHoldBeats = 0
     let cb = onEnding
@@ -1721,6 +1726,7 @@ final class MidiBedEngine {
       }
       self.endTick = target
       self.endPlan = plan
+      self.endFromAdvance = false
       self.endHoldBeats = max(0, plan.holdBeats ?? 0)
       // A fill into the last bar line, when fills are on.
       if cfg.fill.enabled, !cfg.fill.palette.isEmpty { self.fillRequested = true }
@@ -2067,7 +2073,7 @@ final class MidiBedEngine {
   /// Which scene comes next, or -1. Must behave like `pickTarget` in src/advance.ts (unit-tested).
   private func pickAdvanceTarget(_ cfg: MidiBedConfig) -> Int {
     let n = sceneConfigs.count
-    guard cfg.advance.mode > 0, n >= 2 else { return -1 }
+    guard cfg.advance.mode > 0, cfg.advance.mode != 4, n >= 2 else { return -1 }
     switch cfg.advance.mode {
     case 1:
       return (cfg.sceneIndex + 1) % n
@@ -2101,11 +2107,25 @@ final class MidiBedEngine {
     guard tick - padStartTick > 0, pendingConfig == nil else { return }
     var left = advanceBarsLeft <= 0 ? bars : min(advanceBarsLeft, bars)
     if cfg.frozen {
+      // a frozen scene does not run out, so neither does the ending it set up
+      if endFromAdvance, endTick >= 0 { endTick += ticksPerBeat * beatsPerBar }
       advanceBarsLeft = left
       emitScene(index: cfg.sceneIndex, reason: "tick")
       return
     }
     left -= 1
+    // "End the piece": the scene plays its bars, and the ending lands on the bar line where it would have moved on.
+    if cfg.advance.mode == 4, !ended, endTick < 0 || endFromAdvance {
+      let barTicks = ticksPerBeat * beatsPerBar
+      var plan = cfg.advance.ending ?? MidiBedEndRequest(style: 3, fadeBars: 0, finalHit: true, noise: true, holdBeats: nil, noiseShape: 3, noiseLevel: 0.6)
+      plan.style = 3
+      endPlan = plan
+      endTick = tick + max(0, left) * barTicks
+      endFromAdvance = true
+      endHoldBeats = max(0, plan.holdBeats ?? 0)
+      // a fill into the last bar line, when fills are on
+      if left == 1, cfg.fill.enabled, !cfg.fill.palette.isEmpty { fillRequested = true }
+    }
     if advanceTarget < 0 || advanceTarget >= sceneConfigs.count { advanceTarget = pickAdvanceTarget(cfg) }
     let target = advanceTarget
     if left <= 0 {
@@ -2288,6 +2308,14 @@ final class MidiBedEngine {
     }
     advanceBarsLeft = cfg.advance.mode > 0 ? max(0, cfg.advance.bars) : 0
     advanceTarget = pickAdvanceTarget(cfg)
+    // A new scene that does not end the piece cancels the ending the previous scene had set up.
+    if endFromAdvance, cfg.advance.mode != 4 {
+      endTick = -1
+      endPlan = nil
+      endFromAdvance = false
+      endFade = 1
+      endHoldBeats = 0
+    }
     evoHits = [Int](repeating: 0, count: cfg.drums.count)
     evoRot = [Int](repeating: 0, count: cfg.drums.count)
     evoCount = [Int](repeating: 0, count: cfg.drums.count)

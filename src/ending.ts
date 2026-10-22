@@ -43,6 +43,11 @@ export function endingJson(e: EndingState): string {
   });
 }
 
+/** The ending settings as the engine reads them for "End the piece" (a scene that ends the piece by itself). */
+export function endingObject(e: EndingState): Record<string, unknown> {
+  return JSON.parse(endingJson({ ...e, style: 3 }));
+}
+
 /** The next stop style when the rotate key is pressed. */
 export function nextStopStyle(style: number): number {
   return (clamp(Math.round(style), 0, 3) + 1) % STOP_STYLE_NAMES.length;

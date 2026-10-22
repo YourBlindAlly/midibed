@@ -16,8 +16,9 @@ describe('how long a scene plays', () => {
   it('plays at least one bar', () => {
     expect(advanceBars({ mode: 1, count: 0, unit: 0, target: 0 }, harmony)).toBe(1);
   });
-  it('names the four modes', () => {
-    expect(ADVANCE_MODE_NAMES).toHaveLength(4);
+  it('names the five modes, the last one ends the piece', () => {
+    expect(ADVANCE_MODE_NAMES).toHaveLength(5);
+    expect(ADVANCE_MODE_NAMES[4]).toBe('End the piece');
   });
 });
 

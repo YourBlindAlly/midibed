@@ -89,6 +89,7 @@ import {
   resolveScale,
 } from './src/dancer';
 import { ADVANCE_MODE_NAMES, ADVANCE_UNIT_NAMES, AdvanceRule, advanceBars, describeAdvance, pickTarget } from './src/advance';
+import { journeyLength, lengthBreakdown, lengthSentence } from './src/journeylength';
 import {
   BASS_KIND_NAMES,
   BREAKDOWN_NAMES,
@@ -564,6 +565,14 @@ export default function App() {
     state.frozen,
     playing,
   );
+  // How long this journey plays, from the scene that is on now (the live scene's settings stand in for its saved copy).
+  const lengthLabel = (i: number) => sceneLabel(state, i).toLowerCase();
+  const lengthScenes = state.scenes.map((sc, i) =>
+    i === state.activeScene ? { advance: state.advance, harmony: state.harmony } : { advance: sc.advance, harmony: sc.harmony },
+  );
+  const journeyLen = journeyLength(lengthScenes, state.activeScene);
+  const journeyLengthSentence = lengthSentence(journeyLen, state.bpm, lengthLabel);
+  const journeyLengthDetail = lengthBreakdown(journeyLen, state.bpm, lengthLabel);
   const motionWords = describeMotion(
     motionNow,
     { bassFollows: state.drone.follow, padSteadyFifths: padIsSteadyFifths(state.pad) },
@@ -1389,6 +1398,10 @@ export default function App() {
                 placeholderTextColor={colors.dim}
                 onBlur={() => engine.reclaimKeys()}
               />
+            </View>
+            <View accessible accessibilityLabel="Journey length" accessibilityValue={{ text: `${journeyLengthSentence} ${journeyLengthDetail}` }}>
+              <Text style={styles.note}>{journeyLengthSentence}</Text>
+              <Text style={styles.note}>{journeyLengthDetail}</Text>
             </View>
             <ActionButton label="New journey" onPress={addJourney} hint="Adds a journey with the starting scenes, in the same key and tempo" />
             <Stepper
@@ -2912,7 +2925,7 @@ export default function App() {
             />
             {state.advance.mode > 0 && (
               <>
-                <Stepper label="Move on after" value={state.advance.count} onChange={(v) => patchAdvance({ count: v })} min={1} max={64} bigStep={4} format={(v) => `${v}`} />
+                <Stepper label={state.advance.mode === 4 ? 'End after' : 'Move on after'} value={state.advance.count} onChange={(v) => patchAdvance({ count: v })} min={1} max={64} bigStep={4} format={(v) => `${v}`} />
                 <Stepper
                   label="Counted in"
                   value={state.advance.unit}

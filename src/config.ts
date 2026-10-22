@@ -1,5 +1,5 @@
 import { FxState, defaultFx } from './uglyfx';
-import { EndingState, defaultEnding } from './ending';
+import { EndingState, defaultEnding, endingObject } from './ending';
 import { defaultSectionUi } from './sectionui';
 import { presetOwnsChannel } from './filters';
 import { clampOutputMode } from './outputmode';
@@ -1328,6 +1328,8 @@ export function toEngineJson(s: BedState): string {
       mode: s.advance.mode,
       bars: advanceBars(s.advance, s.harmony),
       target: pickTarget(s.advance, s.activeScene, s.scenes.length, 0),
+      // "End the piece": the ending to play when this scene's bars are up
+      ...(s.advance.mode === 4 ? { ending: endingObject(s.ending) } : {}),
     },
     loops: {
       enabled: s.solo ? s.solo === 'loops' : s.loops.enabled,

@@ -8,7 +8,7 @@
  * countdown (and the other things that change the bed by itself) until it is released.
  */
 export type AdvanceRule = {
-  mode: number; // 0 stay, 1 next scene, 2 a chosen scene, 3 a random other scene
+  mode: number; // 0 stay, 1 next scene, 2 a chosen scene, 3 a random other scene, 4 end the piece
   count: number; // how many bars or chord loops
   unit: number; // 0 bars, 1 chord loops
   target: number; // 0-based scene number, used when mode is 2
@@ -19,6 +19,7 @@ export const ADVANCE_MODE_NAMES = [
   'Go to the next scene',
   'Go to a chosen scene',
   'Go to a random other scene',
+  'End the piece',
 ];
 export const ADVANCE_UNIT_NAMES = ['bars', 'chord loops'];
 
@@ -36,7 +37,7 @@ export function advanceBars(rule: AdvanceRule, harmony: { barsPerChord: number; 
  * "A chosen scene" that is the scene itself falls back to the next one.
  */
 export function pickTarget(rule: AdvanceRule, current: number, sceneCount: number, roll: number): number {
-  if (sceneCount < 2 || rule.mode === 0) return -1;
+  if (sceneCount < 2 || rule.mode === 0 || rule.mode === 4) return -1;
   if (rule.mode === 1) return (current + 1) % sceneCount;
   if (rule.mode === 2) return rule.target === current || rule.target < 0 || rule.target >= sceneCount ? (current + 1) % sceneCount : rule.target;
   const others: number[] = [];
@@ -61,6 +62,12 @@ export function stepAdvance(barsLeft: number, bars: number, frozen: boolean): { 
 /** A sentence for the screen: what happens next in this scene. */
 export function describeAdvance(rule: AdvanceRule, bars: number, barsLeft: number, target: number, frozen: boolean, playing: boolean): string {
   if (rule.mode === 0 || bars <= 0) return 'This scene stays until you change it';
+  if (rule.mode === 4) {
+    if (frozen) return 'Frozen: the scene is not changing by itself';
+    const k = playing && barsLeft > 0 ? barsLeft : bars;
+    const w = `${k} ${k === 1 ? 'bar' : 'bars'}`;
+    return playing ? `The piece ends in ${w}` : `After ${w} the piece ends`;
+  }
   const to = target >= 0 ? `scene ${target + 1}` : 'the next scene';
   if (frozen) return 'Frozen: the scene is not changing by itself';
   const n = playing && barsLeft > 0 ? barsLeft : bars;
