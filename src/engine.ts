@@ -29,6 +29,9 @@ type Native = {
   setSynthLevel(channel: number, value: number): void;
   startRecording(): void;
   stopRecording(): void;
+  setNetwork(json: string): void;
+  sendReaperSignal(start: boolean): void;
+  networkInfo(): { enabled: boolean; name: string; port: number; connections: number };
   sendNote(channel: number, note: number, velocity: number, durationMs: number): void;
   playTransitionNow(shape: number, color: number, beats: number, level: number): void;
   sendProgramChange(channel: number, program: number, bankMSB: number, bankLSB: number, loops: boolean): void;
@@ -195,6 +198,12 @@ export const engine = {
   requestEnd: (json: string) => native?.requestEnd(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */
   reclaimKeys: () => native?.reclaimKeyFocus(),
+  /** The live link to a recording program: Network MIDI on or off, and the record and stop signals (src/network.ts). */
+  setNetwork: (json: string) => native?.setNetwork(json),
+  /** Send the record signal (true) or the stop signal (false) now. */
+  sendReaperSignal: (start: boolean) => native?.sendReaperSignal(start),
+  /** Is Network MIDI on, its name and port, and how many computers are connected. */
+  networkInfo: () => native?.networkInfo() ?? null,
   /** Record what the parts play as a MIDI file: starts on a bar line (or at Play, if stopped). */
   startRecording: () => native?.startRecording(),
   /** End the take; the file is saved and announced through onRecording. */

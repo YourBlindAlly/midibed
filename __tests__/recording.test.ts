@@ -1,4 +1,5 @@
-import fs from 'fs';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const fs = require('fs');
 
 const swift = (f: string) => fs.readFileSync(`modules/midibed-engine/ios/${f}`, 'utf8');
 

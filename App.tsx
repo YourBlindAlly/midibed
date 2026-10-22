@@ -1,6 +1,7 @@
 import { BASS_NOTES_NAMES, BASS_RHYTHM_NAMES, BASS_SKIP_NAMES, COLOR_STEP_NAMES } from './src/bassrhythm';
 import { KEYS_FOLLOW_NAMES, KEYS_RHYTHMS, KEYS_SKIP_NAMES, KeysState, keysPatternText } from './src/keys';
 import { PAD_PRESETS, applyPadPreset, padVoiceJson, setPadVoice } from './src/padvoice';
+import { PREROLLS, networkJson } from './src/network';
 import { KEYS_PRESETS, KEYS_TYPE_NAMES, applyKeysPreset, keysVoiceJson, setKeysVoice } from './src/keysvoice';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -635,6 +636,14 @@ export default function App() {
     const t = setTimeout(() => engine.setPadVoice(padVoiceJsonText), 80);
     return () => clearTimeout(t);
   }, [padVoiceJsonText, ready]);
+
+  // The live link to a recording program: send the settings whenever they change.
+  const networkJsonText = networkJson(state.network);
+  useEffect(() => {
+    if (!ready) return;
+    engine.setNetwork(networkJsonText);
+  }, [networkJsonText, ready]);
+  const [netNote, setNetNote] = useState('');
 
   // The built-in effects (Ugly FX): send the settings whenever they or the tempo change (the delay follows the tempo).
   const fxJson = uglyFxJson(state.fx, state.bpm);
@@ -3316,6 +3325,77 @@ export default function App() {
                 }}
               />
             )}
+          </Section>
+          <Section title="Live link to a recording program">
+            <Note>
+              Sends what the parts play to your computer over wifi as a Network MIDI session, so a program such as Reaper can play instruments from it live. The phone and the computer must be on the same network. On the computer, install the free rtpMIDI driver, make the phone join its session, and choose the session as a MIDI input in the recording program. Give each part its own track, set to that part's MIDI channel.
+            </Note>
+            <Toggle
+              label="Send MIDI over the network"
+              value={state.network.on}
+              onChange={(v) => patch({ network: { ...state.network, on: v } })}
+              hint="Makes this phone appear as a Network MIDI session. Switch off when you are not recording."
+            />
+            <ActionButton
+              label="Check the connection"
+              onPress={() => {
+                const info = engine.networkInfo();
+                setNetNote(
+                  !info
+                    ? 'The engine is not available.'
+                    : !info.enabled
+                    ? 'Network MIDI is off.'
+                    : `On as ${info.name}, port ${info.port}. ${info.connections === 0 ? 'No computer is connected yet.' : info.connections === 1 ? 'One computer is connected.' : `${info.connections} computers are connected.`}`,
+                );
+              }}
+            />
+            {netNote ? (
+              <View accessible accessibilityLabel="Connection status" accessibilityValue={{ text: netNote }}>
+                <Text style={styles.note}>{netNote}</Text>
+              </View>
+            ) : null}
+            <Toggle
+              label="Tell the recording program to record when I press Play"
+              value={state.network.record}
+              onChange={(v) => patch({ network: { ...state.network, record: v } })}
+              hint="Sends a record message just before the music starts, and a stop message when MidiBed stops. Leave off to just play while you set up sounds."
+            />
+            <Stepper
+              label="Wait before the music"
+              value={state.network.preroll}
+              onChange={(v) => patch({ network: { ...state.network, preroll: v } })}
+              min={0}
+              max={PREROLLS.length - 1}
+              format={(v) => PREROLLS[v].label}
+              hint="How long the music waits after the record message, so the recording program is ready. A bar or two gives a count-in."
+            />
+            <Stepper
+              label="Record message MIDI channel"
+              value={state.network.channel}
+              onChange={(v) => patch({ network: { ...state.network, channel: v } })}
+              min={0}
+              max={15}
+              format={(v) => `${v + 1}`}
+              hint="Channel 16 is not used by any part"
+            />
+            <Stepper
+              label="Record message control number"
+              value={state.network.startCC}
+              onChange={(v) => patch({ network: { ...state.network, startCC: v } })}
+              min={0}
+              max={127}
+              bigStep={10}
+            />
+            <Stepper
+              label="Stop message control number"
+              value={state.network.stopCC}
+              onChange={(v) => patch({ network: { ...state.network, stopCC: v } })}
+              min={0}
+              max={127}
+              bigStep={10}
+            />
+            <ActionButton label="Send the record message now" hint="For teaching the recording program: use its Add shortcut, then press this" onPress={() => engine.sendReaperSignal(true)} />
+            <ActionButton label="Send the stop message now" onPress={() => engine.sendReaperSignal(false)} />
           </Section>
           <Section title="Output">
             <Toggle label="Announce breathing changes" value={state.announce} onChange={(v) => patch({ announce: v })} hint="Speaks a short message when a bass, pad or drum change happens by itself" />

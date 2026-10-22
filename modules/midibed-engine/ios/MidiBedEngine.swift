@@ -457,6 +457,21 @@ final class MidiBedEngine {
   /// line, say) lands on the tick, exactly like the notes queued with a time.
   private var eventTime: Double? = nil
 
+  // Live link to a recording program: everything the parts play is also sent to a Network MIDI session (RTP-MIDI),
+  // and a "record" message goes out just before the music starts at Play, a "stop" message when it stops.
+  private struct NetworkSettings: Decodable {
+    var enabled: Bool
+    var record: Bool
+    var channel: Int
+    var startCC: Int
+    var stopCC: Int
+    var prerollMs: Double
+    var prerollBeats: Double
+  }
+  private var network = NetworkSettings(enabled: false, record: false, channel: 15, startCC: 102, stopCC: 103, prerollMs: 500, prerollBeats: 0)
+  private var netOutPort = MIDIPortRef()
+  private var reaperRecording = false
+
   // Recording a take as a MIDI file (MidiRecorder.swift). 0 off, 1 waiting for Play, 2 recording.
   private let recorder = MidiRecorder()
   private var recState = 0
@@ -591,6 +606,7 @@ final class MidiBedEngine {
     MIDIDestinationCreateWithBlock(client, "MidiBed In" as CFString, &inputDestination) { [weak self] list, _ in
       self?.handleIncoming(list)
     }
+    MIDIOutputPortCreate(client, "MidiBed Network Out" as CFString, &netOutPort)
     connectInputs()
     synth.startEngine()
 
@@ -885,6 +901,16 @@ final class MidiBedEngine {
         while t < startNow + 0.02 { t += interval }
         self.nextTickTime = t
       }
+      // Tell the recording program to record, and let the music wait a moment so it is ready.
+      self.reaperRecording = false
+      if self.network.enabled && self.network.record, let c = self.config {
+        self.sendReaperSignal(start: true)
+        let bpm = max(20.0, min(300.0, c.bpm))
+        let pulse = 60.0 / (bpm * 24.0)
+        let wait = self.network.prerollMs / 1000.0 + self.network.prerollBeats * 60.0 / bpm
+        // a whole number of clock pulses, so the idle clock keeps its spacing
+        self.nextTickTime += (wait / pulse).rounded() * pulse
+      }
       if self.recState == 1 {
         self.recorder.reset(startTime: self.nextTickTime, bpm: max(20.0, min(300.0, self.config?.bpm ?? 90)))
         self.recState = 2
@@ -909,6 +935,49 @@ final class MidiBedEngine {
 
   func stop() {
     queue.async { self.stopOnQueue(soft: false) }
+  }
+
+  // MARK: Live link (Network MIDI) and the record signal
+
+  /// New settings for the live link. Switching it on makes this phone visible as a Network MIDI session.
+  func setNetwork(json: String) {
+    guard let data = json.data(using: .utf8), let s = try? JSONDecoder().decode(NetworkSettings.self, from: data) else { return }
+    queue.async {
+      self.network = s
+    }
+    DispatchQueue.main.async {
+      let session = MIDINetworkSession.default()
+      session.isEnabled = s.enabled
+      if s.enabled { session.connectionPolicy = .anyone }
+    }
+  }
+
+  /// A message by hand (the test buttons): the record signal or the stop signal.
+  func sendReaperSignalNow(start: Bool) {
+    queue.async { self.sendReaperSignal(start: start) }
+  }
+
+  private func sendReaperSignal(start: Bool) {
+    let cc = start ? network.startCC : network.stopCC
+    sendNetwork([0xB0 | UInt8(max(0, min(15, network.channel))), UInt8(max(0, min(127, cc))), 127])
+    reaperRecording = start
+  }
+
+  /// Raw bytes to the Network MIDI session, if it is on.
+  private func sendNetwork(_ bytes: [UInt8]) {
+    guard network.enabled else { return }
+    let dest = MIDINetworkSession.default().destinationEndpoint()
+    guard dest != 0 else { return }
+    var packetList = MIDIPacketList()
+    let packet = MIDIPacketListInit(&packetList)
+    _ = MIDIPacketListAdd(&packetList, MemoryLayout<MIDIPacketList>.size, packet, 0, bytes.count, bytes)
+    MIDISend(netOutPort, dest, &packetList)
+  }
+
+  /// For the screen: is the session on, what is it called, and how many computers are connected.
+  func networkInfo() -> [String: Any] {
+    let s = MIDINetworkSession.default()
+    return ["enabled": s.isEnabled, "name": s.networkName, "port": Int(s.networkPort), "connections": s.connections().count]
   }
 
   // MARK: Recording a take as a MIDI file
@@ -993,6 +1062,7 @@ final class MidiBedEngine {
     do {
       guard self.running else { return }
       if self.recState == 2 { self.finishRecording() }
+      if self.reaperRecording { self.sendReaperSignal(start: false) }
       self.endTick = -1
       self.endPlan = nil
       self.endFade = 1
@@ -2908,6 +2978,8 @@ final class MidiBedEngine {
       bytes = [status, d1, d2]
     }
     _ = MIDIPacketListAdd(&packetList, MemoryLayout<MIDIPacketList>.size, packet, 0, bytes.count, bytes)
+    // the same message goes to the recording program, once (not for the loops app's own messages or clock)
+    if network.enabled && status < 0xF0 && ports.contains(where: { $0 != 1 }) { sendNetwork(bytes) }
     for p in ports where p >= 0 && p < portSources.count && portSources[p] != 0 {
       MIDIReceived(portSources[p], &packetList)
     }

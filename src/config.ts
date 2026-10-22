@@ -11,6 +11,7 @@ import { DancerState, defaultDancer, makePhrases } from './dancer';
 import { buildBassColorNotes } from './bassrhythm';
 import { KeysVoiceState, defaultKeysVoice } from './keysvoice';
 import { PadVoiceState, defaultPadVoice } from './padvoice';
+import { NetworkState, defaultNetwork } from './network';
 import { KEYS_RHYTHMS, KeysState, clampKeysRhythm, defaultKeys, keysMask } from './keys';
 import type { Layer } from './shortcuts';
 import { cycleBarsFromOldSpeed, phaseOffset, smoothBeatsFromOldSmooth } from './wander';
@@ -307,6 +308,8 @@ export type BedState = {
   readHints: boolean;
   /** The built-in sound plays every note on its exact sample, using a short built-in delay so timing stays tight and even (the music runs about a tenth of a second behind the clock). Off = the old immediate way. Global. */
   tightTiming: boolean;
+  /** The live link to a recording program (Network MIDI + record signal). Global. */
+  network: NetworkState;
   bpm: number;
   swing: number; // percent 0-100
   midiOut: boolean;
@@ -777,6 +780,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   showNotes: true,
   readHints: true,
   tightTiming: true,
+  network: defaultNetwork,
   journeyName: 'Journey 1',
   profiles: defaultProfileChoice,
   bpm: 88,

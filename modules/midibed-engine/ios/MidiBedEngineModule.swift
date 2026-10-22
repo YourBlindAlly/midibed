@@ -49,6 +49,18 @@ public class MidiBedEngineModule: Module {
       return MidiBedEngine.probeLoop(path: path)
     }
 
+    Function("setNetwork") { (json: String) in
+      self.engine.setNetwork(json: json)
+    }
+
+    Function("sendReaperSignal") { (start: Bool) in
+      self.engine.sendReaperSignalNow(start: start)
+    }
+
+    Function("networkInfo") { () -> [String: Any] in
+      return self.engine.networkInfo()
+    }
+
     Function("startRecording") {
       self.engine.startRecording()
     }
