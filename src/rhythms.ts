@@ -39,6 +39,19 @@ export const RHYTHMS: Rhythm[] = [
   { name: 'Syncopated kick: 1, 2 e, 3', steps: 16, hits: [0, 5, 8] },
   // A kick on beats 1 and 3: a plain foundation.
   { name: 'Kick on 1 and 3', steps: 16, hits: [0, 8] },
+  // Single-drum patterns for the grooves (src/grooves.ts). Designs in the spirit of each style, to be tuned by ear.
+  { name: 'Beat 1 only', steps: 16, hits: [0] },
+  // Lub on beat one, dub a dotted eighth later.
+  { name: 'Heartbeat: lub-dub', steps: 16, hits: [0, 3] },
+  // Beat 1 and the 'a' of 2: a laid-back half-time kick.
+  { name: 'Downtempo kick: 1, a of 2', steps: 16, hits: [0, 7] },
+  { name: 'Trip-hop kick', steps: 16, hits: [0, 6, 11] },
+  // Beat 1, the 'a' of 2, the 'and' of 3: the kick leans around the snare on 2 and 4.
+  { name: 'Boom bap kick', steps: 16, hits: [0, 7, 10] },
+  // Beats 1 and 3 with a ghost kick near the end of the bar.
+  { name: 'Lo-fi kick', steps: 16, hits: [0, 8, 14] },
+  // The bossa bass drum: dotted quarter, eighth, twice.
+  { name: 'Bossa kick', steps: 16, hits: [0, 6, 8, 14] },
 ];
 
 export function clampRhythm(i: number): number {

@@ -68,6 +68,7 @@ import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { createPedal } from './src/pedal';
+import { GROOVES, GrooveMemory, applyGroove, rememberGroove, restoreGroove } from './src/grooves';
 import { BACKUP_FILE_NAME, backupText, keepFoundLoops, parseBackup } from './src/backup';
 import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, idForMidi, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
 import { levelText, mixerMessages, synthLevelMessages } from './src/mixer';
@@ -518,6 +519,20 @@ export default function App() {
     if (!silencedMemory) return;
     setState((s) => restoreDrumPatterns(s, silencedMemory));
     setSilencedMemory(null);
+    announceLater('Drum patterns back', 150);
+  };
+  // A groove for the whole kit (src/grooves.ts); Undo brings the previous patterns and swing back.
+  const [grooveIdx, setGrooveIdx] = useState(0);
+  const [grooveMemory, setGrooveMemory] = useState<GrooveMemory | null>(null);
+  const applyKitGroove = () => {
+    setGrooveMemory(rememberGroove(latest.current));
+    setState((s) => applyGroove(s, grooveIdx));
+    announceLater(`Groove: ${GROOVES[grooveIdx].name}`, 150);
+  };
+  const undoKitGroove = () => {
+    if (!grooveMemory) return;
+    setState((s) => restoreGroove(s, grooveMemory));
+    setGrooveMemory(null);
     announceLater('Drum patterns back', 150);
   };
   const [copyWhat, setCopyWhat] = useState(0);
@@ -2078,6 +2093,24 @@ export default function App() {
           {part === 'drums' && (
             <>
           <Section title="Drum" fixed>
+            <Stepper
+              label="Groove"
+              value={grooveIdx}
+              onChange={setGrooveIdx}
+              min={0}
+              max={GROOVES.length - 1}
+              format={(v) => GROOVES[v].name}
+              hint={GROOVES[grooveIdx].about}
+            />
+            <View accessible accessibilityLabel="About this groove" accessibilityValue={{ text: GROOVES[grooveIdx].about }}>
+              <Text style={styles.note}>{GROOVES[grooveIdx].about}</Text>
+            </View>
+            <ActionButton
+              label={`Apply the groove ${GROOVES[grooveIdx].name} to this scene`}
+              hint="Sets which drums play and their patterns, and the swing. Your drum sounds, notes and channels stay. You can undo it"
+              onPress={applyKitGroove}
+            />
+            {grooveMemory !== null && <ActionButton label="Undo the groove" onPress={undoKitGroove} />}
             <ActionButton
               label="Silence all drum patterns"
               hint="Sets every drum's hits to 0 in this scene, so you can build a groove up one drum at a time"
