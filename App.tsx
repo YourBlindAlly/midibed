@@ -68,6 +68,7 @@ import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { createPedal } from './src/pedal';
+import { BACKUP_FILE_NAME, backupText, keepFoundLoops, parseBackup } from './src/backup';
 import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, idForMidi, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
 import { levelText, mixerMessages, synthLevelMessages } from './src/mixer';
 import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
@@ -226,6 +227,62 @@ export default function App() {
       }
     });
   }, []);
+
+  // Back up and restore all the settings as a file (Setup > Back up and restore my settings).
+  const [backupNote, setBackupNote] = useState('');
+  const [backupPath, setBackupPath] = useState<string | null>(null);
+  const backUpSettings = () => {
+    if (!fsApi) {
+      setBackupNote('Backing up works in the app on the phone.');
+      return;
+    }
+    try {
+      const dir = new fsApi.Directory(fsApi.Paths.document, 'backup');
+      dir.create({ intermediates: true, idempotent: true });
+      const file = new fsApi.File(dir, BACKUP_FILE_NAME);
+      file.create({ overwrite: true });
+      file.write(backupText(latest.current));
+      setBackupPath(file.uri);
+      setBackupNote(`Backed up. The file is called ${BACKUP_FILE_NAME}, in the backup folder of the MidiBed folder in the Files app.`);
+      announceLater('Settings backed up', 100);
+    } catch {
+      setBackupNote('The backup could not be saved.');
+      announceLater('The backup could not be saved', 100);
+    }
+  };
+  const restoreSettings = async () => {
+    if (!fsApi) {
+      setBackupNote('Restoring works in the app on the phone.');
+      return;
+    }
+    try {
+      const picked = await fsApi.File.pickFileAsync({ mimeTypes: ['application/json', 'text/plain', '*/*'] });
+      if (picked.canceled || !picked.result) return;
+      const parsed = parseBackup(await picked.result.text());
+      if (!parsed) {
+        setBackupNote('That file is not a MidiBed backup.');
+        announceLater('That file is not a MidiBed backup', 100);
+        return;
+      }
+      const loopsDir = new fsApi.Directory(fsApi.Paths.document, 'loops');
+      const found = keepFoundLoops(parsed, (f: string) => new fsApi.File(loopsDir, f).exists);
+      setState(found.state);
+      setBackupNote(
+        found.before === 0
+          ? 'Settings restored.'
+          : `Settings restored. ${found.after} of ${found.before} loops in the library are on this phone. Copy the loops folder into this app's Files folder, or add the loops again, and the rest will appear.`,
+      );
+      announceLater('Settings restored', 100);
+    } catch {
+      setBackupNote('The backup could not be read.');
+      announceLater('The backup could not be read', 100);
+    }
+  };
+  const confirmRestore = () =>
+    Alert.alert('Restore settings', 'Replace all the settings on this phone (journeys, scenes, favorites, pedal buttons and the rest) with those from a backup file?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Choose the file', onPress: () => void restoreSettings() },
+    ]);
 
   // Recording a take as a MIDI file (Setup > Record a MIDI file).
   const [recState, setRecState] = useState<'off' | 'armed' | 'recording'>('off');
@@ -3344,6 +3401,27 @@ export default function App() {
             </View>
           </Section>
 
+          <Section title="Back up and restore my settings">
+            <Note>
+              Saves every setting (journeys, scenes, favorites, the pedal buttons and the rest) to one file, so you can carry them to another install of MidiBed, for example the signed version. The file is in the backup folder of the MidiBed folder in the Files app. To restore, choose Restore and pick the file; you can look in the On My iPhone area for the other MidiBed folder. The loops themselves are audio and are not inside the file.
+            </Note>
+            <ActionButton label="Back up my settings now" onPress={backUpSettings} />
+            {backupPath && (
+              <ActionButton
+                label="Share the backup file"
+                hint="Opens the share sheet: AirDrop, Files, Dropbox, mail"
+                onPress={() => {
+                  Share.share({ url: encodeURI(backupPath) }).catch(() => {});
+                }}
+              />
+            )}
+            <ActionButton label="Restore settings from a backup file" onPress={confirmRestore} />
+            {backupNote ? (
+              <View accessible accessibilityLabel="Backup status" accessibilityValue={{ text: backupNote }}>
+                <Text style={styles.note}>{backupNote}</Text>
+              </View>
+            ) : null}
+          </Section>
           <Section title="Record a MIDI file">
             <Note>
               Records what the parts play (bass, pad, keys, MidiDancer, drums) as a MIDI file with a track for each part, at the journey's tempo, starting exactly on a bar line. Drop it into your recording program on a bar line, with the tempo set the same, and it lines up. Start recording before you press Play, and the file begins at the first bar. The file is also kept in the Files app, under MidiBed.
