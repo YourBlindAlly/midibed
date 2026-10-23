@@ -32,6 +32,12 @@ export type RecordingPayload = {
   bars: number;
 };
 
+/** A MIDI source (a pedal, a keyboard, another app) appeared or went away. */
+export type MidiDevicePayload = {
+  state: 'connected' | 'disconnected';
+  name: string;
+};
+
 /** A press from a MIDI controller: a note on, a control change or a program change. */
 export type MidiInPayload = {
   kind: 'cc' | 'note' | 'pc';

@@ -1,4 +1,4 @@
-import type { BeatPayload, EndingPayload, MidiInPayload, MotionPayload, RecordingPayload, SceneEventPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
+import type { BeatPayload, EndingPayload, MidiDevicePayload, MidiInPayload, MotionPayload, RecordingPayload, SceneEventPayload } from '../modules/midibed-engine/src/MidiBedEngine.types';
 
 /**
  * Thin wrapper over the native module with a silent fallback so the UI still
@@ -29,6 +29,7 @@ type Native = {
   setSynthLevel(channel: number, value: number): void;
   startRecording(): void;
   stopRecording(): void;
+  midiDevices(): string[];
   setNetwork(json: string): void;
   sendReaperSignal(start: boolean): void;
   networkInfo(): { enabled: boolean; name: string; port: number; connections: number };
@@ -42,6 +43,7 @@ type Native = {
   addListener(name: 'onEnding', cb: (e: EndingPayload) => void): unknown;
   addListener(name: 'onEnded', cb: (e: Record<string, never>) => void): unknown;
   addListener(name: 'onRecording', cb: (e: RecordingPayload) => void): unknown;
+  addListener(name: 'onMidiDevice', cb: (e: MidiDevicePayload) => void): unknown;
 };
 
 let native: Native | null = null;
@@ -153,6 +155,23 @@ export function onRecording(cb: (e: RecordingPayload) => void): () => void {
   };
 }
 
+const deviceSubscribers = new Set<(e: MidiDevicePayload) => void>();
+let deviceHooked = false;
+
+/** A MIDI source (pedal, keyboard) connected or disconnected. One native listener, fanned out. */
+export function onMidiDevice(cb: (e: MidiDevicePayload) => void): () => void {
+  if (native && !deviceHooked) {
+    deviceHooked = true;
+    native.addListener('onMidiDevice', (e) => {
+      deviceSubscribers.forEach((fn) => fn(e));
+    });
+  }
+  deviceSubscribers.add(cb);
+  return () => {
+    deviceSubscribers.delete(cb);
+  };
+}
+
 const midiInSubscribers = new Set<(e: MidiInPayload) => void>();
 let midiInHooked = false;
 
@@ -204,6 +223,8 @@ export const engine = {
   sendReaperSignal: (start: boolean) => native?.sendReaperSignal(start),
   /** Is Network MIDI on, its name and port, and how many computers are connected. */
   networkInfo: () => native?.networkInfo() ?? null,
+  /** The names of the MIDI sources (pedals, keyboards, other apps) that are connected now. */
+  midiDevices: () => native?.midiDevices() ?? [],
   /** Record what the parts play as a MIDI file: starts on a bar line (or at Play, if stopped). */
   startRecording: () => native?.startRecording(),
   /** End the take; the file is saved and announced through onRecording. */

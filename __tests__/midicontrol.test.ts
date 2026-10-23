@@ -73,7 +73,7 @@ describe('MIDI controller mapping', () => {
   });
 
   it('is saved with the other settings, on by default, any channel', () => {
-    expect(defaultState.midiControl).toEqual({ enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400, hold: '{}', holdMs: 700, releases: false });
+    expect(defaultState.midiControl).toEqual({ enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400, hold: '{}', holdMs: 700, releases: false, announceDevices: true });
     const s = migrateState({ midiControl: { map: '{"freeze":"cc:0:20"}', channel: 3 } });
     expect(s.midiControl.channel).toBe(3);
     expect(parseMidiMap(s.midiControl.map)).toEqual({ freeze: 'cc:0:20' });

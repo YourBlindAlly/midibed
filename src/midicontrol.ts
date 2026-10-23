@@ -24,6 +24,8 @@ export type MidiControlState = {
   holdMs: number;
   /** The pedal is in Momentary mode (sends a message when a button is let go). Buttons with a hold then wait for the release. */
   releases: boolean;
+  /** Say it aloud when a pedal or other MIDI device connects or disconnects. */
+  announceDevices: boolean;
 };
 
 export type MidiActionDef = { id: string; label: string; action: ShortcutAction };

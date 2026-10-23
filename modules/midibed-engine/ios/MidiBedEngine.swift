@@ -393,6 +393,11 @@ final class MidiBedEngine {
   /// Called on the main queue for each MIDI message from a controller (a pedal, a keyboard): note on,
   /// control change, program change. {kind: cc|note|pc, channel 0-15, number, value}.
   var onMidiIn: (([String: Any?]) -> Void)?
+  /// Called on the main queue when a MIDI source (a pedal, a keyboard) appears or goes away: {state, name}.
+  var onMidiDevice: (([String: Any?]) -> Void)?
+  private var knownSources: [MIDIEndpointRef: String] = [:]
+  private var devicesPrimed = false
+  private let devicesLock = NSLock()
   private var inputPort = MIDIPortRef()
   private var inputDestination = MIDIEndpointRef()
   private var lastControlTime: [Int: Double] = [:]
@@ -714,12 +719,44 @@ final class MidiBedEngine {
   /// Connect the input port to every MIDI source except MidiBed's own (so it never hears itself).
   private func connectInputs() {
     guard inputPort != 0 else { return }
+    var current: [MIDIEndpointRef: String] = [:]
     let count = MIDIGetNumberOfSources()
     for i in 0..<count {
       let src = MIDIGetSource(i)
       if src == 0 || portSources.contains(src) { continue }
       MIDIPortConnectSource(inputPort, src, nil)
+      current[src] = sourceName(src)
     }
+    // Tell the screen which sources came and went (not for the ones already there at start-up).
+    devicesLock.lock()
+    let before = knownSources
+    let primed = devicesPrimed
+    knownSources = current
+    devicesPrimed = true
+    devicesLock.unlock()
+    guard primed else { return }
+    let cb = onMidiDevice
+    for (ref, name) in current where before[ref] == nil {
+      DispatchQueue.main.async { cb?(["state": "connected", "name": name]) }
+    }
+    for (ref, name) in before where current[ref] == nil {
+      DispatchQueue.main.async { cb?(["state": "disconnected", "name": name]) }
+    }
+  }
+
+  private func sourceName(_ ep: MIDIEndpointRef) -> String {
+    var cf: Unmanaged<CFString>?
+    if MIDIObjectGetStringProperty(ep, kMIDIPropertyDisplayName, &cf) == noErr, let s = cf?.takeRetainedValue() {
+      return s as String
+    }
+    return "MIDI device"
+  }
+
+  /// The names of the MIDI sources (pedals, keyboards, other apps) MidiBed is listening to now.
+  func midiDeviceNames() -> [String] {
+    devicesLock.lock()
+    defer { devicesLock.unlock() }
+    return Array(Set(knownSources.values)).sorted()
   }
 
   /// Parse the MIDI packets of a controller and report presses to JS.

@@ -75,7 +75,7 @@ import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, 
 import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { RHYTHMS, rhythmDescribe, rhythmText } from './src/rhythms';
-import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiIn, onMotion, onRecording, onScene, testSweep } from './src/engine';
+import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiDevice, onMidiIn, onMotion, onRecording, onScene, testSweep } from './src/engine';
 import {
   CONTOUR_NAMES,
   DANCER_MODE_NAMES,
@@ -224,6 +224,31 @@ export default function App() {
         // The engine has already moved to this scene: follow it, without asking it to switch again.
         setState((s) => switchScene(s, e.index));
         if (latest.current.announce) announceLater(sceneLabel(latest.current, e.index), 100);
+      }
+    });
+  }, []);
+
+  // MIDI devices (a pedal) connecting and disconnecting. A disconnect is only announced if the same device has not
+  // come back within a moment, so a Bluetooth blip does not chatter.
+  const [deviceNames, setDeviceNames] = useState<string[]>([]);
+  const pendingDisconnect = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  useEffect(() => {
+    setDeviceNames(engine.midiDevices());
+    return onMidiDevice((e) => {
+      setDeviceNames(engine.midiDevices());
+      const say = latest.current.midiControl.announceDevices;
+      if (e.state === 'disconnected') {
+        if (pendingDisconnect.current[e.name]) clearTimeout(pendingDisconnect.current[e.name]);
+        pendingDisconnect.current[e.name] = setTimeout(() => {
+          delete pendingDisconnect.current[e.name];
+          if (say) announceLater(`${e.name} disconnected`, 0);
+        }, 700);
+      } else if (pendingDisconnect.current[e.name]) {
+        // it was only a blip: back before anyone was told
+        clearTimeout(pendingDisconnect.current[e.name]);
+        delete pendingDisconnect.current[e.name];
+      } else if (say) {
+        announceLater(`${e.name} connected`, 0);
       }
     });
   }, []);
@@ -3396,6 +3421,15 @@ export default function App() {
               step={50}
               format={(v) => `within ${v} milliseconds`}
             />
+            <Toggle
+              label="Say when a MIDI device connects or disconnects"
+              value={state.midiControl.announceDevices}
+              onChange={(v) => patch({ midiControl: { ...state.midiControl, announceDevices: v } })}
+              hint="For a Bluetooth pedal that drops out. A disconnect is announced after a moment, unless the device comes straight back"
+            />
+            <View accessible accessibilityLabel="MIDI devices connected" accessibilityValue={{ text: deviceNames.length ? deviceNames.join(', ') : 'none' }}>
+              <Text style={styles.note}>{`MIDI devices connected: ${deviceNames.length ? deviceNames.join(', ') : 'none'}`}</Text>
+            </View>
             <View accessible accessibilityLabel="Last MIDI received" accessibilityValue={{ text: lastMidiText }}>
               <Text style={styles.note}>{`Last MIDI received: ${lastMidiText}`}</Text>
             </View>
