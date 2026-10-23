@@ -1,0 +1,21 @@
+name: Build and publish ad hoc
+
+# Signed Ad Hoc build for the phones registered with Apple, published to the install page
+# https://yourblindally.github.io/bucket/ (see C:\Users\rusty\OneDrive\Documents\claude code folder\ios-signing-tools\README.md).
+# Run it by hand from the Actions tab. Add a push trigger once the first run works.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: YourBlindAlly/bucket/.github/workflows/build-adhoc-expo.yml@main
+    with:
+      app_name: MidiBed
+      scheme: MidiBed
+      bundle_id: com.rustyperez.midibed
+      team_id: ${{ vars.APPLE_TEAM_ID }}
+    secrets:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      BUCKET_TOKEN: ${{ secrets.BUCKET_TOKEN }}
