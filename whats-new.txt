@@ -1,0 +1,1 @@
+First signed MidiBed build. New: an ambience lane in the Loop player for seamless beds, sound pack swells as transition sounds, a choice of swells starting on the bar, and a live link to recording programs. This installs as its own app, so use Back up my settings in the old one first.
