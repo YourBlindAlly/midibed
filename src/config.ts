@@ -69,6 +69,9 @@ export type DrumState = {
   level: number;
   /** How much each hit differs from the last, percent (see drumvoice.ts). Global like the other sound controls. */
   variation: number;
+  /** The sample pack sound: which imported pack and which group of it. Global like the other sound controls. */
+  packId: string;
+  packGroup: string;
 };
 
 /** Patterns that change by themselves (scene-owned; the kick is never changed). */
@@ -308,6 +311,8 @@ export type BedState = {
   readHints: boolean;
   /** The built-in sound plays every note on its exact sample, using a short built-in delay so timing stays tight and even (the music runs about a tenth of a second behind the clock). Off = the old immediate way. Global. */
   tightTiming: boolean;
+  /** The imported sound packs (JSON text, see src/packs.ts). Global. */
+  packLib: string;
   /** The live link to a recording program (Network MIDI + record signal). Global. */
   network: NetworkState;
   bpm: number;
@@ -408,7 +413,7 @@ export type SceneData = {
   advance: AdvanceRule;
   transitionUse: TransitionUse;
   pad: Omit<PadState, 'channel'>;
-  drums: Omit<DrumState, 'name' | 'note' | 'channel' | 'voice' | 'tune' | 'decay' | 'tone' | 'snap' | 'level' | 'variation'>[];
+  drums: Omit<DrumState, 'name' | 'note' | 'channel' | 'voice' | 'tune' | 'decay' | 'tone' | 'snap' | 'level' | 'variation' | 'packId' | 'packGroup'>[];
   wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'cycleBars' | 'looseness' | 'phase' | 'smoothBeats' | 'opposes' | 'opposeAmount'>[];
   loops: Pick<LoopsState, 'enabled' | 'program' | 'sendBank' | 'bankMSB' | 'bankLSB'>;
 };
@@ -782,6 +787,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   showNotes: true,
   readHints: true,
   tightTiming: true,
+  packLib: '[]',
   network: defaultNetwork,
   journeyName: 'Journey 1',
   profiles: defaultProfileChoice,
@@ -815,7 +821,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
     { name: 'Low tom', enabled: false, note: 45, channel: 9, steps: 16, hits: 3, rotation: 6, velocity: 80, probability: 70, humanize: 30, voice: 10, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 },
     { name: 'Mid tom', enabled: false, note: 47, channel: 9, steps: 16, hits: 3, rotation: 3, velocity: 78, probability: 70, humanize: 30, voice: 11, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 },
     { name: 'High tom', enabled: false, note: 50, channel: 9, steps: 16, hits: 2, rotation: 10, velocity: 76, probability: 70, humanize: 30, voice: 12, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 },
-  ] as Omit<DrumState, keyof typeof drumExtras>[]).map((d) => ({ ...d, ...drumExtras })),
+  ] as Omit<DrumState, keyof typeof drumExtras | 'packId' | 'packGroup'>[]).map((d) => ({ ...d, ...drumExtras, packId: '', packGroup: '' })),
   drone: {
     enabled: true,
     channel: 0,

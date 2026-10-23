@@ -14,6 +14,7 @@ type Native = {
   panic(): void;
   playFill(): void;
   setDrumVoices(json: string): void;
+  setPacks(json: string): void;
   setBassVoice(json: string): void;
   setFX(json: string): void;
   setKeysVoice(json: string): void;
@@ -200,6 +201,8 @@ export const engine = {
   playFill: () => native?.playFill(),
   /** The built-in drum sounds (see src/drumvoice.ts). */
   setDrumVoices: (json: string) => native?.setDrumVoices(json),
+  /** The sound-pack groups the drums use (src/packs.ts): file paths and loudness per group. Loaded in the background. */
+  setPacks: (json: string) => native?.setPacks(json),
   /** The built-in bass voice on/off and its settings. */
   setBassVoice: (json: string) => native?.setBassVoice(json),
   setFX: (json: string) => native?.setFX(json),

@@ -47,6 +47,10 @@ public class MidiBedEngineModule: Module {
       self.engine.setDrumVoices(json: json)
     }
 
+    Function("setPacks") { (json: String) in
+      self.engine.setPacks(json: json)
+    }
+
     // Length, sample rate and channels of an audio file (for the loop library); nil if it cannot be read.
     AsyncFunction("probeLoop") { (path: String) -> [String: Any]? in
       return MidiBedEngine.probeLoop(path: path)

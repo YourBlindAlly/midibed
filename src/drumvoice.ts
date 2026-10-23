@@ -7,7 +7,10 @@
  * Only the built-in sound uses this. A drum sent to another app is just its note and channel, as before.
  */
 // New types go at the END so a saved type number keeps its meaning (the native switch uses the same numbers).
-export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Sharp shaker (cabasa-like)', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine', 'Tube shaker', 'Seed shaker (maraca)', 'Egg shaker (small)'];
+export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Sharp shaker (cabasa-like)', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine', 'Tube shaker', 'Seed shaker (maraca)', 'Egg shaker (small)', 'Sample pack'];
+
+/** The sound type that plays recorded sounds from an imported pack (src/packs.ts). */
+export const SAMPLE_PACK_TYPE = 17;
 
 export type DrumVoiceSettings = {
   voice: number; // index into DRUM_TYPES
@@ -18,6 +21,9 @@ export type DrumVoiceSettings = {
   level: number; // percent, 0..100
   /** percent, 0..100: how much each hit differs from the last. 0 = every hit is exactly the same sound (tight and even); 100 = every hit a little different, as a real shaker is. */
   variation: number;
+  /** For the sample pack sound: which pack and which group of it (src/packs.ts). */
+  packId?: string;
+  packGroup?: string;
 };
 
 export const defaultDrumVoice: DrumVoiceSettings = { voice: 0, tune: 0, decay: 100, tone: 50, snap: 50, level: 100, variation: 100 };
@@ -42,9 +48,12 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, N
 /** The list the engine takes: one entry per drum (later drums win if two share a note). */
 export function drumVoicesJson(
   drums: ({ note: number; channel: number } & Partial<DrumVoiceSettings>)[],
+  /** For each drum, the number of its sample-pack group in the list sent to the engine (-1 none). */
+  groupOf: number[] = [],
 ): string {
   return JSON.stringify(
-    drums.map((d) => ({
+    drums.map((d, i) => ({
+      ...((groupOf[i] ?? -1) >= 0 ? { group: groupOf[i] } : {}),
       note: clamp(Math.round(d.note), 0, 127),
       channel: clamp(Math.round(d.channel), 0, 15),
       type: clamp(Math.round(d.voice ?? 0), 0, DRUM_TYPES.length - 1),

@@ -64,7 +64,8 @@ import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sec
 import { ENDING_FADE_NAMES, STOP_STYLE_NAMES, barsLeftText, endingJson, endingSentence, nextStopStyle } from './src/ending';
 import { DELAY_NOTES, FxPart, FxPartState, panText, uglyFxJson } from './src/uglyfx';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
-import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
+import { DRUM_TYPES, SAMPLE_PACK_TYPE, drumTuneText, drumVoicesJson } from './src/drumvoice';
+import { MAX_PACK_GROUPS, cleanGroupName, groupNames, levelOf, packGroupsForEngine, packNames, parsePacks, setPackDir, withoutPack, type PackSound } from './src/packs';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { createPedal } from './src/pedal';
@@ -158,6 +159,7 @@ try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   fsApi = require('expo-file-system');
   setLoopDir(new fsApi.Directory(fsApi.Paths.document, 'loops').uri);
+  setPackDir(new fsApi.Directory(fsApi.Paths.document, 'packs').uri);
 } catch {
   fsApi = null;
 }
@@ -736,12 +738,22 @@ export default function App() {
   };
 
   // The built-in drum sounds: send each drum's type and settings whenever they change.
-  const drumVoicesText = drumVoicesJson(state.drums);
+  // Sound packs: which groups of recorded sounds the drums use (loaded by the engine in the background), and each drum's group.
+  const packLibrary = parsePacks(state.packLib);
+  const packEngine = packGroupsForEngine(packLibrary, state.drums, SAMPLE_PACK_TYPE);
+  const packsText = JSON.stringify({ groups: packEngine.groups });
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setPacks(packsText), 60);
+    return () => clearTimeout(t);
+  }, [packsText, ready]);
+  const drumVoicesText = drumVoicesJson(state.drums, packEngine.slotGroup);
   useEffect(() => {
     if (!ready) return;
     const t = setTimeout(() => engine.setDrumVoices(drumVoicesText), 80);
     return () => clearTimeout(t);
   }, [drumVoicesText, ready]);
+
 
   // The built-in bass voice: send its on/off and settings whenever they change (and at Play).
   const bassJson = bassVoiceJson(state.bassVoice);
@@ -1082,6 +1094,81 @@ export default function App() {
   const [loopInstrument, setLoopInstrument] = useState('');
   const patchLane = (i: number, change: Partial<BedState['lanes'][number]>) =>
     setState((s) => ({ ...s, lanes: s.lanes.map((l, k) => (k === i ? { ...l, ...change } : l)) }));
+  // Sound packs (Setup > Sound packs): folders of recorded sounds, each subfolder a group.
+  const [packNote, setPackNote] = useState('');
+  const [packView, setPackView] = useState(0);
+  const packSafe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '_');
+  const importPackFolder = async () => {
+    if (!fsApi) {
+      setPackNote('Adding packs works in the app on the phone');
+      return;
+    }
+    try {
+      const picked = await fsApi.Directory.pickDirectoryAsync();
+      const packName = packSafe(picked.name);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const found: { file: any; folder: string }[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const walk = (d: any, folderName: string, depth: number) => {
+        if (depth > 4) return;
+        for (const item of d.list()) {
+          if (item instanceof fsApi.Directory) walk(item, depth === 0 ? item.name : folderName, depth + 1);
+          else if (isAudioFile(item.name)) found.push({ file: item, folder: folderName });
+        }
+      };
+      walk(picked, 'All', 0);
+      if (found.length === 0) {
+        setPackNote('No audio files found in that folder');
+        announceLater('No audio files found', 100);
+        return;
+      }
+      announceLater(`Adding ${found.length} sounds`, 100);
+      const dest = new fsApi.Directory(fsApi.Paths.document, 'packs', packName);
+      dest.create({ intermediates: true, idempotent: true });
+      const added: PackSound[] = [];
+      for (const { file, folder } of found) {
+        const groupDir = new fsApi.Directory(dest, packSafe(folder));
+        groupDir.create({ intermediates: true, idempotent: true });
+        const target = new fsApi.File(groupDir, file.name);
+        if (!target.exists) await file.copy(target);
+        added.push({ pack: packName, group: cleanGroupName(folder), folder, file: `${packName}/${packSafe(folder)}/${file.name}`, level: levelOf(file.name) });
+      }
+      setState((s) => ({ ...s, packLib: JSON.stringify([...withoutPack(parsePacks(s.packLib), packName), ...added]) }));
+      const groupCount = new Set(added.map((a) => a.group)).size;
+      setPackNote(`Added the pack ${packName}: ${added.length} sounds in ${groupCount} ${groupCount === 1 ? 'group' : 'groups'}.`);
+      announceLater(`Added ${packName}`, 300);
+    } catch {
+      setPackNote('Could not add that folder');
+      announceLater('Could not add that folder', 100);
+    }
+  };
+  const removePack = (pack: string) => {
+    Alert.alert('Remove the pack', `Remove ${pack} and delete the copies MidiBed made? Your original files are not touched.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => {
+          try {
+            if (fsApi) {
+              const dir = new fsApi.Directory(fsApi.Paths.document, 'packs', pack);
+              if (dir.exists) dir.delete();
+            }
+          } catch {
+            // the entries go either way
+          }
+          setState((s) => ({
+            ...s,
+            packLib: JSON.stringify(withoutPack(parsePacks(s.packLib), pack)),
+            drums: s.drums.map((d) => (d.packId === pack ? { ...d, packId: '', packGroup: '' } : d)),
+          }));
+          setPackView(0);
+          setPackNote(`Removed ${pack}`);
+          announceLater(`Removed ${pack}`, 200);
+        },
+      },
+    ]);
+  };
   const importLoopFolder = async () => {
     if (!fsApi) {
       setImportNote('Adding loops works in the app on the phone');
@@ -2186,6 +2273,28 @@ export default function App() {
               </View>
               <Section title={`${d.name}: sound of the built-in drum`} id={`${d.name}: Sound of the built-in drum`} inner>
               <Stepper label={`${d.name} built-in sound`} value={d.voice} onChange={(v) => patchDrum(i, { voice: v })} min={0} max={DRUM_TYPES.length - 1} format={(v) => DRUM_TYPES[v]} hint="Which sound the built-in drum plays for this drum, whatever its note. Another app ignores this" />
+              {d.voice === SAMPLE_PACK_TYPE && (
+                <>
+                  <Stepper
+                    label={`${d.name} sound pack`}
+                    value={Math.max(0, packNames(packLibrary).indexOf(d.packId) + 1)}
+                    onChange={(v) => patchDrum(i, { packId: v <= 0 ? '' : packNames(packLibrary)[v - 1], packGroup: '' })}
+                    min={0}
+                    max={packNames(packLibrary).length}
+                    format={(v) => (v === 0 ? (packNames(packLibrary).length ? 'none chosen' : 'none added yet, see Setup') : packNames(packLibrary)[v - 1])}
+                    hint="Which pack of your recorded sounds this drum plays. Add packs on the Setup tab"
+                  />
+                  <Stepper
+                    label={`${d.name} sound group`}
+                    value={Math.max(0, groupNames(packLibrary, d.packId).indexOf(d.packGroup) + 1)}
+                    onChange={(v) => patchDrum(i, { packGroup: v <= 0 ? '' : groupNames(packLibrary, d.packId)[v - 1] })}
+                    min={0}
+                    max={groupNames(packLibrary, d.packId).length}
+                    format={(v) => (v === 0 ? 'none chosen' : `${groupNames(packLibrary, d.packId)[v - 1]}, ${packLibrary.filter((p) => p.pack === d.packId && p.group === groupNames(packLibrary, d.packId)[v - 1]).length} sounds`)}
+                    hint="Each hit plays one sound from this group at random, never the same twice running, louder hits favouring louder sounds. Tune and decay shape it; variation is how much the pick and pitch wander"
+                  />
+                </>
+              )}
               <Stepper label={`${d.name} tune`} value={d.tune} onChange={(v) => patchDrum(i, { tune: v })} min={-12} max={12} format={drumTuneText} />
               <Stepper label={`${d.name} decay`} value={d.decay} onChange={(v) => patchDrum(i, { decay: v })} min={25} max={300} step={5} bigStep={25} format={(v) => `${v} percent`} hint="How long the sound rings" />
               <Stepper label={`${d.name} tone`} value={d.tone} onChange={(v) => patchDrum(i, { tone: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="Darker or brighter" />
@@ -3468,6 +3577,36 @@ export default function App() {
             </View>
           </Section>
 
+          <Section title="Sound packs">
+            <Note>
+              A pack is a folder of your own recorded sounds, with a subfolder for each group (for example solid hits, light ticks, swells). Choose the folder and MidiBed copies the sounds in; its subfolders become the groups. Then give a drum the built-in sound called Sample pack on the Parts tab and choose the pack and a group. Up to {MAX_PACK_GROUPS} groups can be in use at once.
+            </Note>
+            <ActionButton label="Add a sound pack folder" onPress={() => void importPackFolder()} />
+            {packNote ? (
+              <View accessible accessibilityLabel="Sound pack status" accessibilityValue={{ text: packNote }}>
+                <Text style={styles.note}>{packNote}</Text>
+              </View>
+            ) : null}
+            {packNames(packLibrary).length > 0 && (
+              <>
+                <Stepper
+                  label="Pack"
+                  value={Math.min(packView, packNames(packLibrary).length - 1)}
+                  onChange={setPackView}
+                  min={0}
+                  max={packNames(packLibrary).length - 1}
+                  format={(v) => {
+                    const n = packNames(packLibrary)[v];
+                    return `${n}, ${packLibrary.filter((p) => p.pack === n).length} sounds`;
+                  }}
+                />
+                <View accessible accessibilityLabel="Groups in this pack" accessibilityValue={{ text: groupNames(packLibrary, packNames(packLibrary)[Math.min(packView, packNames(packLibrary).length - 1)]).join(', ') }}>
+                  <Text style={styles.note}>{`Groups: ${groupNames(packLibrary, packNames(packLibrary)[Math.min(packView, packNames(packLibrary).length - 1)]).join(', ')}`}</Text>
+                </View>
+                <ActionButton label="Remove this pack" onPress={() => removePack(packNames(packLibrary)[Math.min(packView, packNames(packLibrary).length - 1)])} />
+              </>
+            )}
+          </Section>
           <Section title="Back up and restore my settings">
             <Note>
               Saves every setting (journeys, scenes, favorites, the pedal buttons and the rest) to one file, so you can carry them to another install of MidiBed, for example the signed version. The file is in the backup folder of the MidiBed folder in the Files app. To restore, choose Restore and pick the file; you can look in the On My iPhone area for the other MidiBed folder. The loops themselves are audio and are not inside the file.

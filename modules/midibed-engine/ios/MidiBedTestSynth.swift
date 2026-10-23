@@ -59,7 +59,7 @@ final class MidiBedTestSynth {
   }
 
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 sharp shaker (cabasa-like), 7 tom,
-  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
+  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker, 17 sample pack (a recorded sound from an imported pack) (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
   private struct DrumVoice {
     var active = false
@@ -81,6 +81,9 @@ final class MidiBedTestSynth {
     var s1: Float = 0   // spare filter state (the tube shaker's body)
     var s2: Float = 0
     var rng: UInt32 = 1 // this hit's own noise (see DrumPatch.variation)
+    var sp: UnsafePointer<Float>? = nil // a sample-pack hit (kind 17): the recorded sound being played, its length and position
+    var sn = 0
+    var spos: Float = 0
   }
 
   /// A drum's settings, looked up by MIDI note on channel 10. Without one, the General MIDI note decides.
@@ -94,6 +97,8 @@ final class MidiBedTestSynth {
     var level: Float = 1
     /// 0 = every hit uses the same noise (identical, tight and even), 1 = every hit a different noise.
     var variation: Float = 1
+    /** For the sample pack sound: the number of its group in the pack tables (-1 none). */
+    var group = -1
   }
 
   private let engine = AVAudioEngine()
@@ -125,6 +130,31 @@ final class MidiBedTestSynth {
   private var pads: UnsafeMutablePointer<PadVoice>
   private var drums: UnsafeMutablePointer<DrumVoice>
   private var drumPatches: UnsafeMutablePointer<DrumPatch>
+
+  // Sample packs (src/packs.ts): groups of recorded sounds. The control side fills these tables under packLock; the audio
+  // thread only reads them (with a try-lock) when a pack drum is hit. The audio of every file ever loaded stays in
+  // packCache for the life of the app, so a voice that is still playing never loses its sound.
+  private struct PackSample {
+    var ptr: UnsafePointer<Float>? = nil
+    var count: Int32 = 0
+    /// 1 soft, 2 medium, 3 loud.
+    var level: Float = 2
+  }
+  private final class PackAudio {
+    let data: UnsafeMutablePointer<Float>
+    let count: Int
+    init(data: UnsafeMutablePointer<Float>, count: Int) {
+      self.data = data
+      self.count = count
+    }
+    deinit { data.deallocate() }
+  }
+  private let packTable = UnsafeMutablePointer<PackSample>.allocate(capacity: 16 * 256)
+  private let packCount = UnsafeMutablePointer<Int32>.allocate(capacity: 16)
+  private let packLast = UnsafeMutablePointer<Int32>.allocate(capacity: 16)
+  private let packLock = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
+  private var packCache: [String: PackAudio] = [:]
+  private let packQueue = DispatchQueue(label: "midibed.packs", qos: .userInitiated)
   private var keysVoices: UnsafeMutablePointer<KeysVoice>
   private let keysCount = 12
   private var keysTremPhase: Float = 0
@@ -144,7 +174,7 @@ final class MidiBedTestSynth {
   /// 0.1; worked out offline, scratchpad pad_check.py).
   private static let padWaveGains: [Float] = [1, 1.215, 1.4, 1.418, 1.251, 1.033, 0.991, 0.951, 0.913, 0.878, 0.845]
   private let padCount = 16
-  private let drumCount = 8
+  private let drumCount = 16
 
   // Transition noise (see "Transition noise" below). Its commands travel in their own
   // small ring, protected by the same lock as the MIDI events.
@@ -205,11 +235,83 @@ final class MidiBedTestSynth {
   /// The MIDI channel the electric piano plays on (-1 none): notes there use the keys voices.
   var keysChannel = -1
 
+  /// Control side: load the sounds of the sample-pack groups the drums use (in the background; a file already loaded is not
+  /// loaded again) and replace the group tables. Each group is a list of file paths with a loudness class (1 soft to 3 loud).
+  func loadPacks(_ groups: [[(path: String, level: Float)]]) {
+    let rate = Double(sampleRate)
+    packQueue.async { [weak self] in
+      guard let self = self else { return }
+      var tables: [[PackSample]] = []
+      for g in groups.prefix(16) {
+        var arr: [PackSample] = []
+        for f in g.prefix(256) {
+          var audio = self.packCache[f.path]
+          if audio == nil {
+            audio = self.loadPackAudio(f.path, rate: rate)
+            if let a = audio { self.packCache[f.path] = a }
+          }
+          if let a = audio, a.count > 16 {
+            arr.append(PackSample(ptr: UnsafePointer(a.data), count: Int32(a.count), level: f.level))
+          }
+        }
+        tables.append(arr)
+      }
+      os_unfair_lock_lock(self.packLock)
+      for gi in 0..<16 {
+        let arr = gi < tables.count ? tables[gi] : []
+        self.packCount[gi] = Int32(arr.count)
+        for (k, s) in arr.enumerated() { self.packTable[gi * 256 + k] = s }
+        self.packLast[gi] = -1
+      }
+      os_unfair_lock_unlock(self.packLock)
+    }
+  }
+
+  /// Read one audio file as mono floats at the synth's sample rate (at most 30 seconds).
+  private func loadPackAudio(_ path: String, rate: Double) -> PackAudio? {
+    guard let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { return nil }
+    let fmt = file.processingFormat
+    let frames = AVAudioFrameCount(min(Int64(file.length), Int64(fmt.sampleRate * 30)))
+    guard frames > 0, let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frames) else { return nil }
+    do { try file.read(into: buf, frameCount: frames) } catch { return nil }
+    guard let ch = buf.floatChannelData else { return nil }
+    let n = Int(buf.frameLength)
+    let nch = Int(fmt.channelCount)
+    if n < 16 || nch < 1 { return nil }
+    var mono = [Float](repeating: 0, count: n)
+    for c in 0..<nch {
+      let p = ch[c]
+      for i in 0..<n { mono[i] += p[i] }
+    }
+    if nch > 1 {
+      let g = 1 / Float(nch)
+      for i in 0..<n { mono[i] *= g }
+    }
+    let ratio = fmt.sampleRate / max(8000, rate) // source frames per output frame
+    let outN = ratio == 1 ? n : max(16, Int(Double(n) / ratio))
+    let out = UnsafeMutablePointer<Float>.allocate(capacity: outN + 2)
+    if ratio == 1 {
+      for i in 0..<n { out[i] = mono[i] }
+    } else {
+      for i in 0..<outN {
+        let pos = Double(i) * ratio
+        let i0 = Int(pos)
+        let fr = Float(pos - Double(i0))
+        let a = mono[min(i0, n - 1)]
+        let bb = mono[min(i0 + 1, n - 1)]
+        out[i] = a + (bb - a) * fr
+      }
+    }
+    out[outN] = 0
+    out[outN + 1] = 0
+    return PackAudio(data: out, count: outN)
+  }
+
   /// Control side: the drums' sound settings, by MIDI note. Replaces the whole table.
-  func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float, variation: Float)]) {
+  func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float, variation: Float, group: Int)]) {
     for i in 0..<128 { drumPatches[i] = DrumPatch() }
     for d in list where d.note >= 0 && d.note < 128 {
-      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(16, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level, variation: max(0, min(1, d.variation)))
+      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(17, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level, variation: max(0, min(1, d.variation)), group: d.group)
     }
   }
 
@@ -294,6 +396,10 @@ final class MidiBedTestSynth {
     noiseRing.initialize(repeating: NoiseCommand(), count: noiseCapacity)
     noiseVoices = UnsafeMutablePointer<NoiseVoice>.allocate(capacity: noiseVoiceCount)
     noiseVoices.initialize(repeating: NoiseVoice(), count: noiseVoiceCount)
+    packTable.initialize(repeating: PackSample(), count: 16 * 256)
+    packCount.initialize(repeating: 0, count: 16)
+    packLast.initialize(repeating: -1, count: 16)
+    packLock.initialize(to: os_unfair_lock_s())
     fMode.initialize(repeating: 0, count: 4)
     fTarget.initialize(repeating: 1000, count: 4)
     fRes.initialize(repeating: 0, count: 4)
@@ -318,6 +424,10 @@ final class MidiBedTestSynth {
     pads.deallocate()
     drums.deallocate()
     drumPatches.deallocate()
+    packTable.deallocate()
+    packCount.deallocate()
+    packLast.deallocate()
+    packLock.deallocate()
     keysVoices.deallocate()
     keysParams.deallocate()
     padParams.deallocate()
@@ -569,6 +679,52 @@ final class MidiBedTestSynth {
         v.tone = patch.tone
         v.snap = patch.snap
         v.level = patch.level
+        if v.kind == 17 {
+          // A recorded sound from a sample pack: pick one of the group's sounds. Louder hits favour louder sounds, and the
+          // one played last time is left out, so the same sound never plays twice running.
+          let g = patch.group
+          guard g >= 0, g < 16, os_unfair_lock_trylock(packLock) else { return }
+          defer { os_unfair_lock_unlock(packLock) }
+          let n = Int(packCount[g])
+          if n == 0 { return }
+          let target: Float = 1 + 2 * max(0, min(1, velocity))
+          let last = Int(packLast[g])
+          var pick = 0
+          if patch.variation < 0.05 {
+            var best = Float.greatestFiniteMagnitude
+            for k in 0..<n {
+              if n > 1 && k == last { continue }
+              let d = abs(packTable[g * 256 + k].level - target)
+              if d < best {
+                best = d
+                pick = k
+              }
+            }
+          } else {
+            var wsum: Float = 0
+            for k in 0..<n {
+              if n > 1 && k == last { continue }
+              let d = packTable[g * 256 + k].level - target
+              wsum += expf(-d * d * 1.6) + 0.04
+            }
+            var r = ((nextNoise() + 1) / 2) * wsum
+            for k in 0..<n {
+              if n > 1 && k == last { continue }
+              let d = packTable[g * 256 + k].level - target
+              r -= expf(-d * d * 1.6) + 0.04
+              pick = k
+              if r <= 0 { break }
+            }
+          }
+          packLast[g] = Int32(pick)
+          let s = packTable[g * 256 + pick]
+          guard let p = s.ptr else { return }
+          v.sp = p
+          v.sn = Int(s.count)
+          v.spos = 0
+          // a little pitch wander, as much as the drum's variation allows
+          v.tuneRatio *= powf(2, nextNoise() * 0.25 * patch.variation / 12)
+        }
       } else {
         // No settings for this note: the General MIDI drum map decides.
         switch note {
@@ -1215,6 +1371,21 @@ final class MidiBedTestSynth {
           let shell = (drums[i].lp2 - drums[i].hpPrev) * 0.4 * (0.5 + tone) * expf(-t * 28 / D)
           s = (body * 0.55 + stick + shell) * 0.91
           alive = t <= 0.9 * D + 0.05
+        case 17: // a recorded sound from a sample pack: played from its buffer at the tuned speed, with a shorter ring if decay is turned down
+          if let sp = drums[i].sp {
+            let pos = drums[i].spos
+            let ip = Int(pos)
+            if ip + 1 >= drums[i].sn {
+              alive = false
+            } else {
+              let fr = pos - Float(ip)
+              s = sp[ip] * (1 - fr) + sp[ip + 1] * fr
+              drums[i].spos = pos + f
+              if D < 1 { s *= expf(-t / (0.4 * D)) }
+            }
+          } else {
+            alive = false
+          }
         default: // wood block
           s = sinf(2 * Float.pi * 820 * f * t) * expf(-t * 45 / D) * 0.7
           alive = t <= 0.25 * D + 0.02

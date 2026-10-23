@@ -822,6 +822,7 @@ final class MidiBedEngine {
       var snap: Double
       var level: Double
       var variation: Double?
+      var group: Int?
     }
     guard let data = json.data(using: .utf8), let list = try? JSONDecoder().decode([DrumVoiceConfig].self, from: data) else {
       NSLog("MidiBedEngine: could not decode drum voices")
@@ -829,8 +830,24 @@ final class MidiBedEngine {
     }
     queue.async {
       self.synth.configureDrums(
-        list.map { (note: $0.note, kind: $0.type, tune: Float($0.tune), decay: Float($0.decay), tone: Float($0.tone), snap: Float($0.snap), level: Float($0.level), variation: Float($0.variation ?? 1)) })
+        list.map { (note: $0.note, kind: $0.type, tune: Float($0.tune), decay: Float($0.decay), tone: Float($0.tone), snap: Float($0.snap), level: Float($0.level), variation: Float($0.variation ?? 1), group: $0.group ?? -1) })
     }
+  }
+
+  /// The sample-pack groups the drums use: each group a list of audio file paths with a loudness class. Loaded in the
+  /// background by the synth; kept out of the main configuration like the other sound settings.
+  func setPacks(json: String) {
+    struct PackFile: Decodable {
+      var path: String
+      var level: Double
+    }
+    struct PackGroup: Decodable { var files: [PackFile] }
+    struct PackConfig: Decodable { var groups: [PackGroup] }
+    guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(PackConfig.self, from: data) else {
+      NSLog("MidiBedEngine: could not decode sample packs")
+      return
+    }
+    synth.loadPacks(c.groups.map { g in g.files.map { (path: $0.path, level: Float($0.level)) } })
   }
 
   /// The built-in bass voice: whether it is on, whether the built-in sound plays only it, and its settings.

@@ -207,7 +207,7 @@ describe('softer shakers', () => {
     expect(swift).toContain('case 14: // tube shaker');
     expect(swift).toContain('case 15: // seed shaker');
     expect(swift).toContain('case 16: // small egg shaker');
-    expect(swift).toContain('min(16, d.kind)');
+    expect(swift).toContain('min(17, d.kind)');
   });
 });
 

@@ -59,7 +59,7 @@ describe('built-in drum sounds', () => {
     const path = require('path');
     const swift: string = fs.readFileSync(path.join(__dirname, '..', 'modules', 'midibed-engine', 'ios', 'MidiBedTestSynth.swift'), 'utf8');
     const doc = swift.slice(swift.indexOf('/// One drum hit.'), swift.indexOf('private struct DrumVoice'));
-    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 sharp shaker', '7 tom', '8 wood block', '9 tambourine', '10 low tom', '11 mid tom', '12 high tom', '13 jingle tambourine', '14 tube shaker', '15 seed shaker', '16 egg shaker'].forEach((s) => expect(doc).toContain(s));
-    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'sharp shaker (cabasa-like)', 'tom', 'wood block', 'tambourine', 'low tom', 'mid tom', 'high tom', 'jingle tambourine', 'tube shaker', 'seed shaker (maraca)', 'egg shaker (small)']);
+    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 sharp shaker', '7 tom', '8 wood block', '9 tambourine', '10 low tom', '11 mid tom', '12 high tom', '13 jingle tambourine', '14 tube shaker', '15 seed shaker', '16 egg shaker', '17 sample pack'].forEach((s) => expect(doc).toContain(s));
+    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'sharp shaker (cabasa-like)', 'tom', 'wood block', 'tambourine', 'low tom', 'mid tom', 'high tom', 'jingle tambourine', 'tube shaker', 'seed shaker (maraca)', 'egg shaker (small)', 'sample pack']);
   });
 });
