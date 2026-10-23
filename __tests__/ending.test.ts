@@ -5,7 +5,7 @@ import { MIDI_ACTIONS } from '../src/midicontrol';
 
 describe('orchestrated stop', () => {
   it('starts as the old stop-at-once, with a cut, a final kick and a Boom ready', () => {
-    expect(defaultEnding).toEqual({ style: 0, fade: 0, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 60, holdBeats: 0 });
+    expect(defaultEnding).toEqual({ style: 0, fade: 0, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 60, holdBeats: 0, noiseSource: 0, noisePackId: '', noisePackGroup: '' });
     expect(STOP_STYLE_NAMES).toHaveLength(4);
   });
 

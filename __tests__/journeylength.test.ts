@@ -79,6 +79,6 @@ describe('End the piece', () => {
     expect(e).toContain('if endFromAdvance, endTick >= 0 { endTick += ticksPerBeat * beatsPerBar }');
     expect(e).toContain('if endFromAdvance, cfg.advance.mode != 4 {');
     const c = fs.readFileSync('src/config.ts', 'utf8');
-    expect(c).toContain('...(s.advance.mode === 4 ? { ending: endingObject(s.ending) } : {})');
+    expect(c).toContain('...(s.advance.mode === 4 ? { ending: endingObject(s.ending, plan.ending) } : {})');
   });
 });

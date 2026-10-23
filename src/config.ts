@@ -11,6 +11,7 @@ import { DancerState, defaultDancer, makePhrases } from './dancer';
 import { buildBassColorNotes } from './bassrhythm';
 import { KeysVoiceState, defaultKeysVoice } from './keysvoice';
 import { PadVoiceState, defaultPadVoice } from './padvoice';
+import { groupsForWants, parsePacks } from './packs';
 import { NetworkState, defaultNetwork } from './network';
 import { KEYS_RHYTHMS, KeysState, clampKeysRhythm, defaultKeys, keysMask } from './keys';
 import type { Layer } from './shortcuts';
@@ -21,6 +22,7 @@ import {
   RecurringState,
   TransitionUse,
   TransitionsState,
+  TransitionSlot,
   defaultRecurring,
   defaultTransitionUse,
   defaultTransitions,
@@ -643,6 +645,39 @@ export function applyFavorite(s: BedState, i: number, fav: Favorite): BedState {
 }
 
 /** Keep a key offset in -6..5 (the nearest way round the octave). */
+/**
+ * Which sound-pack groups the engine loads, and the number of each user's group: the drums that use the Sample pack sound,
+ * then the transition sounds, the recurring sound and the ending sound that take a swell from a pack. Both what is sent to
+ * the engine as the packs and every group number sent with the settings come from here, so they always agree.
+ */
+export function packPlan(s: Pick<BedState, 'packLib' | 'drums' | 'transitions' | 'recurring' | 'ending'>) {
+  const wantOf = (o: { source?: number; noiseSource?: number; packId?: string; packGroup?: string; noisePackId?: string; noisePackGroup?: string }, ending = false) => {
+    const on = ending ? o.noiseSource === 1 : o.source === 1;
+    const id = (ending ? o.noisePackId : o.packId) ?? '';
+    const group = (ending ? o.noisePackGroup : o.packGroup) ?? '';
+    return on ? { packId: id, packGroup: group } : null;
+  };
+  const wants = [
+    ...s.drums.map((d) => (d.voice === 17 ? { packId: d.packId, packGroup: d.packGroup } : null)),
+    wantOf(s.transitions.entrance),
+    wantOf(s.transitions.drumBreak),
+    wantOf(s.transitions.drumReturn),
+    wantOf(s.recurring),
+    wantOf(s.ending, true),
+  ];
+  const r = groupsForWants(parsePacks(s.packLib), wants);
+  const n = s.drums.length;
+  return {
+    groups: r.groups,
+    drumGroup: r.index.slice(0, n),
+    entrance: r.index[n],
+    drumBreak: r.index[n + 1],
+    drumReturn: r.index[n + 2],
+    recurring: r.index[n + 3],
+    ending: r.index[n + 4],
+  };
+}
+
 export function wrapOffset(o: number): number {
   return ((((Math.round(o) + 6) % 12) + 12) % 12) - 6;
 }
@@ -1319,7 +1354,11 @@ export function migrateState(rawInput0: unknown): BedState {
 }
 
 /** Shape the native engine expects (MidiBedConfig in MidiBedEngine.swift). */
+const slotForEngine = (t: { on: boolean; shape: number; color: number; beats: number; level: number }) => ({ on: t.on, shape: t.shape, color: t.color, beats: t.beats, level: t.level });
+const sampleOf = (i: number) => (i >= 0 ? { sample: i } : {});
+
 export function toEngineJson(s: BedState): string {
+  const plan = packPlan(s);
   return JSON.stringify({
     bpm: s.bpm,
     swing: s.swing / 100,
@@ -1342,7 +1381,7 @@ export function toEngineJson(s: BedState): string {
           bars: advanceBars(s.advance, s.harmony),
           target: pickTarget(s.advance, s.activeScene, s.scenes.length, 0),
           // "End the piece": the ending to play when this scene's bars are up
-          ...(s.advance.mode === 4 ? { ending: endingObject(s.ending) } : {}),
+          ...(s.advance.mode === 4 ? { ending: endingObject(s.ending, plan.ending) } : {}),
         },
     loops: {
       enabled: s.solo ? s.solo === 'loops' : s.loops.enabled,
@@ -1411,9 +1450,9 @@ export function toEngineJson(s: BedState): string {
     motion: s.motion,
     transitions: {
       minLeadBeats: s.transitionMinEighths / 2,
-      entrance: { ...s.transitions.entrance, on: s.transitions.entrance.on && s.transitionUse.entrance, level: s.transitions.entrance.level / 100 },
-      drumBreak: { ...s.transitions.drumBreak, on: s.transitions.drumBreak.on && s.transitionUse.drumBreak, level: s.transitions.drumBreak.level / 100 },
-      drumReturn: { ...s.transitions.drumReturn, on: s.transitions.drumReturn.on && s.transitionUse.drumReturn, level: s.transitions.drumReturn.level / 100 },
+      entrance: { ...slotForEngine(s.transitions.entrance), on: s.transitions.entrance.on && s.transitionUse.entrance, level: s.transitions.entrance.level / 100, ...sampleOf(plan.entrance) },
+      drumBreak: { ...slotForEngine(s.transitions.drumBreak), on: s.transitions.drumBreak.on && s.transitionUse.drumBreak, level: s.transitions.drumBreak.level / 100, ...sampleOf(plan.drumBreak) },
+      drumReturn: { ...slotForEngine(s.transitions.drumReturn), on: s.transitions.drumReturn.on && s.transitionUse.drumReturn, level: s.transitions.drumReturn.level / 100, ...sampleOf(plan.drumReturn) },
       recurring: {
         on: s.recurring.on && s.transitionUse.recurring,
         when: s.recurring.when,
@@ -1426,6 +1465,7 @@ export function toEngineJson(s: BedState): string {
         color: s.recurring.color,
         beats: s.recurring.beats,
         level: s.recurring.level / 100,
+        ...sampleOf(plan.recurring),
       },
     },
     tightTiming: s.tightTiming,

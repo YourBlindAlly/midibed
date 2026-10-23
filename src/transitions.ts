@@ -27,6 +27,10 @@ export type TransitionSlot = {
   color: number; // index into NOISE_COLOR_NAMES
   beats: number; // lead-in rise time, or how long the sound lasts
   level: number; // percent
+  /** 0 the noise generator, 1 a recorded swell from a sound pack (then pack and group say which; shape, colour and beats are not used). */
+  source: number;
+  packId: string;
+  packGroup: string;
 };
 
 /**
@@ -59,9 +63,9 @@ export const defaultTransitionUse: TransitionUse = { entrance: true, drumBreak: 
 export const NOISE_VERSION = 2;
 
 export const defaultTransitions: TransitionsState = {
-  entrance: { on: false, shape: 1, color: 1, beats: 8, level: 25 },
-  drumBreak: { on: true, shape: 3, color: 0, beats: 4, level: 50 },
-  drumReturn: { on: false, shape: 1, color: 0, beats: 8, level: 25 },
+  entrance: { on: false, shape: 1, color: 1, beats: 8, level: 25, source: 0, packId: '', packGroup: '' },
+  drumBreak: { on: true, shape: 3, color: 0, beats: 4, level: 50, source: 0, packId: '', packGroup: '' },
+  drumReturn: { on: false, shape: 1, color: 0, beats: 8, level: 25, source: 0, packId: '', packGroup: '' },
 };
 
 export function isLeadIn(shape: number): boolean {
@@ -122,6 +126,10 @@ export type RecurringState = {
   color: number;
   beats: number; // one length for every shape
   level: number; // percent
+  /** 0 the noise generator, 1 a recorded swell from a sound pack (the shape settings are then not used). */
+  source: number;
+  packId: string;
+  packGroup: string;
 };
 
 export const RECURRING_WHEN_NAMES = ['Every few bars', 'End of each chord loop'];
@@ -140,6 +148,9 @@ export const defaultRecurring: RecurringState = {
   color: 1,
   beats: 8,
   level: 25,
+  source: 0,
+  packId: '',
+  packGroup: '',
 };
 
 /** Bars between recurring sounds. */

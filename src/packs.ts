@@ -100,15 +100,30 @@ export function packGroupsForEngine(
   drums: { voice: number; packId?: string; packGroup?: string }[],
   samplePackType: number,
 ): { groups: { files: { path: string; level: number }[] }[]; slotGroup: number[] } {
+  const r = groupsForWants(
+    lib,
+    drums.map((d) => (d.voice === samplePackType ? { packId: d.packId ?? '', packGroup: d.packGroup ?? '' } : null)),
+  );
+  return { groups: r.groups, slotGroup: r.index };
+}
+
+/**
+ * The groups the engine must load for a list of wishes (a pack and a group, or null for none), each group once, and for
+ * each wish the number of its group in that list (-1 when it has none, the pack is missing, or 16 are already in use).
+ */
+export function groupsForWants(
+  lib: PackSound[],
+  wants: ({ packId: string; packGroup: string } | null)[],
+): { groups: { files: { path: string; level: number }[] }[]; index: number[] } {
   const keys: string[] = [];
   const groups: { files: { path: string; level: number }[] }[] = [];
-  const slotGroup = drums.map((d) => {
-    if (d.voice !== samplePackType || !d.packId || !d.packGroup) return -1;
-    const key = `${d.packId}\u0000${d.packGroup}`;
+  const index = wants.map((w) => {
+    if (!w || !w.packId || !w.packGroup) return -1;
+    const key = `${w.packId}\u0000${w.packGroup}`;
     let at = keys.indexOf(key);
     if (at < 0) {
       if (keys.length >= MAX_PACK_GROUPS) return -1;
-      const files = soundsIn(lib, d.packId, d.packGroup).map((s) => ({ path: packPath(s.file), level: s.level }));
+      const files = soundsIn(lib, w.packId, w.packGroup).map((s) => ({ path: packPath(s.file), level: s.level }));
       if (files.length === 0) return -1;
       keys.push(key);
       groups.push({ files });
@@ -116,5 +131,5 @@ export function packGroupsForEngine(
     }
     return at;
   });
-  return { groups, slotGroup };
+  return { groups, index };
 }

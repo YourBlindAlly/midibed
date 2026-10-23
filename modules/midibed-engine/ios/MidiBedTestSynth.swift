@@ -139,13 +139,17 @@ final class MidiBedTestSynth {
     var count: Int32 = 0
     /// 1 soft, 2 medium, 3 loud.
     var level: Float = 2
+    /// Seconds from the start to where the sound is loudest (a swell is placed so this lands on a bar line).
+    var peak: Float = 0
   }
   private final class PackAudio {
     let data: UnsafeMutablePointer<Float>
     let count: Int
-    init(data: UnsafeMutablePointer<Float>, count: Int) {
+    let peak: Float
+    init(data: UnsafeMutablePointer<Float>, count: Int, peak: Float) {
       self.data = data
       self.count = count
+      self.peak = peak
     }
     deinit { data.deallocate() }
   }
@@ -251,7 +255,7 @@ final class MidiBedTestSynth {
             if let a = audio { self.packCache[f.path] = a }
           }
           if let a = audio, a.count > 16 {
-            arr.append(PackSample(ptr: UnsafePointer(a.data), count: Int32(a.count), level: f.level))
+            arr.append(PackSample(ptr: UnsafePointer(a.data), count: Int32(a.count), level: f.level, peak: a.peak))
           }
         }
         tables.append(arr)
@@ -265,6 +269,24 @@ final class MidiBedTestSynth {
       }
       os_unfair_lock_unlock(self.packLock)
     }
+  }
+
+  private var transLast = [Int](repeating: -1, count: 16)
+
+  /// Control side: choose a swell from a pack group for a transition (random, never the same twice running), with where
+  /// its loudest part is and how long it is. nil if the group has nothing loaded.
+  func pickTransitionSample(group g: Int) -> (ptr: UnsafePointer<Float>, count: Int, peak: Double, seconds: Double)? {
+    guard g >= 0, g < 16 else { return nil }
+    os_unfair_lock_lock(packLock)
+    defer { os_unfair_lock_unlock(packLock) }
+    let n = Int(packCount[g])
+    if n == 0 { return nil }
+    var k = Int.random(in: 0..<n)
+    if n > 1 && k == transLast[g] { k = (k + 1 + Int.random(in: 0..<(n - 1))) % n }
+    transLast[g] = k
+    let s = packTable[g * 256 + k]
+    guard let p = s.ptr else { return nil }
+    return (p, Int(s.count), Double(s.peak), Double(s.count) / Double(sampleRate))
   }
 
   /// Read one audio file as mono floats at the synth's sample rate (at most 30 seconds).
@@ -304,7 +326,32 @@ final class MidiBedTestSynth {
     }
     out[outN] = 0
     out[outN + 1] = 0
-    return PackAudio(data: out, count: outN)
+    // Where the sound is loudest: 50 ms blocks of energy, smoothed over three blocks.
+    let block = max(1, Int(rate * 0.05))
+    let nb = max(1, outN / block)
+    var en = [Float](repeating: 0, count: nb)
+    for bi in 0..<nb {
+      var e: Float = 0
+      let a0 = bi * block
+      let a1 = min(outN, a0 + block)
+      var i = a0
+      while i < a1 {
+        e += out[i] * out[i]
+        i += 1
+      }
+      en[bi] = e
+    }
+    var bestE: Float = -1
+    var bestI = 0
+    for bi in 0..<nb {
+      let e = en[bi] + (bi > 0 ? en[bi - 1] : 0) + (bi + 1 < nb ? en[bi + 1] : 0)
+      if e > bestE {
+        bestE = e
+        bestI = bi
+      }
+    }
+    let peak = Float((Double(bestI) + 0.5) * Double(block) / rate)
+    return PackAudio(data: out, count: outN, peak: peak)
   }
 
   /// Control side: the drums' sound settings, by MIDI note. Replaces the whole table.
@@ -571,12 +618,12 @@ final class MidiBedTestSynth {
     clockOffset = u - m
   }
 
-  func postNoise(shape: Int, color: Int, pre: Double, post: Double, offset: Double, level: Double) {
+  func postNoise(shape: Int, color: Int, pre: Double, post: Double, offset: Double, level: Double, samplePtr: UnsafePointer<Float>? = nil, sampleCount: Int = 0) {
     os_unfair_lock_lock(lock)
     let next = (noiseWrite + 1) % noiseCapacity
     if next != noiseRead {
       noiseRing[noiseWrite] = NoiseCommand(
-        shape: shape, color: color, pre: Float(pre), post: Float(post), offset: Float(offset), level: Float(level))
+        shape: shape, color: color, pre: Float(pre), post: Float(post), offset: Float(offset), level: Float(level), sp: samplePtr, sn: sampleCount)
       noiseWrite = next
     }
     os_unfair_lock_unlock(lock)
@@ -831,6 +878,9 @@ final class MidiBedTestSynth {
     var post: Float = 0
     var offset: Float = 0
     var level: Float = 0
+    /// A recorded swell from a sound pack instead of noise (shape is then ignored).
+    var sp: UnsafePointer<Float>? = nil
+    var sn: Int = 0
   }
 
   private struct NoiseVoice {
@@ -849,6 +899,8 @@ final class MidiBedTestSynth {
     var brown: Float = 0
     var hpState: Float = 0
     var phase: Float = 0
+    var sp: UnsafePointer<Float>? = nil // a recorded swell: played from its start at t seconds in
+    var sn = 0
   }
 
   /// Level correction per shape (rows: Wave, Wind, Thunder, Boom, Crash) and colour
@@ -872,7 +924,7 @@ final class MidiBedTestSynth {
     var slot = 0
     for i in 0..<noiseVoiceCount where !noiseVoices[i].active { slot = i; break }
     noiseVoices[slot] = NoiseVoice(
-      active: true, shape: c.shape, color: c.color, t: c.offset, pre: c.pre, post: c.post, level: c.level)
+      active: true, shape: c.shape, color: c.color, t: c.offset, pre: c.pre, post: c.post, level: c.level, sp: c.sp, sn: c.sn)
   }
 
   /// One sample of one transition voice. Shapes (the bar line is at t = pre):
@@ -883,6 +935,18 @@ final class MidiBedTestSynth {
   /// 4 Crash: a bright burst on the bar that closes and fades.
   @inline(__always)
   private func renderNoise(_ i: Int, dt: Float, sr: Float) -> Float {
+    if let sp = noiseVoices[i].sp {
+      // A recorded swell: read it at its own speed from t seconds in; it ends where the recording ends.
+      let pos = noiseVoices[i].t * sr
+      let ip = Int(pos)
+      if ip + 1 >= noiseVoices[i].sn {
+        noiseVoices[i].active = false
+        return 0
+      }
+      noiseVoices[i].t += dt
+      let fr = pos - Float(ip)
+      return (sp[ip] * (1 - fr) + sp[ip + 1] * fr) * noiseVoices[i].level
+    }
     let t = noiseVoices[i].t
     let pre = noiseVoices[i].pre
     let post = noiseVoices[i].post

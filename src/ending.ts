@@ -21,9 +21,13 @@ export type EndingState = {
   noiseLevel: number;
   /** Beats the bass, pad and keys keep playing the last chord after the final bar line (0 = they stop there). */
   holdBeats: number;
+  /** 0 the noise generator, 1 a recorded swell from a sound pack for the ending sound. */
+  noiseSource: number;
+  noisePackId: string;
+  noisePackGroup: string;
 };
 
-export const defaultEnding: EndingState = { style: 0, fade: 0, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 60, holdBeats: 0 };
+export const defaultEnding: EndingState = { style: 0, fade: 0, finalHit: true, noise: true, noiseShape: 3, noiseLevel: 60, holdBeats: 0, noiseSource: 0, noisePackId: '', noisePackGroup: '' };
 
 export const STOP_STYLE_NAMES = ['Stop now', 'End of this bar', 'End of the progression', 'End of the scene'];
 export const ENDING_FADE_NAMES = ['Cut on the bar line, notes ring out', 'Fade over the last bar', 'Fade over the last two bars'];
@@ -31,8 +35,9 @@ export const ENDING_FADE_NAMES = ['Cut on the bar line, notes ring out', 'Fade o
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(v) ? v : lo));
 
 /** The request the engine takes (style 1-3). */
-export function endingJson(e: EndingState): string {
+export function endingJson(e: EndingState, sampleGroup = -1): string {
   return JSON.stringify({
+    ...(e.noiseSource === 1 && sampleGroup >= 0 ? { sample: sampleGroup } : {}),
     style: clamp(Math.round(e.style), 1, 3),
     fadeBars: clamp(Math.round(e.fade), 0, 2),
     finalHit: !!e.finalHit,
@@ -44,8 +49,8 @@ export function endingJson(e: EndingState): string {
 }
 
 /** The ending settings as the engine reads them for "End the piece" (a scene that ends the piece by itself). */
-export function endingObject(e: EndingState): Record<string, unknown> {
-  return JSON.parse(endingJson({ ...e, style: 3 }));
+export function endingObject(e: EndingState, sampleGroup = -1): Record<string, unknown> {
+  return JSON.parse(endingJson({ ...e, style: 3 }, sampleGroup));
 }
 
 /** The next stop style when the rotate key is pressed. */

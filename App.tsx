@@ -53,6 +53,7 @@ import {
   switchJourney,
   switchScene,
   toEngineJson,
+  packPlan,
 } from './src/config';
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
@@ -65,7 +66,7 @@ import { ENDING_FADE_NAMES, STOP_STYLE_NAMES, barsLeftText, endingJson, endingSe
 import { DELAY_NOTES, FxPart, FxPartState, panText, uglyFxJson } from './src/uglyfx';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
 import { DRUM_TYPES, SAMPLE_PACK_TYPE, drumTuneText, drumVoicesJson } from './src/drumvoice';
-import { MAX_PACK_GROUPS, cleanGroupName, groupNames, levelOf, packGroupsForEngine, packNames, parsePacks, setPackDir, withoutPack, type PackSound } from './src/packs';
+import { MAX_PACK_GROUPS, cleanGroupName, groupNames, levelOf, packNames, parsePacks, setPackDir, withoutPack, type PackSound } from './src/packs';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { createPedal } from './src/pedal';
@@ -425,7 +426,7 @@ export default function App() {
     if (playing) {
       const style = latest.current.ending.style;
       if (style > 0 && endingBars === null) {
-        engine.requestEnd(endingJson(latest.current.ending));
+        engine.requestEnd(endingJson(latest.current.ending, packPlan(latest.current).ending));
         setEndingBars(-1);
         return endingSentence(style);
       }
@@ -636,6 +637,33 @@ export default function App() {
     setState((s) => ({ ...s, motion: { ...s.motion, preset: 0, [layer]: { ...s.motion[layer], ...p } } }));
   const patchTransition = (which: 'entrance' | 'drumBreak' | 'drumReturn', p: Partial<TransitionSlot>) =>
     setState((s) => ({ ...s, transitions: { ...s.transitions, [which]: { ...s.transitions[which], ...p } } }));
+  // Steppers that choose a sound pack and a group of it, for the transition, recurring and ending sounds.
+  const renderPackPick = (word: string, packId: string, packGroup: string, change: (p: { packId: string; packGroup: string }) => void) => {
+    const packs = packNames(parsePacks(state.packLib));
+    const groups = groupNames(parsePacks(state.packLib), packId);
+    return (
+      <>
+        <Stepper
+          label={`${word}: sound pack`}
+          value={Math.max(0, packs.indexOf(packId) + 1)}
+          onChange={(v) => change({ packId: v <= 0 ? '' : packs[v - 1], packGroup: '' })}
+          min={0}
+          max={packs.length}
+          format={(v) => (v === 0 ? (packs.length ? 'none chosen' : 'none added yet, see Setup') : packs[v - 1])}
+          hint="Which pack the swell comes from. Add packs on the Setup tab"
+        />
+        <Stepper
+          label={`${word}: sound group`}
+          value={Math.max(0, groups.indexOf(packGroup) + 1)}
+          onChange={(v) => change({ packId, packGroup: v <= 0 ? '' : groups[v - 1] })}
+          min={0}
+          max={groups.length}
+          format={(v) => (v === 0 ? 'none chosen' : groups[v - 1])}
+          hint="One sound from this group plays each time, never the same twice running, timed so its loudest part lands on the change. A sound whose loudest part comes late rises into the change; one that is loud at once plays on it"
+        />
+      </>
+    );
+  };
   const patchRecurring = (p: Partial<RecurringState>) => setState((s) => ({ ...s, recurring: { ...s.recurring, ...p } }));
   const toggleRecurringShape = (i: number, on: boolean) =>
     setState((s) => ({ ...s, recurring: { ...s.recurring, shapes: s.recurring.shapes.map((v, k) => (k === i ? on : v)) } }));
@@ -740,14 +768,14 @@ export default function App() {
   // The built-in drum sounds: send each drum's type and settings whenever they change.
   // Sound packs: which groups of recorded sounds the drums use (loaded by the engine in the background), and each drum's group.
   const packLibrary = parsePacks(state.packLib);
-  const packEngine = packGroupsForEngine(packLibrary, state.drums, SAMPLE_PACK_TYPE);
+  const packEngine = packPlan(state);
   const packsText = JSON.stringify({ groups: packEngine.groups });
   useEffect(() => {
     if (!ready) return;
     const t = setTimeout(() => engine.setPacks(packsText), 60);
     return () => clearTimeout(t);
   }, [packsText, ready]);
-  const drumVoicesText = drumVoicesJson(state.drums, packEngine.slotGroup);
+  const drumVoicesText = drumVoicesJson(state.drums, packEngine.drumGroup);
   useEffect(() => {
     if (!ready) return;
     const t = setTimeout(() => engine.setDrumVoices(drumVoicesText), 80);
@@ -1762,6 +1790,19 @@ export default function App() {
               max={4}
               format={(v) => NOISE_SHAPE_NAMES[v] ?? ''}
             />
+            <Stepper
+              label="Ending noise from"
+              value={state.ending.noiseSource}
+              onChange={(v) => patch({ ending: { ...state.ending, noiseSource: v } })}
+              min={0}
+              max={1}
+              format={(v) => (v === 0 ? 'The noise generator' : 'A swell from a sound pack')}
+              hint="With a pack swell the sound starts from its loudest part on the last downbeat"
+            />
+            {state.ending.noiseSource === 1 &&
+              renderPackPick('Ending noise', state.ending.noisePackId, state.ending.noisePackGroup, (p) =>
+                patch({ ending: { ...state.ending, noisePackId: p.packId, noisePackGroup: p.packGroup } }),
+              )}
             <Stepper
               label="Ending noise level"
               value={state.ending.noiseLevel}
@@ -3374,6 +3415,32 @@ export default function App() {
                 <Note>{about}</Note>
                 <Toggle label={`${word} sound`} value={t.on} onChange={(v) => patchTransition(which, { on: v })} />
                 {t.on && (
+                  <Stepper
+                    label={`${word}: sound from`}
+                    value={t.source}
+                    onChange={(v) => patchTransition(which, { source: v })}
+                    min={0}
+                    max={1}
+                    format={(v) => (v === 0 ? 'The noise generator' : 'A swell from a sound pack')}
+                    hint="Noise made inside MidiBed, or one of your recorded swells from a pack"
+                  />
+                )}
+                {t.on && t.source === 1 && (
+                  <>
+                    {renderPackPick(word, t.packId, t.packGroup, (p) => patchTransition(which, p))}
+                    <Stepper label={`${word}: level`} value={t.level} onChange={(v) => patchTransition(which, { level: v })} min={5} max={100} step={5} format={(v) => `${v} percent`} />
+                    <ActionButton
+                      label={`Hear the ${word.toLowerCase()} sound`}
+                      hint="Plays one swell from the group now"
+                      onPress={() => {
+                        const g = packEngine[which];
+                        if (g >= 0) engine.playPackTransitionNow(g, t.level / 100);
+                        else announceLater('Choose a pack and a group first', 100);
+                      }}
+                    />
+                  </>
+                )}
+                {t.on && t.source !== 1 && (
                   <>
                     <Stepper
                       label={`${word}: shape`}
@@ -3422,6 +3489,16 @@ export default function App() {
                   </View>
                 )}
                 <Stepper label="Recurring: chance" value={state.recurring.chance} onChange={(v) => patchRecurring({ chance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} hint="At 100 it plays every time. Lower, and it sometimes lets a turn pass." />
+                <Stepper
+                  label="Recurring: sound from"
+                  value={state.recurring.source}
+                  onChange={(v) => patchRecurring({ source: v })}
+                  min={0}
+                  max={1}
+                  format={(v) => (v === 0 ? 'The noise generator' : 'A swell from a sound pack')}
+                  hint="With a pack swell, the shape, colour and length settings below are not used: the recording has its own length"
+                />
+                {state.recurring.source === 1 && renderPackPick('Recurring', state.recurring.packId, state.recurring.packGroup, (p) => patchRecurring(p))}
                 <Stepper label="Recurring: variety" value={state.recurring.vary} onChange={(v) => patchRecurring({ vary: v })} min={0} max={RECURRING_VARY_NAMES.length - 1} format={(v) => RECURRING_VARY_NAMES[v]} />
                 {state.recurring.vary === 0 ? (
                   <Stepper label="Recurring: shape" value={state.recurring.shape} onChange={(v) => patchRecurring({ shape: v })} min={0} max={NOISE_SHAPE_NAMES.length - 1} format={(v) => NOISE_SHAPE_NAMES[v]} hint={NOISE_SHAPE_HINTS[state.recurring.shape]} />
@@ -3441,6 +3518,11 @@ export default function App() {
                   hint="Plays one now, with the first shape you have ticked or chosen"
                   onPress={() => {
                     const r = state.recurring;
+                    if (r.source === 1) {
+                      if (packEngine.recurring >= 0) engine.playPackTransitionNow(packEngine.recurring, r.level / 100);
+                      else announceLater('Choose a pack and a group first', 100);
+                      return;
+                    }
                     const shape = r.vary === 0 ? r.shape : Math.max(0, r.shapes.findIndex(Boolean));
                     engine.playTransitionNow(shape, r.colorMode === 1 ? 1 : r.color, r.beats, r.level / 100);
                   }}

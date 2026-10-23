@@ -74,7 +74,7 @@ describe('transition settings are global, with a per-scene switch', () => {
     const live = {
       ...defaultState,
       transitionMinEighths: 1,
-      transitions: { ...defaultState.transitions, entrance: { on: true, shape: 0, color: 2, beats: 8, level: 20 } },
+      transitions: { ...defaultState.transitions, entrance: { on: true, shape: 0, color: 2, beats: 8, level: 20, source: 0, packId: '', packGroup: '' } },
     };
     const j = JSON.parse(toEngineJson(live));
     expect(j.transitions.minLeadBeats).toBe(0.5);
@@ -101,9 +101,9 @@ describe('transition settings are global, with a per-scene switch', () => {
   });
 
   it('the sounds are the same in every scene (they are not saved per scene)', () => {
-    const live = { ...defaultState, transitions: { ...defaultState.transitions, entrance: { on: true, shape: 4, color: 0, beats: 8, level: 30 } } };
+    const live = { ...defaultState, transitions: { ...defaultState.transitions, entrance: { on: true, shape: 4, color: 0, beats: 8, level: 30, source: 0, packId: '', packGroup: '' } } };
     const away = switchScene(live, 1);
-    expect(away.transitions.entrance).toEqual({ on: true, shape: 4, color: 0, beats: 8, level: 30 });
+    expect(away.transitions.entrance).toEqual({ on: true, shape: 4, color: 0, beats: 8, level: 30, source: 0, packId: '', packGroup: '' });
     expect(Object.keys(defaultState.scenes[0])).not.toContain('transitions');
     expect(Object.keys(defaultState.scenes[0])).toContain('transitionUse');
   });

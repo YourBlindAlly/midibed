@@ -36,6 +36,7 @@ struct MidiBedEndRequest: Decodable {
   var holdBeats: Double?    // the bass, pad and keys keep the last chord ringing this many beats after the last bar line
   var noiseShape: Int
   var noiseLevel: Double
+  var sample: Int?          // the ending sound is a swell from a sound-pack group
 }
 
 /// A lane's breathing (reference: src/lanebreath.ts): mode 0 steady, 1 its own play/rest cycle, 2 only while the
@@ -180,6 +181,7 @@ struct MidiBedTransitionSlot: Decodable {
   var color: Int
   var beats: Double
   var level: Double         // 0...1
+  var sample: Int?          // a swell from a sound-pack group (its number in the engine's list) instead of noise
 }
 
 /// A sound that comes round now and then inside a scene (every N bars, or at the end of each
@@ -196,6 +198,7 @@ struct MidiBedRecurring: Decodable {
   var color: Int
   var beats: Double
   var level: Double         // 0...1
+  var sample: Int?          // a swell from a sound-pack group instead of noise
 }
 
 struct MidiBedTransitionConfig: Decodable {
@@ -503,8 +506,13 @@ final class MidiBedEngine {
     var post: Double
     var offset: Double
     var level: Double
+    /// A recorded swell from a sound pack instead of noise.
+    var samplePtr: UnsafePointer<Float>? = nil
+    var sampleCount = 0
   }
   private var pendingNoise: [PendingNoise] = []
+  /// The swell chosen for the next recurring sound (so its lead-up is known when it is scheduled).
+  private var recurPick: (ptr: UnsafePointer<Float>, count: Int, peak: Double, seconds: Double)? = nil
 
   // The recurring sound: the bar (counted from the scene start) of the next boundary, whether
   // that boundary gets a sound, which, and whether it has been scheduled yet.
@@ -1685,7 +1693,14 @@ final class MidiBedEngine {
       pending.append(Pending(time: time, status: 0x90 | ch, d1: note, d2: 124))
       pending.append(Pending(time: time + 0.25, status: 0x80 | ch, d1: note, d2: 0))
     }
-    if plan.noise {
+    if plan.noise, let g = plan.sample, g >= 0, let pick = synth.pickTransitionSample(group: g) {
+      // a recorded swell on the last downbeat: a build-up cannot start before the end, so it plays from its loudest part
+      let offset = pick.peak > 0.25 ? pick.peak : 0
+      pendingNoise.append(
+        PendingNoise(
+          time: time, tag: 9, shape: -1, color: 0, pre: pick.peak, post: max(0, pick.seconds - pick.peak), offset: offset,
+          level: plan.noiseLevel, samplePtr: pick.ptr, sampleCount: pick.count))
+    } else if plan.noise {
       let bpm = max(20.0, min(300.0, cfg.bpm))
       let secs = noiseSeconds(shape: plan.noiseShape, beats: 8, bpm: bpm)
       pendingNoise.append(
@@ -2073,11 +2088,38 @@ final class MidiBedEngine {
   /// Must behave exactly like `planTransition` in src/transitions.ts (which is unit-tested):
   /// enough room -> the lead-in plays, joining its sweep part-way if it is late; too close
   /// (less than minLeadBeats) -> only the "downer" on the bar: Wave its falling half, Wind a Crash.
-  private func scheduleTransition(_ slot: MidiBedTransitionSlot, tag: Int, barTime: Double, cfg: MidiBedConfig) {
+  /// Place a recorded swell so that its loudest part lands on `barTime`.
+  private func scheduleSwell(_ pick: (ptr: UnsafePointer<Float>, count: Int, peak: Double, seconds: Double), tag: Int, barTime: Double, level: Double, cfg: MidiBedConfig) {
+    let bpm = max(20.0, min(300.0, cfg.bpm))
+    let beat = 60.0 / bpm
+    let now = ProcessInfo.processInfo.systemUptime
+    let tp = pick.peak
+    var offset = 0.0
+    if tp > 0.25 {
+      let remaining = barTime - now
+      offset = remaining >= cfg.transitions.minLeadBeats * beat ? max(0, tp - remaining) : tp
+    }
+    let startTime = max(now, barTime - (tp - offset))
+    pendingNoise.append(
+      PendingNoise(
+        time: startTime, tag: tag, shape: -1, color: 0, pre: tp, post: max(0, pick.seconds - tp), offset: offset, level: level,
+        samplePtr: pick.ptr, sampleCount: pick.count))
+  }
+
+  private func scheduleTransition(_ slot: MidiBedTransitionSlot, tag: Int, barTime: Double, cfg: MidiBedConfig, preset: (ptr: UnsafePointer<Float>, count: Int, peak: Double, seconds: Double)? = nil) {
     guard slot.on else { return }
     let bpm = max(20.0, min(300.0, cfg.bpm))
     let beat = 60.0 / bpm
     let now = ProcessInfo.processInfo.systemUptime
+    // A swell from a sound pack: placed so its loudest part lands on the bar line. One that is loud at once plays ON the
+    // bar; one that builds up starts early (joining part-way if there is not time, or only what follows its loudest part
+    // when the bar is too close, like the noise lead-ins).
+    if let g = slot.sample, g >= 0 {
+      if let pick = preset ?? synth.pickTransitionSample(group: g) {
+        scheduleSwell(pick, tag: tag, barTime: barTime, level: slot.level, cfg: cfg)
+        return
+      }
+    }
     var shape = slot.shape
     var (pre, post) = noiseSeconds(shape: shape, beats: slot.beats, bpm: bpm)
     var offset = 0.0
@@ -2099,6 +2141,14 @@ final class MidiBedEngine {
         pre: pre, post: post, offset: offset, level: slot.level))
   }
 
+  /// Hear a swell from a sound-pack group right now, from its start.
+  func playPackTransitionNow(group: Int, level: Double) {
+    queue.async {
+      guard let pick = self.synth.pickTransitionSample(group: group) else { return }
+      self.synth.postNoise(shape: -1, color: 0, pre: pick.peak, post: max(0, pick.seconds - pick.peak), offset: 0, level: level, samplePtr: pick.ptr, sampleCount: pick.count)
+    }
+  }
+
   /// Play a transition right now, for hearing what a setting sounds like.
   func playTransitionNow(shape: Int, color: Int, beats: Double, level: Double) {
     queue.async {
@@ -2114,7 +2164,7 @@ final class MidiBedEngine {
     let noiseLead = (config?.tightTiming ?? true) ? synth.scheduleLead : 0
     for n in pendingNoise {
       if n.time + noiseLead <= now {
-        synth.postNoise(shape: n.shape, color: n.color, pre: n.pre, post: n.post, offset: n.offset, level: n.level)
+        synth.postNoise(shape: n.shape, color: n.color, pre: n.pre, post: n.post, offset: n.offset, level: n.level, samplePtr: n.samplePtr, sampleCount: n.sampleCount)
       } else {
         later.append(n)
       }
@@ -2230,8 +2280,14 @@ final class MidiBedEngine {
   /// Decide, once, what the next boundary will play (or whether it lets its turn pass).
   private func rollRecurring(_ rec: MidiBedRecurring) {
     recurScheduled = false
+    recurPick = nil
     recurPlay = Double.random(in: 0..<1, using: &rng) * 100 < rec.chance
     guard recurPlay else { return }
+    if let g = rec.sample, g >= 0 {
+      // a swell from a sound pack: chosen now, so its lead-up (where its loudest part is) is known
+      recurPick = synth.pickTransitionSample(group: g)
+      if recurPick != nil { return }
+    }
     let allowed = (0..<5).filter { rec.shapeMask & (1 << $0) != 0 }
     if rec.vary == 1, let pick = allowed.randomElement(using: &rng) {
       recurShape = pick
@@ -2273,11 +2329,11 @@ final class MidiBedEngine {
     let rec = cfg.transitions.recurring
     let bpm = max(20.0, min(300.0, cfg.bpm))
     let barDur = 60.0 / bpm * Double(beatsPerBar)
-    let pre = noiseSeconds(shape: recurShape, beats: rec.beats, bpm: bpm).pre
+    let pre = recurPick != nil ? (recurPick!.peak > 0.25 ? recurPick!.peak : 0) : noiseSeconds(shape: recurShape, beats: rec.beats, bpm: bpm).pre
     let boundaryTime = time - Double(r) * barDur + Double(recurBoundary) * barDur
     if boundaryTime - pre < time + barDur {
-      let slot = MidiBedTransitionSlot(on: true, shape: recurShape, color: recurColor, beats: rec.beats, level: rec.level)
-      scheduleTransition(slot, tag: 3, barTime: boundaryTime, cfg: cfg)
+      let slot = MidiBedTransitionSlot(on: true, shape: recurShape, color: recurColor, beats: rec.beats, level: rec.level, sample: recurPick != nil ? (rec.sample ?? -1) : nil)
+      scheduleTransition(slot, tag: 3, barTime: boundaryTime, cfg: cfg, preset: recurPick)
       recurScheduled = true
     }
   }

@@ -91,3 +91,52 @@ describe('sound packs', () => {
     expect(app).toContain('sound pack`');
   });
 });
+
+describe('pack swells as transition sounds', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { packPlan, toEngineJson: toJson } = require('../src/config');
+
+  it('the plan numbers each group once across the drums, the transition sounds, the recurring sound and the ending', () => {
+    setPackDir('file:///data/Documents/packs/');
+    const s = {
+      ...defaultState,
+      packLib: JSON.stringify(lib),
+      drums: defaultState.drums.map((d, i) => (i === 0 ? { ...d, voice: 17, packId: 'shell kit', packGroup: 'Solid hits' } : d)),
+      transitions: {
+        entrance: { ...defaultState.transitions.entrance, on: true, source: 1, packId: 'shell kit', packGroup: 'Light ticks' },
+        drumBreak: { ...defaultState.transitions.drumBreak, source: 1, packId: 'shell kit', packGroup: 'Solid hits' },
+        drumReturn: defaultState.transitions.drumReturn,
+      },
+      ending: { ...defaultState.ending, noiseSource: 1, noisePackId: 'shell kit', noisePackGroup: 'Light ticks' },
+    };
+    const p = packPlan(s);
+    expect(p.groups).toHaveLength(2);
+    expect(p.drumGroup[0]).toBe(0);
+    expect(p.drumBreak).toBe(0); // the same group as the drum uses
+    expect(p.entrance).toBe(1);
+    expect(p.ending).toBe(1);
+    expect(p.drumReturn).toBe(-1);
+    expect(p.recurring).toBe(-1);
+    const j = JSON.parse(toJson(s));
+    expect(j.transitions.entrance.sample).toBe(1);
+    expect(j.transitions.drumBreak.sample).toBe(0);
+    expect(j.transitions.drumReturn.sample).toBeUndefined();
+    // a noise sound is exactly as before
+    expect(j.transitions.drumReturn).toEqual({ on: false, shape: 1, color: 0, beats: 8, level: 0.25 });
+  });
+
+  it('the Swift side places a swell so its loudest part lands on the bar line', () => {
+    const s = fs.readFileSync('modules/midibed-engine/ios/MidiBedTestSynth.swift', 'utf8');
+    expect(s).toContain('func pickTransitionSample(group g: Int)');
+    expect(s).toContain('let peak = Float((Double(bestI) + 0.5) * Double(block) / rate)');
+    expect(s).toContain('A recorded swell: read it at its own speed');
+    const e = fs.readFileSync('modules/midibed-engine/ios/MidiBedEngine.swift', 'utf8');
+    expect(e).toContain('let startTime = max(now, barTime - (tp - offset))');
+    expect(e).toContain('offset = remaining >= cfg.transitions.minLeadBeats * beat ? max(0, tp - remaining) : tp');
+    expect(e).toContain('func playPackTransitionNow(group: Int, level: Double)');
+    const m = fs.readFileSync('modules/midibed-engine/ios/MidiBedEngineModule.swift', 'utf8');
+    expect(m).toContain('Function("playPackTransitionNow")');
+    const app = fs.readFileSync('App.tsx', 'utf8');
+    expect(app).toContain('A swell from a sound pack');
+  });
+});
