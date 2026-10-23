@@ -22,6 +22,8 @@ export type MidiControlState = {
   hold: string;
   /** How long a button must stay down to count as held, in milliseconds. */
   holdMs: number;
+  /** The pedal is in Momentary mode (sends a message when a button is let go). Buttons with a hold then wait for the release. */
+  releases: boolean;
 };
 
 export type MidiActionDef = { id: string; label: string; action: ShortcutAction };
@@ -60,6 +62,10 @@ export const MIDI_ACTIONS: MidiActionDef[] = [
   { id: 'sceneChangeAt', label: 'When scene changes land', action: { type: 'sceneChangeAt' } },
   ...[0, 1, 2, 3].map((i) => ({ id: `lane${i + 1}`, label: `Loop lane ${i + 1} on or off`, action: { type: 'lane', index: i } as ShortcutAction })),
   { id: 'keyboardActions', label: 'Keyboard shortcuts on or off', action: { type: 'keyboardActions' } },
+  // Made for a long press: from a stop it starts playing in that scene; while playing it goes there; on the scene that is playing it stays there.
+  ...[0, 1, 2, 3].map((i) => ({ id: `play${i + 1}`, label: `Scene ${i + 1}: play from it, go to it, or stay on it`, action: { type: 'sceneStart', index: i } as ShortcutAction })),
+  { id: 'stopOnly', label: 'Stop with the chosen ending (does nothing when stopped)', action: { type: 'stopOnly' } },
+  { id: 'stay', label: 'Stay on this scene on or off', action: { type: 'stay' } },
 ];
 
 export function triggerKey(m: Pick<MidiMessage, 'kind' | 'channel' | 'number'>): string {
@@ -105,7 +111,7 @@ export function isPress(m: MidiMessage): boolean {
 
 /** Which action ids are an on/off toggle, so a double press can put the first press back before doing its own thing. */
 export function isToggleAction(a: ShortcutAction): boolean {
-  return a.type === 'freeze' || a.type === 'layer' || a.type === 'solo' || a.type === 'filterHold' || a.type === 'lane';
+  return a.type === 'freeze' || a.type === 'layer' || a.type === 'solo' || a.type === 'filterHold' || a.type === 'lane' || a.type === 'stay';
 }
 
 export function parseDoubleMap(json: string): Record<string, string> {

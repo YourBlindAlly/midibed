@@ -2102,6 +2102,14 @@ final class MidiBedEngine {
     let bars = cfg.advance.mode > 0 ? cfg.advance.bars : 0
     if bars <= 0 {
       advanceBarsLeft = 0
+      // staying on the scene sets aside an ending the scene had set up
+      if endFromAdvance {
+        endTick = -1
+        endPlan = nil
+        endFromAdvance = false
+        endFade = 1
+        endHoldBeats = 0
+      }
       return
     }
     guard tick - padStartTick > 0, pendingConfig == nil else { return }

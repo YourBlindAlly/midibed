@@ -67,7 +67,8 @@ import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson
 import { DRUM_TYPES, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
-import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, holdArmed, idForMidi, isDoublePress, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
+import { createPedal } from './src/pedal';
+import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, idForMidi, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
 import { levelText, mixerMessages, synthLevelMessages } from './src/mixer';
 import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
@@ -326,6 +327,7 @@ export default function App() {
 
   const resetAfterStop = () => {
     setPlaying(false);
+    setState((s) => (s.stayHere ? { ...s, stayHere: false } : s));
     setPosition('1.1');
     motionRef.current = { bass: false, pad: false, drums: false };
     setMotionNow(motionRef.current);
@@ -393,7 +395,7 @@ export default function App() {
   const patchDrone = (p: Partial<BedState['drone']>) => setState((s) => ({ ...s, drone: { ...s.drone, ...p } }));
   const goToScene = (to: number) => {
     if (to === state.activeScene) return;
-    const next = switchScene(state, to);
+    const next = { ...switchScene(state, to), stayHere: false };
     // Only queue if the engine will actually receive a changed config.
     const queued = playing && toEngineJson(next) !== json;
     queueNextApply.current = queued;
@@ -401,6 +403,26 @@ export default function App() {
     setQueuedScene(queued ? to : null);
     const msg = queued ? `${sceneLabel(next, to)}, ${sceneChangeWhen(state.sceneChangeAt)}` : sceneLabel(next, to);
     announceLater(msg, 500);
+  };
+
+  // From a stop: go to a scene and start playing there. (The new settings are sent first, so the music begins in that scene.)
+  const startAtScene = (to: number) => {
+    const next = to === state.activeScene ? state : { ...switchScene(state, to), stayHere: false };
+    if (next !== state) {
+      queueNextApply.current = false;
+      setState(next);
+    }
+    engine.applyConfig(toEngineJson(next));
+    engine.start();
+    setPlaying(true);
+    sendMixerLevels();
+    announceLater(`Playing, ${sceneLabel(next, to)}`, 300);
+  };
+  // Stay on this scene: the scene's own move-on (or end) is set aside until you change scene. Not the same as Freeze.
+  const toggleStay = () => {
+    const on = !state.stayHere;
+    patch({ stayHere: on });
+    announceLater(on ? `Staying on ${sceneLabel(state, state.activeScene)}` : `${sceneLabel(state, state.activeScene)} will move on as planned`, 150);
   };
 
   // Silence every drum pattern to build a groove up one part at a time; Undo brings the patterns back.
@@ -429,7 +451,7 @@ export default function App() {
   const sendJourneySounds = (s: BedState) => s.sounds.forEach((slot) => sendSound(slot));
   const goToJourney = (to: number) => {
     if (to === state.activeJourney || to < 0 || to >= state.journeys.length) return;
-    const next = switchJourney(state, to);
+    const next = { ...switchJourney(state, to), stayHere: false };
     const queued = playing && toEngineJson(next) !== json;
     queueNextApply.current = queued;
     setState(next);
@@ -557,7 +579,9 @@ export default function App() {
       : state.advance.mode === 3
         ? -1
         : pickTarget(state.advance, state.activeScene, state.scenes.length, 0);
-  const advanceSentence = describeAdvance(
+  const advanceSentence = state.stayHere
+    ? 'Staying on this scene until you change it. Long press its pedal button again to let it move on'
+    : describeAdvance(
     state.advance,
     advanceBars(state.advance, state.harmony),
     advanceInfo.barsLeft,
@@ -568,7 +592,7 @@ export default function App() {
   // How long this journey plays, from the scene that is on now (the live scene's settings stand in for its saved copy).
   const lengthLabel = (i: number) => sceneLabel(state, i).toLowerCase();
   const lengthScenes = state.scenes.map((sc, i) =>
-    i === state.activeScene ? { advance: state.advance, harmony: state.harmony } : { advance: sc.advance, harmony: sc.harmony },
+    i === state.activeScene ? { advance: state.stayHere ? { ...state.advance, mode: 0 } : state.advance, harmony: state.harmony } : { advance: sc.advance, harmony: sc.harmony },
   );
   const journeyLen = journeyLength(lengthScenes, state.activeScene);
   const journeyLengthSentence = lengthSentence(journeyLen, state.bpm, lengthLabel);
@@ -779,6 +803,18 @@ export default function App() {
       case 'playStop':
         onMagicTap();
         break;
+      case 'sceneStart':
+        if (action.index >= sceneCount) break;
+        if (!playing) startAtScene(action.index);
+        else if (action.index === state.activeScene) toggleStay();
+        else goToScene(action.index);
+        break;
+      case 'stopOnly':
+        if (playing) onMagicTap();
+        break;
+      case 'stay':
+        if (playing) toggleStay();
+        break;
       case 'solo':
         setSolo(state.solo === action.layer ? null : action.layer);
         break;
@@ -879,10 +915,17 @@ export default function App() {
   const [lastMidiText, setLastMidiText] = useState('none yet');
   const runActionRef = useRef(runAction);
   runActionRef.current = runAction;
-  const lastPressRef = useRef<{ id: string; at: number } | null>(null);
-  // Buttons that have sent a release (a pedal in Momentary mode), and the hold timers running now.
-  const releaseSeenRef = useRef<Set<string>>(new Set());
-  const holdTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const pedalRef = useRef(
+    createPedal({
+      now: () => Date.now(),
+      setTimer: (fn, ms) => setTimeout(fn, ms),
+      clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+      run: (actionId) => {
+        const d = MIDI_ACTIONS.find((a) => a.id === actionId);
+        if (d) runActionRef.current(d.action);
+      },
+    }),
+  );
   useEffect(() => {
     return onMidiIn((m) => {
       setLastMidiText(describeMidi(m));
@@ -897,49 +940,26 @@ export default function App() {
         return;
       }
       if (!s.midiControl.enabled) return;
-      // A release (a button let go): remember that this pedal sends them, and stop any hold being timed.
+      const trig = triggerKey(m);
+      // A release (a button let go): a button waiting to see whether it is a tap or a hold runs its tap now.
       if (m.kind !== 'pc' && m.value === 0) {
-        if (s.midiControl.channel < 0 || m.channel === s.midiControl.channel) {
-          const key = triggerKey(m);
-          releaseSeenRef.current.add(key);
-          if (holdTimersRef.current[key]) {
-            clearTimeout(holdTimersRef.current[key]);
-            delete holdTimersRef.current[key];
-          }
-        }
+        if (s.midiControl.channel < 0 || m.channel === s.midiControl.channel) pedalRef.current.release(trig);
         return;
       }
       const id = idForMidi(s.midiControl.map, m, s.midiControl.channel);
       const def = id ? MIDI_ACTIONS.find((a) => a.id === id) : undefined;
       if (!id || !def) return;
-      // A quick second press of a button that has a double press does that instead of repeating the press.
-      // The first press already ran at once (nothing waits to see whether a second one follows). If the
-      // first press was an on/off toggle, the second puts it back first, so the double press leaves no mark.
-      const dbl = parseDoubleMap(s.midiControl.double)[id];
-      const now = Date.now();
-      const last = lastPressRef.current;
-      if (dbl && isDoublePress(last, id, now, s.midiControl.doubleMs)) {
-        lastPressRef.current = null;
-        const second = MIDI_ACTIONS.find((a) => a.id === dbl);
-        if (isToggleAction(def.action)) runActionRef.current(def.action);
-        if (second) runActionRef.current(second.action);
-        return;
-      }
-      lastPressRef.current = dbl ? { id, at: now } : null;
-      runActionRef.current(def.action);
-      // Holding the button: if it is still down after the hold time, put a toggle back and do the hold action.
-      const holdId = parseHoldMap(s.midiControl.hold)[id];
-      const key = triggerKey(m);
-      if (holdId && holdArmed(true, releaseSeenRef.current.has(key))) {
-        if (holdTimersRef.current[key]) clearTimeout(holdTimersRef.current[key]);
-        holdTimersRef.current[key] = setTimeout(() => {
-          delete holdTimersRef.current[key];
-          const held = MIDI_ACTIONS.find((a) => a.id === holdId);
-          lastPressRef.current = null;
-          if (isToggleAction(def.action)) runActionRef.current(def.action);
-          if (held) runActionRef.current(held.action);
-        }, s.midiControl.holdMs);
-      }
+      // Tap, quick double press and hold are worked out in src/pedal.ts. A button with a hold waits to see which
+      // it is (a tap runs when you let go); a button without one runs at once.
+      pedalRef.current.press(trig, {
+        tapId: id,
+        doubleId: parseDoubleMap(s.midiControl.double)[id],
+        holdId: parseHoldMap(s.midiControl.hold)[id],
+        doubleMs: s.midiControl.doubleMs,
+        holdMs: s.midiControl.holdMs,
+        tapIsToggle: isToggleAction(def.action),
+        assumeReleases: s.midiControl.releases,
+      });
     });
   }, []);
 
@@ -3293,7 +3313,13 @@ export default function App() {
               min={0}
               max={MIDI_ACTIONS.length}
               format={(v) => (v === 0 ? 'nothing extra' : MIDI_ACTIONS[v - 1].label)}
-              hint="For the action chosen above. Needs the pedal's button in Momentary mode, so it sends a message when you let go. The press runs at once; if you keep holding, this is done as well, and an on or off switch is put back first"
+              hint="For the action chosen above. Needs the pedal's button in Momentary mode, so it sends a message when you let go. The button then waits to see which you meant: let go quickly and the first action runs as you let go, keep holding and only this runs"
+            />
+            <Toggle
+              label="My pedal sends a message when I let go"
+              value={state.midiControl.releases}
+              onChange={(v) => patch({ midiControl: { ...state.midiControl, releases: v } })}
+              hint="Switch on for a pedal in Momentary mode. Otherwise a button learns this only after its first release, and its first press after starting the app acts at once. Leave off for a pedal in Single mode, or a tap would never run"
             />
             <Stepper
               label="Hold time"

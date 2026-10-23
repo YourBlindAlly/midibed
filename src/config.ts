@@ -339,6 +339,8 @@ export type BedState = {
   advance: AdvanceRule;
   /** Freeze: stop the bed changing by itself (breathing, recurring sounds, auto-advance). Never saved as on. */
   frozen: boolean;
+  /** Stay on this scene: its automatic move-on (or end) is set aside until you change scene. Never saved as on. */
+  stayHere: boolean;
   /** Per scene: which of those sounds this scene plays. */
   transitionUse: TransitionUse;
   /** Level-scale version of the saved transition levels (see NOISE_VERSION). */
@@ -760,7 +762,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   filterGlide: 2,
   filterHold: false,
   sceneChangeAt: 0,
-  midiControl: { enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400, hold: '{}', holdMs: 700 },
+  midiControl: { enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400, hold: '{}', holdMs: 700, releases: false },
   bassVoice: defaultBassVoice,
   fx: defaultFx,
   ending: defaultEnding,
@@ -859,6 +861,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   recurring: defaultRecurring,
   advance: defaultAdvance,
   frozen: false,
+  stayHere: false,
   transitionUse: defaultTransitionUse,
   noiseVersion: NOISE_VERSION,
   transitionMinEighths: 1,
@@ -1267,6 +1270,7 @@ export function migrateState(rawInput0: unknown): BedState {
     ...merged,
     keyOffset,
     frozen: false, // never come back frozen
+    stayHere: false, // nor staying
     filterHold: false, // nor held
     outputMode: clampOutputMode((merged as { outputMode?: number }).outputMode ?? 0),
     solo: null, // never come back soloed
@@ -1324,13 +1328,16 @@ export function toEngineJson(s: BedState): string {
     sceneChangeAt: s.sceneChangeAt,
     // The Loop player layer: off (or another layer soloed) silences every lane.
     lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster, s.bpm).map((l) => ({ ...l, on: l.on && (s.solo ? s.solo === 'player' : s.playerOn) })),
-    advance: {
-      mode: s.advance.mode,
-      bars: advanceBars(s.advance, s.harmony),
-      target: pickTarget(s.advance, s.activeScene, s.scenes.length, 0),
-      // "End the piece": the ending to play when this scene's bars are up
-      ...(s.advance.mode === 4 ? { ending: endingObject(s.ending) } : {}),
-    },
+    // "Stay on this scene" sets the automatic move-on (or the end of the piece) aside until the scene changes.
+    advance: s.stayHere
+      ? { mode: 0, bars: 0, target: -1 }
+      : {
+          mode: s.advance.mode,
+          bars: advanceBars(s.advance, s.harmony),
+          target: pickTarget(s.advance, s.activeScene, s.scenes.length, 0),
+          // "End the piece": the ending to play when this scene's bars are up
+          ...(s.advance.mode === 4 ? { ending: endingObject(s.ending) } : {}),
+        },
     loops: {
       enabled: s.solo ? s.solo === 'loops' : s.loops.enabled,
       channel: s.loops.channel,

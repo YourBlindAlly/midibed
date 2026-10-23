@@ -22,6 +22,9 @@ export type ShortcutAction =
   | { type: 'filterFocus' }
   | { type: 'sceneChangeAt' }
   | { type: 'keyboardActions' }
+  | { type: 'sceneStart'; index: number }
+  | { type: 'stopOnly' }
+  | { type: 'stay' }
   | { type: 'lane'; index: number }
   | { type: 'layer'; layer: Layer }
   | { type: 'solo'; layer: Layer }
