@@ -3491,13 +3491,13 @@ export default function App() {
               label="Check the connection"
               onPress={() => {
                 const info = engine.networkInfo();
-                setNetNote(
-                  !info
-                    ? 'The engine is not available.'
-                    : !info.enabled
-                    ? 'Network MIDI is off.'
-                    : `On as ${info.name}, port ${info.port}. ${info.connections === 0 ? 'No computer is connected yet.' : info.connections === 1 ? 'One computer is connected.' : `${info.connections} computers are connected.`}`,
-                );
+                const note = !info
+                  ? 'The engine is not available.'
+                  : !info.enabled
+                  ? 'Network MIDI is off. Switch on Send MIDI over the network first.'
+                  : `On as ${info.name}, port ${info.port}. ${info.connections === 0 ? 'No computer is connected yet.' : info.connections === 1 ? 'One computer is connected.' : `${info.connections} computers are connected.`}`;
+                setNetNote(note);
+                announceLater(note, 100);
               }}
             />
             {netNote ? (
