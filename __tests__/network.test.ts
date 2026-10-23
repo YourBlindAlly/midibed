@@ -38,3 +38,11 @@ describe('the live link to a recording program', () => {
     expect(app).toContain('Tell the recording program to record when I press Play');
   });
 });
+
+describe('the local network permission for Network MIDI', () => {
+  it('the app declares its local network use and the Apple MIDI service', () => {
+    const cfg = fs.readFileSync('app.config.js', 'utf8');
+    expect(cfg).toContain('NSLocalNetworkUsageDescription');
+    expect(cfg).toContain("NSBonjourServices: ['_apple-midi._udp']");
+  });
+});

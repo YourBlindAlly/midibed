@@ -21,6 +21,10 @@ module.exports = {
         ITSAppUsesNonExemptEncryption: false,
         // Lets the Files app show MidiBed's folder, so recorded MIDI files can be picked up from there.
         UIFileSharingEnabled: true,
+        // Network MIDI (the live link to a recording program) uses the local network. Since iOS 14 the app has to say so,
+        // or the permission question may never be asked and the session cannot connect.
+        NSLocalNetworkUsageDescription: 'MidiBed sends its MIDI to your computer over the local network, for recording.',
+        NSBonjourServices: ['_apple-midi._udp'],
         LSSupportsOpeningDocumentsInPlace: true,
       },
     },
