@@ -317,14 +317,14 @@ describe('tight, even timing', () => {
     expect(e).toContain('emit(due[k].status, due[k].d1, due[k].d2, port: due[k].port, at: due[k].time)');
     expect(e).toContain('self.delayedMIDI.removeAll()');
     expect(e).toContain('self.synth.flush()');
-    expect(e).toContain('synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats, at: at)');
+    expect(e).toContain('synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats, at: at, fadeIn: p.fadeIn)');
     expect(e).toContain('var tightTiming: Bool?');
   });
 
   it('the loop player starts and stops lanes on an exact frame', () => {
     const l = swift('LoopPlayer.swift');
     expect(l).toContain('private func renderPiece(');
-    expect(l).toContain('func start(lane: Int, seconds: Double, repeats: Int = 1, at: Double = 0)');
+    expect(l).toContain('func start(lane: Int, seconds: Double, repeats: Int = 1, at: Double = 0, fadeIn: Float = 0.008)');
     expect(l).toContain('func stop(lane: Int, fade: Float = 0.03, at: Double = 0)');
   });
 });

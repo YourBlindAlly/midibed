@@ -8,7 +8,9 @@
  *
  * A file is never committed anywhere: loops live only in the app's own storage on the phone.
  */
-export const LANE_COUNT = 4;
+export const LANE_COUNT = 5;
+/** The last lane is the ambience lane: natural speed, ignores the tempo, never restarts, fades in and out slowly. */
+export const AMBIENCE_LANE = 4;
 
 export type LibraryLoop = {
   id: string;
@@ -312,7 +314,7 @@ export function lanesForEngine(
   libJson: string,
   master = 100,
   journeyBpm = 0,
-): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean; follow: boolean; semis: number; breathe: { mode: number; onBars: number; offBars: number; chance: number } }[] {
+): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean; follow: boolean; semis: number; ambience: boolean; seconds: number; breathe: { mode: number; onBars: number; offBars: number; chance: number } }[] {
   const lib = parseLibrary(libJson);
   return Array.from({ length: LANE_COUNT }, (_, i) => {
     const lane = lanes[i] ?? defaultLane;
@@ -323,8 +325,9 @@ export function lanesForEngine(
     const repeats = lane.bars > 0 ? 1 : fit ? fit.repeats : loop ? loop.repeats : 1;
     const gain = loop ? matchGain(loop.peak, loop.rms) : 1;
     const level = (Math.max(0, Math.min(150, lane.level)) / 100) * (Math.max(0, Math.min(150, master)) / 100) * gain;
-    return { path, bars, repeats, level, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', follow: lane.follow !== false,
-      semis: Math.max(-SEMI_RANGE, Math.min(SEMI_RANGE, Math.round(lane.semis || 0))),
+    const amb = i === AMBIENCE_LANE;
+    return { path, bars, repeats, level, ambience: amb, seconds: loop ? loop.seconds : 0, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', follow: amb ? true : lane.follow !== false,
+      semis: amb ? 0 : Math.max(-SEMI_RANGE, Math.min(SEMI_RANGE, Math.round(lane.semis || 0))),
       breathe: {
         mode: Math.max(0, Math.min(3, Math.round(lane.breathe || 0))),
         onBars: Math.max(1, Math.min(64, Math.round(lane.breatheOn || 8))),

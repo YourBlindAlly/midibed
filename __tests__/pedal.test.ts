@@ -118,7 +118,8 @@ describe('pedal: tap, double tap and hold', () => {
 describe('the new pedal actions and stay', () => {
   it('has a play-from-scene action for each scene, a stop-only action and a stay toggle, added at the end', () => {
     const ids = MIDI_ACTIONS.map((a) => a.id);
-    expect(ids.slice(-6)).toEqual(['play1', 'play2', 'play3', 'play4', 'stopOnly', 'stay']);
+    expect(ids.slice(-7, -1)).toEqual(['play1', 'play2', 'play3', 'play4', 'stopOnly', 'stay']);
+    expect(ids[ids.length - 1]).toBe('lane5');
     expect(isToggleAction(MIDI_ACTIONS.find((a) => a.id === 'stay')!.action)).toBe(true);
   });
 

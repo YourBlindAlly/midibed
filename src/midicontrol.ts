@@ -68,6 +68,7 @@ export const MIDI_ACTIONS: MidiActionDef[] = [
   ...[0, 1, 2, 3].map((i) => ({ id: `play${i + 1}`, label: `Scene ${i + 1}: play from it, go to it, or stay on it`, action: { type: 'sceneStart', index: i } as ShortcutAction })),
   { id: 'stopOnly', label: 'Stop with the chosen ending (does nothing when stopped)', action: { type: 'stopOnly' } },
   { id: 'stay', label: 'Stay on this scene on or off', action: { type: 'stay' } },
+  { id: 'lane5', label: 'Ambience lane on or off', action: { type: 'lane', index: 4 } as ShortcutAction },
 ];
 
 export function triggerKey(m: Pick<MidiMessage, 'kind' | 'channel' | 'number'>): string {

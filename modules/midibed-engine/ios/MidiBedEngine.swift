@@ -58,6 +58,8 @@ struct MidiBedLaneConfig: Decodable {
   var on: Bool
   var follow: Bool?         // the pitch follows the tempo (default true)
   var semis: Int?           // pitch shift in whole semitones (default 0)
+  var ambience: Bool?       // the ambience lane: natural speed, never restarts, slow fades
+  var seconds: Double?      // the file's own length (ambience lane)
   var breathe: MidiBedLaneBreathe?
 }
 
@@ -202,6 +204,7 @@ struct MidiBedRecurring: Decodable {
 }
 
 struct MidiBedTransitionConfig: Decodable {
+  var swellOnBar: Bool?     // a sound-pack swell starts on the bar line instead of peaking on it
   var minLeadBeats: Double  // a lead-in needs at least this long before the bar line, else its "downer" plays on the bar
   var entrance: MidiBedTransitionSlot   // when a scene starts
   var drumBreak: MidiBedTransitionSlot  // as the drums drop out in a breakdown
@@ -494,6 +497,7 @@ final class MidiBedEngine {
     var seconds: Double
     var repeats: Int = 1
     var fade: Float = 0.03
+    var fadeIn: Float = 0.008
   }
   private var pendingLoop: [PendingLoop] = []
 
@@ -1820,6 +1824,22 @@ final class MidiBedEngine {
       let lane = cfg.lanes[i]
       let ready = !lane.path.isEmpty && synth.loops.isReady(i)
       let allowed = laneMayPlay(i, lane, cfg)
+      if lane.ambience == true {
+        // The ambience lane ignores the tempo and the bar count: it fades in when it starts and keeps going across
+        // scenes (the same file stays on) until it is switched off, when it fades out slowly.
+        let secs = max(0.5, lane.seconds ?? 10)
+        if lane.on && ready && allowed {
+          if !laneActive[i] {
+            pendingLoop.append(PendingLoop(time: time, lane: i, start: true, seconds: secs, repeats: 1, fadeIn: 3.0))
+            laneActive[i] = true
+            laneStart[i] = tick
+          }
+        } else if laneActive[i] {
+          pendingLoop.append(PendingLoop(time: time, lane: i, start: false, seconds: 0, fade: 3.0))
+          laneActive[i] = false
+        }
+        continue
+      }
       if lane.on && ready && allowed {
         let span = max(1, lane.bars) * barTicks
         if !laneActive[i] || (tick - laneStart[i]) % span == 0 {
@@ -1868,7 +1888,7 @@ final class MidiBedEngine {
       synth.loops.load(lane: i, path: path)
       synth.loops.setMix(lane: i, level: Float(lane?.level ?? 1), pan: Float(lane?.pan ?? 0))
       // A tempo change: the lane keeps its place at its new speed.
-      if let l = lane { synth.loops.fit(lane: i, seconds: loopSeconds(l.bars, cfg), repeats: max(1, l.repeats), follow: l.follow ?? true, semis: l.semis ?? 0) }
+      if let l = lane { synth.loops.fit(lane: i, seconds: l.ambience == true ? max(0.5, l.seconds ?? 10) : loopSeconds(l.bars, cfg), repeats: max(1, l.repeats), follow: l.follow ?? true, semis: l.semis ?? 0) }
     }
   }
 
@@ -1880,7 +1900,7 @@ final class MidiBedEngine {
         // With tight timing the lane starts or stops on the exact sample the bar line falls on, the same lead after
         // its time as the notes (so a loop and the drums land together).
         let at = (config?.tightTiming ?? true) ? p.time + synth.scheduleLead : 0
-        if p.start { synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats, at: at) } else { synth.loops.stop(lane: p.lane, fade: p.fade, at: at) }
+        if p.start { synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats, at: at, fadeIn: p.fadeIn) } else { synth.loops.stop(lane: p.lane, fade: p.fade, at: at) }
       } else {
         later.append(p)
       }
@@ -2094,6 +2114,13 @@ final class MidiBedEngine {
     let beat = 60.0 / bpm
     let now = ProcessInfo.processInfo.systemUptime
     let tp = pick.peak
+    if cfg.transitions.swellOnBar == true {
+      pendingNoise.append(
+        PendingNoise(
+          time: max(now, barTime), tag: tag, shape: -1, color: 0, pre: tp, post: max(0, pick.seconds - tp), offset: 0, level: level,
+          samplePtr: pick.ptr, sampleCount: pick.count))
+      return
+    }
     var offset = 0.0
     if tp > 0.25 {
       let remaining = barTime - now

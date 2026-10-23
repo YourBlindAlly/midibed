@@ -54,8 +54,8 @@ describe('loop names, lengths and the library', () => {
 
 describe('lanes', () => {
   it('start empty and off, and are four', () => {
-    expect(LANE_COUNT).toBe(4);
-    expect(defaultState.lanes).toHaveLength(4);
+    expect(LANE_COUNT).toBe(5);
+    expect(defaultState.lanes).toHaveLength(5);
     expect(defaultState.lanes.every((l) => l.loop === '' && !l.on)).toBe(true);
     expect(BAR_CHOICES[0]).toBe(-1);
     expect(BAR_CHOICES[1]).toBe(0);
@@ -83,7 +83,7 @@ describe('lanes', () => {
     setLoopDir('file:///x/loops/');
     const lib = addToLibrary('[]', [entry()]);
     const s = { ...defaultState, loopLib: lib, lanes: defaultLanes().map((l, i) => (i === 0 ? { ...l, loop: 'Set/PL_Bongos_90', on: true } : l)) };
-    expect(JSON.parse(toEngineJson(s)).lanes).toHaveLength(4);
+    expect(JSON.parse(toEngineJson(s)).lanes).toHaveLength(5);
     expect(JSON.parse(toEngineJson(s)).lanes[0].on).toBe(true);
     const moved = switchScene(s, 1);
     expect(moved.lanes[0].on).toBe(false); // scene 2 starts with empty lanes
@@ -98,8 +98,8 @@ describe('lanes', () => {
     expect(out.scenes[2].lanes[1]).toMatchObject({ loop: 'a', on: true });
     expect(out.scenes[2].drums).toEqual(s.scenes[2].drums);
     const migrated = migrateState({});
-    expect(migrated.lanes).toHaveLength(4);
-    expect(migrated.scenes.every((sc) => sc.lanes.length === 4)).toBe(true);
+    expect(migrated.lanes).toHaveLength(5);
+    expect(migrated.scenes.every((sc) => sc.lanes.length === 5)).toBe(true);
     expect(migrated.loopLib).toBe('[]');
   });
 });
@@ -344,5 +344,19 @@ describe('pitch shift in semitones', () => {
     expect(m.lanes[1].follow).toBe(true);
     expect(m.scenes[1].lanes[0].follow).toBe(false);
     expect((m.lanes[0] as any).keepPitch).toBeUndefined();
+  });
+});
+
+describe('ambience lane', () => {
+  it('is the last lane and carries the file length, natural settings', () => {
+    const lib = JSON.stringify([{ id: 'Bed/ocean.flac', name: 'ocean', folder: 'Bed', file: 'Bed - ocean.flac', seconds: 30, bpm: 88, bars: 11, repeats: 1 }]);
+    const lanes = defaultLanes();
+    lanes[4] = { ...lanes[4], loop: 'Bed/ocean.flac', on: true, semis: 5, follow: false };
+    const out = lanesForEngine(lanes, lib, 100, 120);
+    expect(out[4].ambience).toBe(true);
+    expect(out[4].seconds).toBe(30);
+    expect(out[4].semis).toBe(0);
+    expect(out[4].follow).toBe(true);
+    expect(out[0].ambience).toBe(false);
   });
 });

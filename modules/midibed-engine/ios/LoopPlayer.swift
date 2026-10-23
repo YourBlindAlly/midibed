@@ -16,7 +16,7 @@ import Foundation
 /// Thread safety: the control side (engine queue, loader queue) and the audio thread share one
 /// os_unfair_lock. The audio thread only ever try-locks (one buffer of loops is skipped if the lock is busy).
 final class LoopPlayer {
-  static let laneCount = 4
+  static let laneCount = 5
 
   private final class Buf {
     let frames: Int
@@ -61,6 +61,7 @@ final class LoopPlayer {
     var stopPending = false
     var stopAt: Double = 0
     var stopFade: Float = 0.03
+    var startFade: Float = 0.008
   }
 
   private var lanes = [Lane](repeating: Lane(), count: LoopPlayer.laneCount)
@@ -169,10 +170,11 @@ final class LoopPlayer {
 
   /// Start from the top. `seconds` is how long the loop's bars last at the current tempo. With `at` (an
   /// engine-clock time, see MidiBedTestSynth.syncClock) the start happens on that exact sample; 0 = now.
-  func start(lane: Int, seconds: Double, repeats: Int = 1, at: Double = 0) {
+  func start(lane: Int, seconds: Double, repeats: Int = 1, at: Double = 0, fadeIn: Float = 0.008) {
     guard lane >= 0, lane < LoopPlayer.laneCount else { return }
     os_unfair_lock_lock(lock)
     if lanes[lane].raw != nil, seconds > 0.05 {
+      lanes[lane].startFade = max(0.008, fadeIn)
       lanes[lane].wantSeconds = seconds
       lanes[lane].wantRepeats = max(1, repeats)
       if at > 0 {
@@ -212,7 +214,7 @@ final class LoopPlayer {
       lanes[lane].posFrames = 0
       lanes[lane].playing = true
       lanes[lane].target = lanes[lane].level
-      lanes[lane].fadeSec = 0.008
+      lanes[lane].fadeSec = lanes[lane].startFade
     } else {
       lanes[lane].stopPending = false
       lanes[lane].target = 0

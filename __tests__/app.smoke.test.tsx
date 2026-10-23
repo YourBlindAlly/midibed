@@ -158,7 +158,7 @@ describe('loop player tab', () => {
     expect(tab).toBeDefined();
     await act(async () => tab.props.onPress());
     const names = labels(tree);
-    expect(names).toEqual(expect.arrayContaining(['Add loops from a folder', 'Lane 1 plays', 'Lane 4 plays', 'Lane 1 loop', 'Lane 1 length', 'Loop player reverb']));
+    expect(names).toEqual(expect.arrayContaining(['Add loops from a folder', 'Lane 1 plays', 'Lane 4 plays', 'Ambience lane plays', 'Lane 1 loop', 'Lane 1 length', 'Loop player reverb']));
     expect(names).not.toContain('Clear the loop library'); // nothing in the library yet
     expect(names).not.toContain('Tempo');
   });

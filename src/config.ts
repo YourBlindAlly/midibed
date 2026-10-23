@@ -354,6 +354,8 @@ export type BedState = {
   noiseVersion: number;
   /** A lead-in needs at least this many eighth notes before the change, or only its downer plays on the beat. */
   transitionMinEighths: number;
+  /** Sound-pack swells: false = the loudest part lands on the bar line (default); true = the swell starts on the bar line. */
+  swellOnBar: boolean;
   pad: PadState;
   fade: FadeState;
   sounds: SoundSlot[];
@@ -906,6 +908,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   transitionUse: defaultTransitionUse,
   noiseVersion: NOISE_VERSION,
   transitionMinEighths: 1,
+  swellOnBar: false,
   harmony: {
     mode: 1, // Dorian
     preset: 5, // Folk turn
@@ -1450,6 +1453,7 @@ export function toEngineJson(s: BedState): string {
     motion: s.motion,
     transitions: {
       minLeadBeats: s.transitionMinEighths / 2,
+      swellOnBar: s.swellOnBar === true,
       entrance: { ...slotForEngine(s.transitions.entrance), on: s.transitions.entrance.on && s.transitionUse.entrance, level: s.transitions.entrance.level / 100, ...sampleOf(plan.entrance) },
       drumBreak: { ...slotForEngine(s.transitions.drumBreak), on: s.transitions.drumBreak.on && s.transitionUse.drumBreak, level: s.transitions.drumBreak.level / 100, ...sampleOf(plan.drumBreak) },
       drumReturn: { ...slotForEngine(s.transitions.drumReturn), on: s.transitions.drumReturn.on && s.transitionUse.drumReturn, level: s.transitions.drumReturn.level / 100, ...sampleOf(plan.drumReturn) },

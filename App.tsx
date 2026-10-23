@@ -58,7 +58,7 @@ import {
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
 import { LANE_BREATHE_NAMES } from './src/lanebreath';
-import { BAR_CHOICES, LANE_COUNT, LibraryLoop, SEMI_RANGE, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
+import { AMBIENCE_LANE, BAR_CHOICES, LANE_COUNT, LibraryLoop, SEMI_RANGE, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -1114,7 +1114,7 @@ export default function App() {
   }, [state.loopLib]);
   const loopFolders = folderNames(loopLib);
   const instruments = instrumentList(loopLib);
-  const [laneBrowse, setLaneBrowse] = useState<number[]>([0, 0, 0, 0]);
+  const [laneBrowse, setLaneBrowse] = useState<number[]>([0, 0, 0, 0, 0]);
   const [importNote, setImportNote] = useState('');
   // What the lane browser shows: how close to the tempo, and words the loop's name must contain.
   const [loopNear, setLoopNear] = useState(0);
@@ -2921,16 +2921,23 @@ export default function App() {
             // The loop already in the lane stays in the list even if the filter would hide it.
             if (current && !inFolder.some((l) => l.id === current.id)) inFolder = [current, ...inFolder];
             const loopIdx = Math.max(0, inFolder.findIndex((l) => l.id === lane.loop) + 1);
+            const amb = i === AMBIENCE_LANE;
+            const lname = amb ? "Ambience lane" : `Lane ${i + 1}`;
             return (
-              <Section key={`lane${i}`} title={`Lane ${i + 1}`} id={`Loop lane ${i + 1}`}>
+              <Section key={`lane${i}`} title={lname} id={amb ? 'Ambience lane' : `Loop lane ${i + 1}`}>
+                {amb && (
+                  <Note>
+                    For beds like the ocean drum loops. It plays at the file's natural speed whatever the tempo, fades in slowly when it starts and out slowly when it stops, and keeps going when the scene changes if the next scene has the same file on. Pick seamless loops.
+                  </Note>
+                )}
                 <Toggle
-                  label={`Lane ${i + 1} plays`}
+                  label={`${lname} plays`}
                   value={lane.on}
                   onChange={(v) => patchLane(i, { on: v })}
                   hint="Starts or stops on the next bar line. Saved with the scene"
                 />
                 <Stepper
-                  label={`Lane ${i + 1} folder`}
+                  label={`${lname} folder`}
                   value={browseIdx}
                   onChange={(v) => setLaneBrowse((b) => b.map((x, k) => (k === i ? Math.max(0, Math.min(loopFolders.length, v)) : x)))}
                   min={0}
@@ -2939,7 +2946,7 @@ export default function App() {
                   hint="Which folder's loops the loop stepper below goes through. All folders mixes them. The tempo and name filters at the top narrow it further"
                 />
                 <Stepper
-                  label={`Lane ${i + 1} loop`}
+                  label={`${lname} loop`}
                   value={loopIdx}
                   onChange={(v) => {
                     const n = Math.max(0, Math.min(inFolder.length, v));
@@ -2950,8 +2957,8 @@ export default function App() {
                   format={(v) => (v === 0 ? 'empty' : `${inFolder[v - 1].name}, ${inFolder[v - 1].bars} ${inFolder[v - 1].bars === 1 ? 'bar' : 'bars'}${inFolder[v - 1].bpm ? `, ${inFolder[v - 1].bpm} BPM` : ''}`)}
                   hint="Which loop is in this lane. It goes through the loops that pass the filters"
                 />
-                <Stepper
-                  label={`Lane ${i + 1} length`}
+                {!amb && <Stepper
+                  label={`${lname} length`}
                   value={Math.max(0, BAR_CHOICES.indexOf(lane.bars))}
                   onChange={(v) => patchLane(i, { bars: BAR_CHOICES[Math.max(0, Math.min(BAR_CHOICES.length - 1, v))] })}
                   min={0}
@@ -2966,9 +2973,9 @@ export default function App() {
                     return `best fit: ${fit.bars} ${fit.bars === 1 ? 'bar' : 'bars'}${fit.repeats > 1 ? `, ${fit.repeats} times` : ''}, ${pct === 0 ? 'no speed change' : `${pct} percent ${fit.speed > 1 ? 'faster' : 'slower'}${!lane.follow ? ', pitch kept' : ''}`}`;
                   }}
                   hint="Best fit picks the length, or half or double it, that needs the smallest speed change at this tempo. As the file says uses the length worked out from its name. Or choose the bars yourself"
-                />
+                />}
                 <Stepper
-                  label={`Lane ${i + 1} breathing`}
+                  label={`${lname} breathing`}
                   value={lane.breathe}
                   onChange={(v) => patchLane(i, { breathe: v })}
                   min={0}
@@ -2978,19 +2985,19 @@ export default function App() {
                 />
                 {lane.breathe === 1 && (
                   <>
-                    <Stepper label={`Lane ${i + 1} plays for`} value={lane.breatheOn} onChange={(v) => patchLane(i, { breatheOn: v })} min={1} max={64} bigStep={4} format={(v) => (v === 1 ? '1 bar' : `${v} bars`)} />
-                    <Stepper label={`Lane ${i + 1} then rests for`} value={lane.breatheOff} onChange={(v) => patchLane(i, { breatheOff: v })} min={1} max={64} bigStep={4} format={(v) => (v === 1 ? '1 bar' : `${v} bars`)} />
-                    <Stepper label={`Lane ${i + 1} chance of resting`} value={lane.breatheChance} onChange={(v) => patchLane(i, { breatheChance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} hint="When its playing turn ends, the chance that it really rests" />
+                    <Stepper label={`${lname} plays for`} value={lane.breatheOn} onChange={(v) => patchLane(i, { breatheOn: v })} min={1} max={64} bigStep={4} format={(v) => (v === 1 ? '1 bar' : `${v} bars`)} />
+                    <Stepper label={`${lname} then rests for`} value={lane.breatheOff} onChange={(v) => patchLane(i, { breatheOff: v })} min={1} max={64} bigStep={4} format={(v) => (v === 1 ? '1 bar' : `${v} bars`)} />
+                    <Stepper label={`${lname} chance of resting`} value={lane.breatheChance} onChange={(v) => patchLane(i, { breatheChance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} hint="When its playing turn ends, the chance that it really rests" />
                   </>
                 )}
-                <Toggle
-                  label={`Lane ${i + 1} pitch follows the tempo`}
+                {!amb && <Toggle
+                  label={`${lname} pitch follows the tempo`}
                   value={lane.follow}
                   onChange={(v) => patchLane(i, { follow: v })}
                   hint="On: a plain speed change, so a slower tempo lowers the pitch. Off: the loop keeps its own pitch and is time-stretched to fit the tempo"
-                />
-                <Stepper
-                  label={`Lane ${i + 1} pitch shift`}
+                />}
+                {!amb && <Stepper
+                  label={`${lname} pitch shift`}
                   value={lane.semis}
                   onChange={(v) => patchLane(i, { semis: v })}
                   min={-SEMI_RANGE}
@@ -2998,9 +3005,9 @@ export default function App() {
                   bigStep={5}
                   format={(v) => (v === 0 ? 'no shift' : `${v > 0 ? 'up' : 'down'} ${Math.abs(v)} ${Math.abs(v) === 1 ? 'semitone' : 'semitones'}`)}
                   hint="Whole semitones. The loop still fills its bars. It may take a moment to be ready after a change"
-                />
+                />}
                 <Stepper
-                  label={`Lane ${i + 1} level`}
+                  label={`${lname} level`}
                   value={lane.level}
                   onChange={(v) => patchLane(i, { level: v })}
                   min={0}
@@ -3009,7 +3016,7 @@ export default function App() {
                   format={(v) => `${v} percent`}
                 />
                 <Stepper
-                  label={`Lane ${i + 1} balance`}
+                  label={`${lname} balance`}
                   value={lane.pan}
                   onChange={(v) => patchLane(i, { pan: v })}
                   min={-100}
@@ -3401,6 +3408,12 @@ export default function App() {
               max={8}
               format={eighthsText}
               hint="If a lead-in has less time than this before the change, it is skipped and only its falling sound plays on the beat. Wave plays its falling half, Wind plays a Crash."
+            />
+            <Toggle
+              label="Sound pack swells start on the bar"
+              value={state.swellOnBar}
+              onChange={(v) => patch({ swellOnBar: v })}
+              hint="Off: the loudest part of the swell lands on the bar line, so it builds up into the change. On: the swell starts on the bar line and blooms after it"
             />
           </Section>
 
