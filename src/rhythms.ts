@@ -61,7 +61,38 @@ export function clampRhythm(i: number): number {
 /** The pattern as bits (bit n = step n plays). */
 export function rhythmMask(i: number): number {
   const r = RHYTHMS[clampRhythm(i)];
-  return r.hits.reduce((m, h) => m | (1 << h), 0);
+  return r.hits.reduce((m, h) => m + 2 ** h, 0);
+}
+
+/** How many rhythms come with the app; the ones after these were loaded from a file and are always appended. */
+export const BUILTIN_RHYTHM_COUNT = RHYTHMS.length;
+
+/** A rhythm from a file, or null if it is not usable (name, 1 to 32 steps, hits inside the steps). */
+export function checkRhythm(raw: unknown): Rhythm | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const name = typeof r.name === 'string' ? r.name.trim().slice(0, 40) : '';
+  const steps = Number(r.steps);
+  if (!name || !Number.isInteger(steps) || steps < 1 || steps > 32 || !Array.isArray(r.hits)) return null;
+  const hits = [...new Set(r.hits.map(Number))].filter((h) => Number.isInteger(h) && h >= 0 && h < steps).sort((a, b) => a - b);
+  if (hits.length !== new Set(r.hits.map(Number)).size) return null;
+  return { name, steps, hits };
+}
+
+/**
+ * Add rhythms from a file to the end of the library (a name already there is left as it is, so numbers saved in
+ * scenes keep their meaning). Returns the names that were added.
+ */
+export function registerRhythms(list: unknown): string[] {
+  const added: string[] = [];
+  if (!Array.isArray(list)) return added;
+  for (const raw of list) {
+    const r = checkRhythm(raw);
+    if (!r || RHYTHMS.some((x) => x.name === r.name)) continue;
+    RHYTHMS.push(r);
+    added.push(r.name);
+  }
+  return added;
 }
 
 /** The pattern with the rotation applied, as one boolean per step. */

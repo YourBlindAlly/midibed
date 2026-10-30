@@ -12,8 +12,10 @@ import type { BedState, DrumState } from './config';
 import { RHYTHMS } from './rhythms';
 
 export type SlotSpec = {
-  /** Name of a rhythm in the library (src/rhythms.ts). */
+  /** Name of a rhythm in the library (src/rhythms.ts); '' with `euclid` set means the Euclidean spread. */
   rhythm: string;
+  /** The Euclidean spread instead of a library rhythm (a groove saved from drums that use hits and steps). */
+  euclid?: { hits: number; steps: number };
   velocity: number;
   rotation?: number;
   /** Chance a hit plays, percent (default 100). */
@@ -236,9 +238,40 @@ export const GROOVES: Groove[] = [
   },
 ];
 
+/** Grooves the player saved or loaded from a file (a module registry like the custom apps; set on every render). */
+let userGrooveList: Groove[] = [];
+
+/** The saved text for grooves: a JSON list. Anything unusable is dropped. */
+export function parseUserGrooves(text: string): Groove[] {
+  try {
+    const raw = JSON.parse(text);
+    if (!Array.isArray(raw)) return [];
+    return raw.map((g) => checkGroove(g).groove).filter((g): g is Groove => g !== null);
+  } catch {
+    return [];
+  }
+}
+
+export function setUserGrooves(list: Groove[]): void {
+  userGrooveList = list;
+}
+
+/** Built-in grooves first (a saved groove with the same name takes its place), then the rest of the saved ones. */
+export function allGrooves(): Groove[] {
+  const byName = new Map(userGrooveList.map((g) => [g.name, g]));
+  const base = GROOVES.map((g) => byName.get(g.name) ?? g);
+  const extra = userGrooveList.filter((g) => !GROOVES.some((b) => b.name === g.name));
+  return [...base, ...extra];
+}
+
 export function grooveIndexById(id: string): number {
-  const i = GROOVES.findIndex((g) => g.id === id);
+  const i = allGrooves().findIndex((g) => g.id === id);
   return i < 0 ? 0 : i;
+}
+
+/** True for a groove the player saved or loaded (not one that only comes with the app). */
+export function isUserGroove(g: Groove): boolean {
+  return userGrooveList.some((u) => u.name === g.name);
 }
 
 function rhythmIndex(name: string): number {
@@ -246,22 +279,40 @@ function rhythmIndex(name: string): number {
   return i < 0 ? 0 : i;
 }
 
-/** Set the scene's drums and swing to a groove. Sounds, notes and channels are kept. */
-export function applyGroove(s: BedState, index: number): BedState {
-  const g = GROOVES[Math.max(0, Math.min(GROOVES.length - 1, Math.round(index)))];
+/** The levels of 'keep the extras sparse', for the screen. */
+export const THIN_NAMES = ['As written', 'A little sparser', 'Sparser', 'Very sparse', 'Kick and snare only'];
+// Kit places left out at each level (0 kick, 1 snare, 2 hat, 3 shaker, 4 tambourine, 5 low tom, 6 mid tom, 7 high tom):
+// level 2 drops the high and mid toms, level 3 all the toms and the tambourine, level 4 everything but the kick and snare.
+const THIN_DROP: number[][] = [[], [], [7, 6], [7, 6, 5, 4], [2, 3, 4, 5, 6, 7]];
+const THIN_CHANCE = [1, 0.8, 0.6, 0.45, 0];
+const THIN_VELOCITY = [1, 0.92, 0.85, 0.8, 1];
+
+/**
+ * Set the scene's drums and swing to a groove. Sounds, notes and channels are kept. `thin` (0 to 4) thins the extras
+ * (everything but the kick and snare): fewer of their hits play, no ghost notes, a bit softer, and from level 2 the
+ * toms (then the tambourine) are left out; level 4 keeps only the kick and snare.
+ */
+export function applyGroove(s: BedState, index: number, thin = 0): BedState {
+  const list = allGrooves();
+  const g = list[Math.max(0, Math.min(list.length - 1, Math.round(index)))];
+  const level = Math.max(0, Math.min(4, Math.round(thin)));
   const drums = s.drums.map((d, i) => {
     const spec = g.slots[i];
     if (i >= g.slots.length) return d;
-    if (!spec) return { ...d, enabled: false };
+    if (!spec || THIN_DROP[level].includes(i)) return { ...d, enabled: false };
+    const extra = i >= 2;
+    const euclid = spec.euclid && !RHYTHMS.some((r) => r.name === spec.rhythm) ? spec.euclid : null;
+    const chance = Math.round((spec.chance ?? 100) * (extra ? THIN_CHANCE[level] : 1));
     return {
       ...d,
       enabled: true,
-      rhythm: rhythmIndex(spec.rhythm),
+      rhythm: euclid ? 0 : rhythmIndex(spec.rhythm),
+      ...(euclid ? { hits: Math.min(euclid.hits, euclid.steps), steps: euclid.steps } : {}),
       rotation: spec.rotation ?? 0,
-      velocity: spec.velocity,
-      probability: spec.chance ?? 100,
+      velocity: Math.max(1, Math.round(spec.velocity * (extra ? THIN_VELOCITY[level] : 1))),
+      probability: Math.max(1, chance),
       humanize: spec.humanize ?? 20,
-      ghostHits: spec.ghost?.hits ?? 0,
+      ghostHits: extra && level > 0 ? 0 : spec.ghost?.hits ?? 0,
       ghostRotation: spec.ghost?.rotation ?? 0,
       ghostVelocity: spec.ghost?.velocity ?? 40,
       accentEvery: spec.accent?.every ?? 0,
@@ -272,6 +323,87 @@ export function applyGroove(s: BedState, index: number): BedState {
     };
   });
   return { ...s, drums, swing: g.swing };
+}
+
+const num = (v: unknown, lo: number, hi: number, fallback: number): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : fallback;
+};
+
+/** One slot from a file: null for an off drum, a cleaned spec, or undefined if it cannot be used. */
+function checkSlot(raw: unknown, problems: string[], label: string): SlotSpec | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const rhythm = typeof r.rhythm === 'string' ? r.rhythm : '';
+  let euclid: SlotSpec['euclid'];
+  if (r.euclid && typeof r.euclid === 'object') {
+    const e = r.euclid as Record<string, unknown>;
+    const steps = num(e.steps, 1, 32, 16);
+    euclid = { hits: num(e.hits, 0, steps, 0), steps };
+  }
+  if (!euclid && !RHYTHMS.some((x) => x.name === rhythm)) {
+    problems.push(`${label}: there is no rhythm called "${rhythm}"`);
+    return undefined;
+  }
+  const spec: SlotSpec = { rhythm, velocity: num(r.velocity, 1, 127, 80) };
+  if (euclid) spec.euclid = euclid;
+  if (r.rotation !== undefined) spec.rotation = num(r.rotation, 0, 31, 0);
+  if (r.chance !== undefined) spec.chance = num(r.chance, 1, 100, 100);
+  if (r.humanize !== undefined) spec.humanize = num(r.humanize, 0, 100, 20);
+  if (r.looseMs !== undefined) spec.looseMs = num(r.looseMs, 0, 40, 0);
+  if (r.keepFirst !== undefined) spec.keepFirst = r.keepFirst === true;
+  if (r.ghost && typeof r.ghost === 'object') {
+    const gh = r.ghost as Record<string, unknown>;
+    spec.ghost = { hits: num(gh.hits, 0, 32, 0), rotation: num(gh.rotation, 0, 31, 0), velocity: num(gh.velocity, 1, 127, 40) };
+  }
+  if (r.accent && typeof r.accent === 'object') {
+    const ac = r.accent as Record<string, unknown>;
+    spec.accent = { every: num(ac.every, 0, 8, 0), boost: num(ac.boost, 0, 100, 30), offset: num(ac.offset, 0, 7, 0) };
+  }
+  return spec;
+}
+
+/** A groove from a file or a saved list, or why not. Missing drums at the end count as off. */
+export function checkGroove(raw: unknown): { groove: Groove | null; problems: string[] } {
+  const problems: string[] = [];
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { groove: null, problems: ['a groove that is not an object'] };
+  const r = raw as Record<string, unknown>;
+  const name = typeof r.name === 'string' ? r.name.trim().slice(0, 40) : '';
+  if (!name) return { groove: null, problems: ['a groove without a name'] };
+  if (!Array.isArray(r.slots)) return { groove: null, problems: [`${name}: no drums listed`] };
+  const slots: (SlotSpec | null)[] = [];
+  for (let i = 0; i < 8; i++) {
+    const c = i < r.slots.length ? checkSlot(r.slots[i], problems, `${name}, drum ${i + 1}`) : null;
+    if (c === undefined) return { groove: null, problems: problems.length ? problems : [`${name}: drum ${i + 1} is not usable`] };
+    slots.push(c);
+  }
+  if (!slots.some((x) => x !== null)) return { groove: null, problems: [`${name}: every drum is off`] };
+  const about = typeof r.about === 'string' && r.about.trim() ? r.about.trim().slice(0, 300) : 'A groove you saved or loaded.';
+  const id = typeof r.id === 'string' && r.id ? r.id : `mine-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  return { groove: { id, name, about, swing: num(r.swing, 0, 60, 0), slots }, problems };
+}
+
+/** Save the scene's drums as a groove: each drum's pattern as it is now, and the swing. */
+export function captureGroove(s: BedState, name: string): Groove {
+  const slots = s.drums.slice(0, 8).map((d): SlotSpec | null => {
+    if (!d.enabled) return null;
+    const spec: SlotSpec =
+      d.rhythm > 0 && RHYTHMS[d.rhythm]
+        ? { rhythm: RHYTHMS[d.rhythm].name, velocity: d.velocity }
+        : { rhythm: '', euclid: { hits: d.hits, steps: d.steps }, velocity: d.velocity };
+    if (d.rotation) spec.rotation = d.rotation;
+    if (d.probability < 100) spec.chance = d.probability;
+    spec.humanize = d.humanize;
+    if (d.ghostHits > 0) spec.ghost = { hits: d.ghostHits, rotation: d.ghostRotation, velocity: d.ghostVelocity };
+    if (d.accentEvery > 0) spec.accent = { every: d.accentEvery, boost: d.accentBoost, offset: d.accentOffset };
+    if (d.keepFirst) spec.keepFirst = true;
+    if (d.looseMs > 0) spec.looseMs = d.looseMs;
+    return spec;
+  });
+  while (slots.length < 8) slots.push(null);
+  const clean = name.trim().slice(0, 40) || 'My groove';
+  return { id: `mine-${clean.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, name: clean, about: 'A groove you saved from your own drums.', swing: s.swing, slots };
 }
 
 const PATTERN_FIELDS = [

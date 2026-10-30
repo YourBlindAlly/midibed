@@ -70,7 +70,8 @@ import { MAX_PACK_GROUPS, cleanGroupName, groupNames, levelOf, packNames, parseP
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
 import { createPedal } from './src/pedal';
-import { GROOVES, GrooveMemory, applyGroove, rememberGroove, restoreGroove } from './src/grooves';
+import { GrooveMemory, THIN_NAMES, allGrooves, applyGroove, captureGroove, isUserGroove, rememberGroove, restoreGroove } from './src/grooves';
+import { GROOVE_FILE_NAME, grooveFileText, loadGrooveFile, removeGroove, saveGroove, syncUserLibrary } from './src/grooveFile';
 import { BACKUP_FILE_NAME, backupText, keepFoundLoops, parseBackup } from './src/backup';
 import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, idForMidi, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
 import { levelText, mixerMessages, synthLevelMessages } from './src/mixer';
@@ -468,6 +469,8 @@ export default function App() {
   const loopsProfile = getProfile(state.profiles.loops);
   const fadeProfile = [droneProfile, padProfile].find((p) => p.fadeCC !== undefined);
   setCustomApps(parseCustomApps(state.customApps));
+  syncUserLibrary(state);
+  const GROOVES = allGrooves();
   const patchProfile = (role: ProfileRole, id: string) =>
     setState((s) => ({ ...s, profiles: { ...s.profiles, [role]: id } }));
   const noteLabel = (n: number) => {
@@ -527,10 +530,75 @@ export default function App() {
   // A groove for the whole kit (src/grooves.ts); Undo brings the previous patterns and swing back.
   const [grooveIdx, setGrooveIdx] = useState(0);
   const [grooveMemory, setGrooveMemory] = useState<GrooveMemory | null>(null);
+  const grooveSel = Math.min(grooveIdx, GROOVES.length - 1);
+  const [grooveName, setGrooveName] = useState('');
+  const [grooveNote, setGrooveNote] = useState('');
+  const saveMyGroove = () => {
+    const name = grooveName.trim() || `My groove ${GROOVES.filter((g) => isUserGroove(g)).length + 1}`;
+    const g = captureGroove(latest.current, name);
+    setState((s) => saveGroove(s, g));
+    setGrooveName('');
+    setGrooveNote(`Saved the groove ${g.name}. It is in the Groove list.`);
+    announceLater(`Saved the groove ${g.name}`, 150);
+    // Show it in the list once it is there.
+    setTimeout(() => {
+      const i = allGrooves().findIndex((x) => x.name === g.name);
+      if (i >= 0) setGrooveIdx(i);
+    }, 0);
+  };
+  const removeMyGroove = () => {
+    const g = GROOVES[grooveSel];
+    setState((s) => removeGroove(s, g.name));
+    setGrooveNote(`Removed the groove ${g.name}.`);
+    announceLater(`Removed the groove ${g.name}`, 150);
+    setGrooveIdx(0);
+  };
+  // Grooves, rhythms and journeys from a file (Setup > Grooves and journeys from a file).
+  const [fileNote, setFileNote] = useState('');
+  const [grooveFilePath, setGrooveFilePath] = useState<string | null>(null);
+  const loadGrooveFileFromPhone = async () => {
+    if (!fsApi) {
+      setFileNote('Loading a file works in the app on the phone.');
+      return;
+    }
+    try {
+      const picked = await fsApi.File.pickFileAsync({ mimeTypes: ['application/json', 'text/plain', '*/*'] });
+      if (picked.canceled || !picked.result) return;
+      const text = await picked.result.text();
+      const r = loadGrooveFile(latest.current, text);
+      if (r.ok) setState(r.state);
+      setFileNote(r.summary);
+      announceLater(r.summary, 100);
+    } catch {
+      setFileNote('The file could not be read.');
+      announceLater('The file could not be read', 100);
+    }
+  };
+  const saveGrooveFile = (which: 'grooves' | 'thisJourney' | 'allJourneys') => {
+    if (!fsApi) {
+      setFileNote('Saving a file works in the app on the phone.');
+      return;
+    }
+    try {
+      const st = latest.current;
+      const text = grooveFileText(st, which === 'grooves' ? 'none' : which === 'thisJourney' ? [st.activeJourney] : 'all');
+      const dir = new fsApi.Directory(fsApi.Paths.document, 'backup');
+      dir.create({ intermediates: true, idempotent: true });
+      const file = new fsApi.File(dir, GROOVE_FILE_NAME);
+      file.create({ overwrite: true });
+      file.write(text);
+      setGrooveFilePath(file.uri);
+      setFileNote(`Saved. The file is called ${GROOVE_FILE_NAME}, in the backup folder of the MidiBed folder in the Files app.`);
+      announceLater('File saved', 100);
+    } catch {
+      setFileNote('The file could not be saved.');
+      announceLater('The file could not be saved', 100);
+    }
+  };
   const applyKitGroove = () => {
     setGrooveMemory(rememberGroove(latest.current));
-    setState((s) => applyGroove(s, grooveIdx));
-    announceLater(`Groove: ${GROOVES[grooveIdx].name}`, 150);
+    setState((s) => applyGroove(s, grooveSel, s.grooveThin));
+    announceLater(`Groove: ${GROOVES[grooveSel].name}`, 150);
   };
   const undoKitGroove = () => {
     if (!grooveMemory) return;
@@ -2223,22 +2291,56 @@ export default function App() {
           <Section title="Drum" fixed>
             <Stepper
               label="Groove"
-              value={grooveIdx}
+              value={grooveSel}
               onChange={setGrooveIdx}
               min={0}
               max={GROOVES.length - 1}
-              format={(v) => GROOVES[v].name}
-              hint={GROOVES[grooveIdx].about}
+              format={(v) => `${GROOVES[v].name}${isUserGroove(GROOVES[v]) ? ', mine' : ''}`}
+              hint={GROOVES[grooveSel].about}
             />
-            <View accessible accessibilityLabel="About this groove" accessibilityValue={{ text: GROOVES[grooveIdx].about }}>
-              <Text style={styles.note}>{GROOVES[grooveIdx].about}</Text>
+            <View accessible accessibilityLabel="About this groove" accessibilityValue={{ text: GROOVES[grooveSel].about }}>
+              <Text style={styles.note}>{GROOVES[grooveSel].about}</Text>
             </View>
+            <Stepper
+              label="Extra drums in a groove"
+              value={state.grooveThin}
+              onChange={(v) => patch({ grooveThin: v })}
+              min={0}
+              max={THIN_NAMES.length - 1}
+              format={(v) => THIN_NAMES[v]}
+              hint="How sparse the hat, shaker, tambourine and toms are when you apply a groove. Sparser plays fewer of their hits, drops the ghost notes and the toms, and the last level keeps only the kick and snare. The kick and snare stay as written"
+            />
             <ActionButton
-              label={`Apply the groove ${GROOVES[grooveIdx].name} to this scene`}
+              label={`Apply the groove ${GROOVES[grooveSel].name} to this scene`}
               hint="Sets which drums play and their patterns, and the swing. Your drum sounds, notes and channels stay. You can undo it"
               onPress={applyKitGroove}
             />
             {grooveMemory !== null && <ActionButton label="Undo the groove" onPress={undoKitGroove} />}
+            <View style={styles.nameBox}>
+              <Text style={styles.note}>Name for my groove</Text>
+              <TextInput
+                style={styles.nameInput}
+                value={grooveName}
+                onChangeText={setGrooveName}
+                accessibilityLabel="Name for my groove"
+                accessibilityHint="Type a name, then use the save button. Leave it empty for a number"
+                maxLength={40}
+                autoCorrect={false}
+                placeholderTextColor={colors.dim}
+                onBlur={() => engine.reclaimKeys()}
+              />
+            </View>
+            <ActionButton
+              label="Save the current drums as my groove"
+              hint="Keeps every drum's pattern and the swing as they are now, under the name above. It joins the Groove list. A groove of yours with the same name is replaced"
+              onPress={saveMyGroove}
+            />
+            {isUserGroove(GROOVES[grooveSel]) && <ActionButton label={`Remove my groove ${GROOVES[grooveSel].name}`} onPress={removeMyGroove} />}
+            {grooveNote ? (
+              <View accessible accessibilityLabel="Groove status" accessibilityValue={{ text: grooveNote }}>
+                <Text style={styles.note}>{grooveNote}</Text>
+              </View>
+            ) : null}
             <ActionButton
               label="Silence all drum patterns"
               hint="Sets every drum's hits to 0 in this scene, so you can build a groove up one drum at a time"
@@ -3720,6 +3822,29 @@ export default function App() {
             {backupNote ? (
               <View accessible accessibilityLabel="Backup status" accessibilityValue={{ text: backupNote }}>
                 <Text style={styles.note}>{backupNote}</Text>
+              </View>
+            ) : null}
+          </Section>
+          <Section title="Grooves and journeys from a file">
+            <Note>
+              Add grooves, rhythms and journeys from a file without a new build, for example one that sits in Dropbox. Choose Load, then pick the file in the Files list (Dropbox shows there when its app is on the phone). Everything in the file is added: a journey never replaces one you have, and a groove only replaces one of yours with the same name. You can also save your own grooves and a journey to a file to keep or share.
+            </Note>
+            <ActionButton label="Load grooves and journeys from a file" onPress={() => void loadGrooveFileFromPhone()} />
+            <ActionButton label="Save my grooves to a file" onPress={() => saveGrooveFile('grooves')} />
+            <ActionButton label="Save this journey and my grooves to a file" onPress={() => saveGrooveFile('thisJourney')} />
+            <ActionButton label="Save all journeys and my grooves to a file" onPress={() => saveGrooveFile('allJourneys')} />
+            {grooveFilePath && (
+              <ActionButton
+                label="Share the grooves file"
+                hint="Opens the share sheet: AirDrop, Files, Dropbox, mail"
+                onPress={() => {
+                  Share.share({ url: encodeURI(grooveFilePath) }).catch(() => {});
+                }}
+              />
+            )}
+            {fileNote ? (
+              <View accessible accessibilityLabel="File status" accessibilityValue={{ text: fileNote }}>
+                <Text style={styles.note}>{fileNote}</Text>
               </View>
             ) : null}
           </Section>

@@ -297,6 +297,12 @@ export type BedState = {
   customApps: string;
   /** Sound favorites per app (profile id), as JSON; see soundFavs.ts. Global, not saved in a scene or journey. */
   soundFavs: string;
+  /** Grooves the player saved or loaded from a file, as JSON (src/grooves.ts). Global. */
+  userGrooves: string;
+  /** Rhythms loaded from a file, as JSON; appended to the library at run time (src/rhythms.ts). Global. */
+  userRhythms: string;
+  /** How sparse the extra drums are when a groove is applied: 0 as written ... 4 kick and snare only. */
+  grooveThin: number;
   /** MidiDancer: call-and-response phrases on the key's scale. Everything but the channel is saved per scene. */
   dancer: DancerState;
   /** Keys: a rhythmic electric piano that comps the chords. Everything but the channel is saved per scene. */
@@ -388,7 +394,7 @@ export type Journey = {
   sounds: JourneySound[];
 };
 
-export const MAX_JOURNEYS = 12;
+export const MAX_JOURNEYS = 24;
 
 /**
  * What a scene remembers. Deliberately NOT in a scene: tempo, the drone root,
@@ -815,6 +821,9 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   ports: { bass: false, pad: false, dancer: false, drums: false, keys: false },
   customApps: '[]',
   // Rusty's good Synth One pad presets, kept under the Synth One app.
+  userGrooves: '[]',
+  userRhythms: '[]',
+  grooveThin: 0,
   soundFavs: stringifyFavMap({ synthone: favsFromPrograms(parseFavorites(getProfile('synthone').favorites ?? '')) }),
   dancer: defaultDancer,
   keys: defaultKeys,
@@ -1283,6 +1292,16 @@ function resetLaneLevels(raw: unknown): unknown {
   return out;
 }
 
+/** A saved or loaded journey brought up to date: anything it lacks gets the defaults. */
+export function normalizeJourney(raw: unknown, template: Journey = captureJourney(defaultState)): Journey {
+  const j = mergeDefaults(template, raw);
+  return {
+    ...j,
+    activeScene: Math.max(0, Math.min(j.scenes.length - 1, j.activeScene)),
+    scenes: j.scenes.map((sc) => ({ ...sc, keyOffset: wrapOffset(sc.keyOffset), harmony: { ...sc.harmony, mode: clampMode(sc.harmony.mode) } })),
+  };
+}
+
 export function migrateState(rawInput0: unknown): BedState {
   const rawInput = resetLaneLevels(rawInput0);
   const lifted = markCustomMotion(liftHarmony(upgradeNoiseLevels(convertWanderers(convertKeepPitch(rawInput)))));
@@ -1342,16 +1361,7 @@ export function migrateState(rawInput0: unknown): BedState {
   const template = captureJourney(defaultState);
   const journeys: Journey[] = [];
   for (let i = 0; i < count; i++) {
-    if (i === activeJ) {
-      journeys.push(captureJourney(live));
-    } else {
-      const j = mergeDefaults(template, rawList[i]);
-      journeys.push({
-        ...j,
-        activeScene: Math.max(0, Math.min(j.scenes.length - 1, j.activeScene)),
-        scenes: j.scenes.map((sc) => ({ ...sc, keyOffset: wrapOffset(sc.keyOffset), harmony: { ...sc.harmony, mode: clampMode(sc.harmony.mode) } })),
-      });
-    }
+    journeys.push(i === activeJ ? captureJourney(live) : normalizeJourney(rawList[i], template));
   }
   return { ...live, journeys, activeJourney: activeJ };
 }
