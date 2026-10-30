@@ -1,0 +1,811 @@
+{
+ "kit": [
+  "Kick",
+  "Snare",
+  "Hat",
+  "Shaker",
+  "Tambourine",
+  "Low tom",
+  "Mid tom",
+  "High tom"
+ ],
+ "notes": [
+  36,
+  38,
+  42,
+  82,
+  54,
+  45,
+  47,
+  50
+ ],
+ "rhythms": [
+  {
+   "name": "Euclidean spread",
+   "steps": 0,
+   "hits": []
+  },
+  {
+   "name": "Son clave",
+   "steps": 16,
+   "hits": [
+    0,
+    3,
+    6,
+    10,
+    12
+   ]
+  },
+  {
+   "name": "Rumba clave",
+   "steps": 16,
+   "hits": [
+    0,
+    3,
+    7,
+    10,
+    12
+   ]
+  },
+  {
+   "name": "Bossa nova clave",
+   "steps": 16,
+   "hits": [
+    0,
+    3,
+    6,
+    10,
+    13
+   ]
+  },
+  {
+   "name": "Shiko",
+   "steps": 16,
+   "hits": [
+    0,
+    4,
+    6,
+    10,
+    12
+   ]
+  },
+  {
+   "name": "Soukous",
+   "steps": 16,
+   "hits": [
+    0,
+    3,
+    6,
+    10,
+    11
+   ]
+  },
+  {
+   "name": "Gahu",
+   "steps": 16,
+   "hits": [
+    0,
+    3,
+    6,
+    10,
+    14
+   ]
+  },
+  {
+   "name": "Bembe bell, 12 steps",
+   "steps": 12,
+   "hits": [
+    0,
+    2,
+    4,
+    5,
+    7,
+    9,
+    11
+   ]
+  },
+  {
+   "name": "Tresillo, 8 steps",
+   "steps": 8,
+   "hits": [
+    0,
+    3,
+    6
+   ]
+  },
+  {
+   "name": "Cinquillo, 8 steps",
+   "steps": 8,
+   "hits": [
+    0,
+    2,
+    3,
+    5,
+    6
+   ]
+  },
+  {
+   "name": "Habanera, 8 steps",
+   "steps": 8,
+   "hits": [
+    0,
+    3,
+    4,
+    6
+   ]
+  },
+  {
+   "name": "Four on the floor",
+   "steps": 16,
+   "hits": [
+    0,
+    4,
+    8,
+    12
+   ]
+  },
+  {
+   "name": "Backbeat",
+   "steps": 16,
+   "hits": [
+    4,
+    12
+   ]
+  },
+  {
+   "name": "Half time",
+   "steps": 16,
+   "hits": [
+    8
+   ]
+  },
+  {
+   "name": "Offbeat eighths",
+   "steps": 16,
+   "hits": [
+    2,
+    6,
+    10,
+    14
+   ]
+  },
+  {
+   "name": "Straight eighths",
+   "steps": 16,
+   "hits": [
+    0,
+    2,
+    4,
+    6,
+    8,
+    10,
+    12,
+    14
+   ]
+  },
+  {
+   "name": "Straight sixteenths",
+   "steps": 16,
+   "hits": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ]
+  },
+  {
+   "name": "Syncopated kick: 1, 2 e, 3",
+   "steps": 16,
+   "hits": [
+    0,
+    5,
+    8
+   ]
+  },
+  {
+   "name": "Kick on 1 and 3",
+   "steps": 16,
+   "hits": [
+    0,
+    8
+   ]
+  },
+  {
+   "name": "Beat 1 only",
+   "steps": 16,
+   "hits": [
+    0
+   ]
+  },
+  {
+   "name": "Heartbeat: lub-dub",
+   "steps": 16,
+   "hits": [
+    0,
+    3
+   ]
+  },
+  {
+   "name": "Downtempo kick: 1, a of 2",
+   "steps": 16,
+   "hits": [
+    0,
+    7
+   ]
+  },
+  {
+   "name": "Trip-hop kick",
+   "steps": 16,
+   "hits": [
+    0,
+    6,
+    11
+   ]
+  },
+  {
+   "name": "Boom bap kick",
+   "steps": 16,
+   "hits": [
+    0,
+    7,
+    10
+   ]
+  },
+  {
+   "name": "Lo-fi kick",
+   "steps": 16,
+   "hits": [
+    0,
+    8,
+    14
+   ]
+  },
+  {
+   "name": "Bossa kick",
+   "steps": 16,
+   "hits": [
+    0,
+    6,
+    8,
+    14
+   ]
+  }
+ ],
+ "grooves": [
+  {
+   "id": "ambient-pulse",
+   "name": "Ambient pulse",
+   "about": "Almost nothing: a soft kick once a bar and a faint shaker. For drones and deep rest, any tempo.",
+   "swing": 0,
+   "slots": [
+    {
+     "rhythm": "Beat 1 only",
+     "velocity": 66,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    null,
+    null,
+    {
+     "rhythm": "Offbeat eighths",
+     "velocity": 34,
+     "humanize": 40,
+     "chance": 55,
+     "looseMs": 10
+    },
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "heartbeat",
+   "name": "Heartbeat",
+   "about": "A slow lub-dub like a heartbeat, the first beat stronger. For meditation and breathing, 55 to 75 beats per minute.",
+   "swing": 0,
+   "slots": [
+    {
+     "rhythm": "Heartbeat: lub-dub",
+     "velocity": 70,
+     "keepFirst": true,
+     "humanize": 15,
+     "accent": {
+      "every": 2,
+      "boost": 40,
+      "offset": 0
+     }
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "frame-drum",
+   "name": "Frame drum pulse",
+   "about": "A steady soft pulse on the low drum with the first beat of the bar stronger. Grounding, for yoga and walking meditation, 60 to 90.",
+   "swing": 0,
+   "slots": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    {
+     "rhythm": "Four on the floor",
+     "velocity": 60,
+     "humanize": 30,
+     "accent": {
+      "every": 4,
+      "boost": 35,
+      "offset": 0
+     }
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "id": "half-time-ambient",
+   "name": "Half-time ambient",
+   "about": "Spacious: a kick on one, a soft rim on three and a whisper of shaker. Chill-out and relaxed flow, 70 to 90.",
+   "swing": 8,
+   "slots": [
+    {
+     "rhythm": "Downtempo kick: 1, a of 2",
+     "velocity": 68,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Half time",
+     "velocity": 50,
+     "humanize": 25,
+     "chance": 90
+    },
+    null,
+    {
+     "rhythm": "Offbeat eighths",
+     "velocity": 34,
+     "humanize": 40,
+     "chance": 70
+    },
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "downtempo",
+   "name": "Downtempo",
+   "about": "Laid-back and steady: kick, a snare on three, easy hats and a soft shaker. The classic chill bed, 70 to 100.",
+   "swing": 18,
+   "slots": [
+    {
+     "rhythm": "Downtempo kick: 1, a of 2",
+     "velocity": 90,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Half time",
+     "velocity": 76,
+     "humanize": 25
+    },
+    {
+     "rhythm": "Straight eighths",
+     "velocity": 50,
+     "humanize": 40,
+     "chance": 90,
+     "accent": {
+      "every": 2,
+      "boost": 22,
+      "offset": 1
+     }
+    },
+    {
+     "rhythm": "Straight sixteenths",
+     "velocity": 32,
+     "humanize": 45,
+     "chance": 65
+    },
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "trip-hop",
+   "name": "Trip-hop",
+   "about": "Slow, heavy and a little behind the beat: a deep kick, a snare on three, sparse hats. Moody and cinematic, 65 to 90.",
+   "swing": 22,
+   "slots": [
+    {
+     "rhythm": "Trip-hop kick",
+     "velocity": 96,
+     "keepFirst": true,
+     "humanize": 15,
+     "looseMs": 10
+    },
+    {
+     "rhythm": "Half time",
+     "velocity": 84,
+     "humanize": 30,
+     "looseMs": 14
+    },
+    {
+     "rhythm": "Offbeat eighths",
+     "velocity": 48,
+     "humanize": 25,
+     "chance": 85,
+     "looseMs": 12
+    },
+    null,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "boom-bap",
+   "name": "Boom bap",
+   "about": "Hip-hop with a knock: the snare on two and four, the kick leaning around it. Head-nodding, 85 to 95.",
+   "swing": 28,
+   "slots": [
+    {
+     "rhythm": "Boom bap kick",
+     "velocity": 98,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Backbeat",
+     "velocity": 92,
+     "humanize": 30
+    },
+    {
+     "rhythm": "Straight eighths",
+     "velocity": 58,
+     "humanize": 40,
+     "accent": {
+      "every": 2,
+      "boost": 25,
+      "offset": 0
+     }
+    },
+    null,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "lofi",
+   "name": "Lo-fi hip-hop",
+   "about": "Dusty and loose: a soft kick with a ghost near the end, a gentle backbeat, swung hats. Study and rest, 70 to 90.",
+   "swing": 36,
+   "slots": [
+    {
+     "rhythm": "Lo-fi kick",
+     "velocity": 82,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Backbeat",
+     "velocity": 68,
+     "humanize": 45
+    },
+    {
+     "rhythm": "Straight eighths",
+     "velocity": 46,
+     "humanize": 50,
+     "looseMs": 14
+    },
+    {
+     "rhythm": "Offbeat eighths",
+     "velocity": 28,
+     "humanize": 45,
+     "chance": 60
+    },
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "chill-house",
+   "name": "Chill house",
+   "about": "Gentle and danceable: a soft four on the floor, a light clap on two and four, offbeat hats. Sunset and flow yoga, 100 to 118.",
+   "swing": 6,
+   "slots": [
+    {
+     "rhythm": "Four on the floor",
+     "velocity": 86,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Backbeat",
+     "velocity": 66,
+     "humanize": 25
+    },
+    {
+     "rhythm": "Offbeat eighths",
+     "velocity": 62,
+     "humanize": 25
+    },
+    {
+     "rhythm": "Straight sixteenths",
+     "velocity": 34,
+     "humanize": 40,
+     "chance": 70,
+     "accent": {
+      "every": 4,
+      "boost": 40,
+      "offset": 2
+     }
+    },
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "dub-steppers",
+   "name": "Dub steppers",
+   "about": "Dubby and deep: the kick on every beat, a rim on three, offbeat hats. Hypnotic, 75 to 100.",
+   "swing": 8,
+   "slots": [
+    {
+     "rhythm": "Four on the floor",
+     "velocity": 92,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Half time",
+     "velocity": 78,
+     "humanize": 25
+    },
+    {
+     "rhythm": "Offbeat eighths",
+     "velocity": 56,
+     "humanize": 25
+    },
+    null,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "one-drop",
+   "name": "Reggae one-drop",
+   "about": "The reggae lilt: the kick and rim fall together on beat three, with skanking hats. Warm and relaxed, 65 to 90.",
+   "swing": 14,
+   "slots": [
+    {
+     "rhythm": "Half time",
+     "velocity": 90,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Half time",
+     "velocity": 78,
+     "humanize": 25
+    },
+    {
+     "rhythm": "Straight eighths",
+     "velocity": 48,
+     "humanize": 35,
+     "accent": {
+      "every": 2,
+      "boost": 35,
+      "offset": 1
+     }
+    },
+    null,
+    {
+     "rhythm": "Offbeat eighths",
+     "velocity": 44,
+     "humanize": 40,
+     "chance": 85
+    },
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "bossa-lounge",
+   "name": "Bossa lounge",
+   "about": "Smooth and breezy: the bossa kick, a side-stick clave, soft eighth hats. Cafe and lounge, 80 to 110.",
+   "swing": 0,
+   "slots": [
+    {
+     "rhythm": "Bossa kick",
+     "velocity": 74,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Bossa nova clave",
+     "velocity": 62,
+     "humanize": 25
+    },
+    {
+     "rhythm": "Straight eighths",
+     "velocity": 42,
+     "humanize": 35
+    },
+    {
+     "rhythm": "Straight sixteenths",
+     "velocity": 26,
+     "humanize": 45,
+     "chance": 55
+    },
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "afro-cuban-light",
+   "name": "Afro-Cuban light",
+   "about": "Warm world percussion: a clave on the rim, hand drums in interlocking cells, an easy kick. Danceable but soft, 85 to 110.",
+   "swing": 4,
+   "slots": [
+    {
+     "rhythm": "Kick on 1 and 3",
+     "velocity": 82,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Son clave",
+     "velocity": 58,
+     "humanize": 25
+    },
+    {
+     "rhythm": "Straight eighths",
+     "velocity": 44,
+     "humanize": 35,
+     "chance": 85
+    },
+    {
+     "rhythm": "Soukous",
+     "velocity": 42,
+     "humanize": 40
+    },
+    null,
+    {
+     "rhythm": "Tresillo, 8 steps",
+     "velocity": 66,
+     "humanize": 35
+    },
+    null,
+    {
+     "rhythm": "Cinquillo, 8 steps",
+     "velocity": 56,
+     "humanize": 35,
+     "chance": 85
+    }
+   ]
+  },
+  {
+   "id": "folk-boom-chick",
+   "name": "Folk boom-chick",
+   "about": "Acoustic and easy: kick on one and three, a soft rim on two and four, a swishing shaker. Campfire folk, 80 to 110.",
+   "swing": 8,
+   "slots": [
+    {
+     "rhythm": "Kick on 1 and 3",
+     "velocity": 84,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    {
+     "rhythm": "Backbeat",
+     "velocity": 60,
+     "humanize": 25
+    },
+    null,
+    {
+     "rhythm": "Straight eighths",
+     "velocity": 46,
+     "humanize": 35,
+     "accent": {
+      "every": 2,
+      "boost": 30,
+      "offset": 1
+     }
+    },
+    {
+     "rhythm": "Offbeat eighths",
+     "velocity": 48,
+     "humanize": 40,
+     "chance": 75
+    },
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "organic-world",
+   "name": "Organic world",
+   "about": "The folktronica feel: a syncopated kick, hand drums and shakers in loose interlocking patterns. Flowing, 80 to 105.",
+   "swing": 12,
+   "slots": [
+    {
+     "rhythm": "Syncopated kick: 1, 2 e, 3",
+     "velocity": 80,
+     "keepFirst": true,
+     "humanize": 15
+    },
+    null,
+    null,
+    {
+     "rhythm": "Straight sixteenths",
+     "velocity": 32,
+     "humanize": 45,
+     "chance": 70,
+     "accent": {
+      "every": 4,
+      "boost": 40,
+      "offset": 0
+     }
+    },
+    {
+     "rhythm": "Gahu",
+     "velocity": 52,
+     "humanize": 40,
+     "chance": 80
+    },
+    {
+     "rhythm": "Habanera, 8 steps",
+     "velocity": 64,
+     "humanize": 35
+    },
+    {
+     "rhythm": "Soukous",
+     "velocity": 56,
+     "humanize": 35
+    },
+    {
+     "rhythm": "Bossa nova clave",
+     "velocity": 50,
+     "humanize": 35,
+     "chance": 70
+    }
+   ]
+  }
+ ]
+}
