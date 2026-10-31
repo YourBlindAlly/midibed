@@ -2358,7 +2358,7 @@ export default function App() {
             </View>
             <ActionButton
               label="Save the current drums as my groove"
-              hint="Keeps every drum's pattern and the swing as they are now, under the name above. It joins the Groove list. A groove of yours with the same name is replaced"
+              hint="Keeps every drum's pattern, whether it is switched on or muted, and the swing as they are now, under the name above. It joins the Groove list. A groove of yours with the same name is replaced"
               onPress={saveMyGroove}
             />
             {isUserGroove(GROOVES[grooveSel]) && <ActionButton label={`Remove my groove ${GROOVES[grooveSel].name}`} onPress={removeMyGroove} />}

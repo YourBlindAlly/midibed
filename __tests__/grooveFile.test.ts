@@ -73,6 +73,20 @@ describe('my grooves', () => {
     expect(allGrooves()).toHaveLength(GROOVES.length);
   });
 
+  it('a muted drum keeps its pattern in the saved groove and comes back muted', () => {
+    let s = applyGroove(defaultState, organic, 0);
+    s = { ...s, drums: s.drums.map((d, i) => (i === 3 ? { ...d, enabled: false, rhythm: 0, hits: 5, steps: 12 } : d)) };
+    const g = captureGroove(s, 'Muted shaker');
+    expect(g.slots[3]?.muted).toBe(true);
+    expect(g.slots[3]?.euclid).toEqual({ hits: 5, steps: 12 });
+    const back = applyGroove(defaultState, 0);
+    syncUserLibrary(saveGroove(back, g));
+    const out = applyGroove(back, allGrooves().findIndex((x) => x.name === 'Muted shaker'));
+    expect(out.drums[3].enabled).toBe(false);
+    expect(out.drums[3].hits).toBe(5);
+    syncUserLibrary(defaultState);
+  });
+
   it('a saved groove with the name of a built-in one takes its place without adding a second', () => {
     const g = captureGroove(defaultState, 'Downtempo');
     const s = saveGroove(defaultState, g);

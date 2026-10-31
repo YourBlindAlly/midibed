@@ -68,7 +68,7 @@ def slot_pattern(spec, rhythms):
 
 
 def thinned(spec, i, thin):
-    if spec is None or i in THIN_DROP[thin]:
+    if spec is None or spec.get('muted') or i in THIN_DROP[thin]:
         return None
     if i < 2:
         return spec

@@ -25,6 +25,8 @@ export type SlotSpec = {
   accent?: { every: number; boost?: number; offset?: number };
   looseMs?: number;
   keepFirst?: boolean;
+  /** The drum keeps this pattern but is switched off (muted) when the groove is applied. */
+  muted?: boolean;
 };
 
 export type Groove = {
@@ -300,12 +302,13 @@ export function applyGroove(s: BedState, index: number, thin = 0): BedState {
     const spec = g.slots[i];
     if (i >= g.slots.length) return d;
     if (!spec || THIN_DROP[level].includes(i)) return { ...d, enabled: false };
+    const muted = spec.muted === true;
     const extra = i >= 2;
     const euclid = spec.euclid && !RHYTHMS.some((r) => r.name === spec.rhythm) ? spec.euclid : null;
     const chance = Math.round((spec.chance ?? 100) * (extra ? THIN_CHANCE[level] : 1));
     return {
       ...d,
-      enabled: true,
+      enabled: !muted,
       rhythm: euclid ? 0 : rhythmIndex(spec.rhythm),
       ...(euclid ? { hits: Math.min(euclid.hits, euclid.steps), steps: euclid.steps } : {}),
       rotation: spec.rotation ?? 0,
@@ -353,6 +356,7 @@ function checkSlot(raw: unknown, problems: string[], label: string): SlotSpec | 
   if (r.humanize !== undefined) spec.humanize = num(r.humanize, 0, 100, 20);
   if (r.looseMs !== undefined) spec.looseMs = num(r.looseMs, 0, 40, 0);
   if (r.keepFirst !== undefined) spec.keepFirst = r.keepFirst === true;
+  if (r.muted === true) spec.muted = true;
   if (r.ghost && typeof r.ghost === 'object') {
     const gh = r.ghost as Record<string, unknown>;
     spec.ghost = { hits: num(gh.hits, 0, 32, 0), rotation: num(gh.rotation, 0, 31, 0), velocity: num(gh.velocity, 1, 127, 40) };
@@ -387,7 +391,6 @@ export function checkGroove(raw: unknown): { groove: Groove | null; problems: st
 /** Save the scene's drums as a groove: each drum's pattern as it is now, and the swing. */
 export function captureGroove(s: BedState, name: string): Groove {
   const slots = s.drums.slice(0, 8).map((d): SlotSpec | null => {
-    if (!d.enabled) return null;
     const spec: SlotSpec =
       d.rhythm > 0 && RHYTHMS[d.rhythm]
         ? { rhythm: RHYTHMS[d.rhythm].name, velocity: d.velocity }
@@ -399,6 +402,7 @@ export function captureGroove(s: BedState, name: string): Groove {
     if (d.accentEvery > 0) spec.accent = { every: d.accentEvery, boost: d.accentBoost, offset: d.accentOffset };
     if (d.keepFirst) spec.keepFirst = true;
     if (d.looseMs > 0) spec.looseMs = d.looseMs;
+    if (!d.enabled) spec.muted = true;
     return spec;
   });
   while (slots.length < 8) slots.push(null);
