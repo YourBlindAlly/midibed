@@ -1184,6 +1184,14 @@ export default function App() {
   const instruments = instrumentList(loopLib);
   const [laneBrowse, setLaneBrowse] = useState<number[]>([0, 0, 0, 0, 0]);
   const [importNote, setImportNote] = useState('');
+  // Make the "Add loops" folder exist so it shows in the Files app under MidiBed.
+  useEffect(() => {
+    try {
+      if (fsApi) new fsApi.Directory(fsApi.Paths.document, 'Add loops').create({ intermediates: true, idempotent: true });
+    } catch {
+      // not available (tests, web)
+    }
+  }, []);
   // What the lane browser shows: how close to the tempo, and words the loop's name must contain.
   const [loopNear, setLoopNear] = useState(0);
   const [loopText, setLoopText] = useState('');
@@ -1265,13 +1273,14 @@ export default function App() {
       },
     ]);
   };
-  const importLoopFolder = async () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const importLoops = async (source: any | null) => {
     if (!fsApi) {
       setImportNote('Adding loops works in the app on the phone');
       return;
     }
     try {
-      const picked = await fsApi.Directory.pickDirectoryAsync();
+      const picked = source ?? (await fsApi.Directory.pickDirectoryAsync());
       const dest = new fsApi.Directory(fsApi.Paths.document, 'loops');
       dest.create({ intermediates: true, idempotent: true });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1319,7 +1328,24 @@ export default function App() {
       setImportNote(`Added ${added.length} loops`);
       announceLater(`Added ${added.length} loops`, 100);
     } catch (e) {
-      setImportNote('Adding loops was cancelled or failed');
+      const why = e instanceof Error && e.message ? e.message.slice(0, 160) : 'no reason given';
+      setImportNote(`Adding loops was cancelled or failed. The reason: ${why}`);
+      announceLater('Adding loops was cancelled or failed', 100);
+    }
+  };
+  const importLoopFolder = () => void importLoops(null);
+  // The folder "Add loops" in MidiBed's own folder (Files > On My iPhone > MidiBed): no picker needed.
+  const scanAddLoopsFolder = () => {
+    if (!fsApi) {
+      setImportNote('Adding loops works in the app on the phone');
+      return;
+    }
+    try {
+      const inbox = new fsApi.Directory(fsApi.Paths.document, 'Add loops');
+      inbox.create({ intermediates: true, idempotent: true });
+      void importLoops(inbox);
+    } catch (e) {
+      setImportNote('The Add loops folder could not be opened');
     }
   };
   // Loops added before loudness matching have no measurement: read them again from their copies.
@@ -2950,6 +2976,11 @@ export default function App() {
               label="Add loops from a folder"
               hint="Choose a folder in the Files app. Every audio file inside it, including sub-folders, is copied in"
               onPress={importLoopFolder}
+            />
+            <ActionButton
+              label="Add loops from the MidiBed Add loops folder"
+              hint="No picker. In the Files app, open On My iPhone, then MidiBed, then Add loops, and paste your loop folders there. Then use this button"
+              onPress={scanAddLoopsFolder}
             />
             {importNote !== '' && (
               <View accessible accessibilityLabel="Loop import" accessibilityValue={{ text: importNote }}>
