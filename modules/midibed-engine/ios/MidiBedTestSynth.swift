@@ -1543,8 +1543,11 @@ final class MidiBedTestSynth {
 
       var channelIndex = 0
       for buffer in abl {
-        let p = buffer.mData!.assumingMemoryBound(to: Float.self)
-        p[frame] = channelIndex == 1 ? right : left
+        // iOS can hand over a buffer with no memory behind it (or one shorter than asked for); skip it rather than
+        // crash the app on the audio thread.
+        if let raw = buffer.mData, frame < Int(buffer.mDataByteSize) / MemoryLayout<Float>.size {
+          raw.assumingMemoryBound(to: Float.self)[frame] = channelIndex == 1 ? right : left
+        }
         channelIndex += 1
       }
     }
