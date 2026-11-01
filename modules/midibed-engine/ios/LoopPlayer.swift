@@ -343,7 +343,9 @@ final class LoopPlayer {
   /// The frame a scheduled time falls on within a block, 0 if it is already past, -1 if it is after the block.
   private static func offset(_ at: Double, _ bufStart: Double, _ secPerFrame: Double, _ frames: Int) -> Int {
     if bufStart.isInfinite || at <= bufStart { return 0 }
-    let k = Int((at - bufStart) / secPerFrame)
+    let kd = (at - bufStart) / secPerFrame
+    guard kd.isFinite, kd < 1e9 else { return -1 }
+    let k = Int(kd)
     return k < frames ? k : -1
   }
 
@@ -375,7 +377,7 @@ final class LoopPlayer {
     let gr: Float = pan < 0 ? 1 + pan : 1
     for i in from..<to {
       gain += (target - gain) * coef
-      var i0 = Int(pos)
+      var i0 = pos.isFinite ? max(0, Int(min(pos, 1e12))) : 0
       if i0 >= b.frames { i0 = 0; pos -= n }
       var i1 = i0 + 1
       if i1 >= b.frames { i1 = 0 }

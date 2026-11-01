@@ -285,8 +285,8 @@ final class BassVoice {
     phS += dtA * 0.5
     if phS >= 1 { phS -= 1 }
     let width = max(0.05, min(0.95, p(.pulseWidth)))
-    let oscA = oscillator(wave: Int(p(.waveA)), phase: phA, dt: dtA, width: width)
-    let oscB = oscillator(wave: Int(p(.waveB)), phase: phB, dt: dtB, width: width)
+    let oscA = oscillator(wave: Int(max(0, min(8, p(.waveA).isFinite ? p(.waveA) : 0))), phase: phA, dt: dtA, width: width)
+    let oscB = oscillator(wave: Int(max(0, min(8, p(.waveB).isFinite ? p(.waveB) : 0))), phase: phB, dt: dtB, width: width)
     let mix = p(.mixB)
     let subWave = sinf(2 * Float.pi * phS)
     let bypass = max(0, min(1, p(.subBypass)))

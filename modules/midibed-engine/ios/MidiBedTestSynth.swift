@@ -16,6 +16,13 @@ import os
 /// runs on the audio thread. A small fixed ring of events is shared under an
 /// os_unfair_lock; the audio thread only try-locks (skips draining this buffer if
 /// the writer holds it), so it never blocks.
+/// A whole number from a decimal one that can never stop the app: Swift traps on Int(NaN) and Int(infinity), and a
+/// trap on the audio thread closes MidiBed. Anything that is not a sensible number becomes 0.
+@inline(__always)
+func safeInt(_ f: Float) -> Int { f.isFinite ? Int(max(-1e9, min(1e9, f))) : 0 }
+@inline(__always)
+func safeInt(_ f: Double) -> Int { f.isFinite ? Int(max(-1e12, min(1e12, f))) : 0 }
+
 final class MidiBedTestSynth {
   private struct Event {
     var status: UInt8 = 0
@@ -938,7 +945,7 @@ final class MidiBedTestSynth {
     if let sp = noiseVoices[i].sp {
       // A recorded swell: read it at its own speed from t seconds in; it ends where the recording ends.
       let pos = noiseVoices[i].t * sr
-      let ip = Int(pos)
+      let ip = max(0, safeInt(pos))
       if ip + 1 >= noiseVoices[i].sn {
         noiseVoices[i].active = false
         return 0
@@ -1135,7 +1142,7 @@ final class MidiBedTestSynth {
     // The pad's sound shape for this buffer.
     let pWave = max(0, min(1, padParams[0]))
     let pGainPos = pWave * 10
-    let pGainI = min(9, Int(pGainPos))
+    let pGainI = max(0, min(9, safeInt(pGainPos)))
     let pWaveGain = MidiBedTestSynth.padWaveGains[pGainI] + (MidiBedTestSynth.padWaveGains[pGainI + 1] - MidiBedTestSynth.padWaveGains[pGainI]) * (pGainPos - Float(pGainI))
     let pDetune = max(0, min(40, padParams[1]))
     let pDrift = max(0, min(1, padParams[2]))
@@ -1438,7 +1445,7 @@ final class MidiBedTestSynth {
         case 17: // a recorded sound from a sample pack: played from its buffer at the tuned speed, with a shorter ring if decay is turned down
           if let sp = drums[i].sp {
             let pos = drums[i].spos
-            let ip = Int(pos)
+            let ip = max(0, safeInt(pos))
             if ip + 1 >= drums[i].sn {
               alive = false
             } else {
@@ -1498,8 +1505,8 @@ final class MidiBedTestSynth {
         let delaySamples = (0.5 + 5.5 * flDepth * (0.5 + 0.5 * sinf(2 * Float.pi * flangePhase))) * 0.001 * sr
         var readPos = Float(flangeIdx) - delaySamples
         if readPos < 0 { readPos += 4096 }
-        let i0 = Int(readPos) & 4095
-        let frac = readPos - Float(Int(readPos))
+        let i0 = safeInt(readPos) & 4095
+        let frac = readPos - Float(safeInt(readPos))
         let i1 = (i0 + 1) & 4095
         let wet = flangeBuf[i0] * (1 - frac) + flangeBuf[i1] * frac
         flangeBuf[flangeIdx] = partPad + flFeedback * wet

@@ -217,7 +217,7 @@ final class UglyFX {
   @inline(__always)
   private func tap(_ line: FXLine, _ delay: Float) -> Float {
     let d = max(1, min(Float(line.size - 2), delay))
-    let whole = Int(d)
+    let whole = d.isFinite ? max(1, Int(d)) : 1
     let frac = d - Float(whole)
     var i0 = line.idx - whole
     if i0 < 0 { i0 += line.size }
