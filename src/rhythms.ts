@@ -54,6 +54,8 @@ export const RHYTHMS: Rhythm[] = [
   { name: 'Bossa kick', steps: 16, hits: [0, 6, 8, 14] },
   // A snare on 2, the "a" before 3, the "e" after 3 and 4; the second bar adds the "a" of 4 as a pickup into the next downbeat.
   { name: 'Snare 2, a, e, 4 with pickup (2 bars)', steps: 32, hits: [4, 7, 9, 12, 20, 23, 25, 28, 31] },
+  // A kick on beat 1, the "and" and the "a" of beat 2, then the "e" after 3 (not on 3 itself).
+  { name: 'Kick 1, & a of 2, e of 3', steps: 16, hits: [0, 6, 7, 9] },
 ];
 
 export function clampRhythm(i: number): number {
