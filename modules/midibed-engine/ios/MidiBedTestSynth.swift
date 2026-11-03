@@ -66,7 +66,7 @@ final class MidiBedTestSynth {
   }
 
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 sharp shaker (cabasa-like), 7 tom,
-  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker, 17 sample pack (a recorded sound from an imported pack) (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
+  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker, 17 sample pack (a recorded sound from an imported pack), 18 round analog snare, 19 bright rattle snare, 20 crisp digital snare (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
   private struct DrumVoice {
     var active = false
@@ -84,6 +84,8 @@ final class MidiBedTestSynth {
     var decay: Float = 1
     var tone: Float = 0.5
     var snap: Float = 0.5
+    var body: Float = 0.5   // snares 18-20: how much tonal body, and how long it rings
+    var rattle: Float = 0.5 // snares 18-20: how long the noise rattle lasts
     var level: Float = 1
     var s1: Float = 0   // spare filter state (the tube shaker's body)
     var s2: Float = 0
@@ -101,6 +103,8 @@ final class MidiBedTestSynth {
     var decay: Float = 1
     var tone: Float = 0.5
     var snap: Float = 0.5
+    var body: Float = 0.5
+    var rattle: Float = 0.5
     var level: Float = 1
     /// 0 = every hit uses the same noise (identical, tight and even), 1 = every hit a different noise.
     var variation: Float = 1
@@ -362,10 +366,10 @@ final class MidiBedTestSynth {
   }
 
   /// Control side: the drums' sound settings, by MIDI note. Replaces the whole table.
-  func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, level: Float, variation: Float, group: Int)]) {
+  func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, body: Float, rattle: Float, level: Float, variation: Float, group: Int)]) {
     for i in 0..<128 { drumPatches[i] = DrumPatch() }
     for d in list where d.note >= 0 && d.note < 128 {
-      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(17, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, level: d.level, variation: max(0, min(1, d.variation)), group: d.group)
+      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(20, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, body: max(0, min(1, d.body)), rattle: max(0, min(1, d.rattle)), level: d.level, variation: max(0, min(1, d.variation)), group: d.group)
     }
   }
 
@@ -732,6 +736,8 @@ final class MidiBedTestSynth {
         v.decay = patch.decay
         v.tone = patch.tone
         v.snap = patch.snap
+        v.body = patch.body
+        v.rattle = patch.rattle
         v.level = patch.level
         if v.kind == 17 {
           // A recorded sound from a sample pack: pick one of the group's sounds. Louder hits favour louder sounds, and the
@@ -1278,6 +1284,28 @@ final class MidiBedTestSynth {
           drums[i].lp2 += a * (drums[i].lp - drums[i].lp2)
           s = body + drums[i].lp2 * snap * 1.3 * expf(-t * 17 / D)
           alive = t <= 0.35 * D + 0.1
+        case 18, 19, 20: // snares with separate body and rattle: 18 round analog, 19 bright rattle, 20 crisp digital (scratchpad snare_check.py)
+          let kd = drums[i].kind
+          let f1: Float = kd == 18 ? 180 : (kd == 19 ? 200 : 210)
+          let f2: Float = kd == 18 ? 330 : (kd == 19 ? 360 : 390)
+          let bodyAmt = drums[i].body
+          let rat = drums[i].rattle
+          let ring: Float = kd == 18 ? 30 - 14 * bodyAmt : (kd == 19 ? 38 - 16 * bodyAmt : 50 - 20 * bodyAmt)
+          let nRate: Float = kd == 18 ? 24 - 16 * rat : (kd == 19 ? 14 - 9 * rat : 30 - 14 * rat)
+          let hpr: Float = kd == 18 ? 0.93 - 0.10 * tone : (kd == 19 ? 0.86 - 0.10 * tone : 0.90 - 0.10 * tone)
+          let la: Float = kd == 18 ? 0.10 + 0.30 * tone : (kd == 19 ? 0.25 + 0.40 * tone : 0.18 + 0.35 * tone)
+          let nGain: Float = kd == 18 ? 1.5 : (kd == 19 ? 1.1 : 1.4)
+          let tones = sinf(2 * Float.pi * f1 * f * t) * 0.55 + sinf(2 * Float.pi * f2 * f * t) * 0.30
+          let bodyPart = tones * expf(-t * ring / D) * (0.30 + 0.70 * bodyAmt)
+          let hp = noise - drums[i].xPrev + hpr * drums[i].hpPrev
+          drums[i].xPrev = noise
+          drums[i].hpPrev = hp
+          drums[i].lp += la * (hp - drums[i].lp)
+          drums[i].lp2 += la * (drums[i].lp - drums[i].lp2)
+          s = bodyPart + drums[i].lp2 * (0.2 + snap * nGain) * expf(-t * nRate / D)
+          if kd == 19 { s += noise * snap * 0.25 * expf(-t * 700) }
+          if kd == 20 { s = floorf(s * 48 + 0.5) / 48 } // the 707 grit: a coarse 8-bit-like step
+          alive = t <= min(2.0, 6 * D / max(4, min(ring, nRate)))
         case 2: // rim click: two short tones and a click
           let tones = (sinf(2 * Float.pi * 1700 * f * t) * 0.5 + sinf(2 * Float.pi * 480 * f * t) * 0.5) * expf(-t * 420 / D)
           s = tones * 0.9 + noise * snap * 0.6 * expf(-t * 1500)

@@ -832,6 +832,8 @@ final class MidiBedEngine {
       var decay: Double
       var tone: Double
       var snap: Double
+      var body: Double?
+      var rattle: Double?
       var level: Double
       var variation: Double?
       var group: Int?
@@ -842,7 +844,7 @@ final class MidiBedEngine {
     }
     queue.async {
       self.synth.configureDrums(
-        list.map { (note: $0.note, kind: $0.type, tune: Float($0.tune), decay: Float($0.decay), tone: Float($0.tone), snap: Float($0.snap), level: Float($0.level), variation: Float($0.variation ?? 1), group: $0.group ?? -1) })
+        list.map { (note: $0.note, kind: $0.type, tune: Float($0.tune), decay: Float($0.decay), tone: Float($0.tone), snap: Float($0.snap), body: Float($0.body ?? 0.5), rattle: Float($0.rattle ?? 0.5), level: Float($0.level), variation: Float($0.variation ?? 1), group: $0.group ?? -1) })
     }
   }
 

@@ -2467,7 +2467,13 @@ export default function App() {
               <Stepper label={`${d.name} tune`} value={d.tune} onChange={(v) => patchDrum(i, { tune: v })} min={-12} max={12} format={drumTuneText} />
               <Stepper label={`${d.name} decay`} value={d.decay} onChange={(v) => patchDrum(i, { decay: v })} min={25} max={300} step={5} bigStep={25} format={(v) => `${v} percent`} hint="How long the sound rings" />
               <Stepper label={`${d.name} tone`} value={d.tone} onChange={(v) => patchDrum(i, { tone: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="Darker or brighter" />
-              <Stepper label={`${d.name} snap`} value={d.snap} onChange={(v) => patchDrum(i, { snap: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How much click, noise or attack the sound has" />
+              <Stepper label={d.voice >= 18 && d.voice <= 20 ? `${d.name} snappy` : `${d.name} snap`} value={d.snap} onChange={(v) => patchDrum(i, { snap: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint={d.voice >= 18 && d.voice <= 20 ? 'How much of the noisy snare rattle is mixed in' : 'How much click, noise or attack the sound has'} />
+              {d.voice >= 18 && d.voice <= 20 && (
+                <>
+                  <Stepper label={`${d.name} body`} value={d.body ?? 50} onChange={(v) => patchDrum(i, { body: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How much of the drum's tonal thump there is, and how long it rings. Low is mostly rattle, high is a fat drum sound" />
+                  <Stepper label={`${d.name} rattle length`} value={d.rattle ?? 50} onChange={(v) => patchDrum(i, { rattle: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How long the noisy rattle lasts. Low is short and dry, high is long and sizzly" />
+                </>
+              )}
               <Stepper
                 label={`${d.name} variation`}
                 value={d.variation}

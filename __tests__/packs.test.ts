@@ -81,7 +81,7 @@ describe('sound packs', () => {
     expect(s).toContain('func loadPacks(_ groups:');
     expect(s).toContain('os_unfair_lock_trylock(packLock)');
     expect(s).toContain('if n > 1 && k == last { continue }'); // never the same sound twice running
-    expect(s).toContain('max(0, min(17, d.kind))');
+    expect(s).toContain('max(0, min(20, d.kind))');
     const e = fs.readFileSync('modules/midibed-engine/ios/MidiBedEngine.swift', 'utf8');
     expect(e).toContain('func setPacks(json: String)');
     const m = fs.readFileSync('modules/midibed-engine/ios/MidiBedEngineModule.swift', 'utf8');

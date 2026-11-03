@@ -42,7 +42,7 @@ export type FillHit = { step: number; voice: number; velocity: number };
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Sound types (drumvoice.ts numbers) that can take part, and their role. */
-const ROLE_OF_VOICE: Record<number, 0 | 1 | 2 | 3> = { 1: 0, 12: 1, 7: 2, 11: 2, 10: 3 };
+const ROLE_OF_VOICE: Record<number, 0 | 1 | 2 | 3> = { 1: 0, 18: 0, 19: 0, 20: 0, 12: 1, 7: 2, 11: 2, 10: 3 };
 
 /** The drums a fill can use, from the drum slots (each: note, channel, velocity, voice type). */
 export function fillPalette(drums: { note: number; channel: number; velocity: number; voice: number }[]): FillVoice[] {

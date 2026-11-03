@@ -68,6 +68,9 @@ export type DrumState = {
   decay: number;
   tone: number;
   snap: number;
+  /** The three snares with separate body and rattle (see drumvoice.ts); missing = 50. */
+  body?: number;
+  rattle?: number;
   level: number;
   /** How much each hit differs from the last, percent (see drumvoice.ts). Global like the other sound controls. */
   variation: number;
@@ -423,7 +426,7 @@ export type SceneData = {
   advance: AdvanceRule;
   transitionUse: TransitionUse;
   pad: Omit<PadState, 'channel'>;
-  drums: Omit<DrumState, 'name' | 'note' | 'channel' | 'voice' | 'tune' | 'decay' | 'tone' | 'snap' | 'level' | 'variation' | 'packId' | 'packGroup'>[];
+  drums: Omit<DrumState, 'name' | 'note' | 'channel' | 'voice' | 'tune' | 'decay' | 'tone' | 'snap' | 'body' | 'rattle' | 'level' | 'variation' | 'packId' | 'packGroup'>[];
   wanderers: Pick<WandererState, 'enabled' | 'min' | 'max' | 'cycleBars' | 'looseness' | 'phase' | 'smoothBeats' | 'opposes' | 'opposeAmount'>[];
   loops: Pick<LoopsState, 'enabled' | 'program' | 'sendBank' | 'bankMSB' | 'bankLSB'>;
 };
