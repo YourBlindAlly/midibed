@@ -2552,6 +2552,16 @@ export default function App() {
                 step={5}
               />
               <Stepper
+                label={`${d.name} ghost chance`}
+                value={d.ghostChance ?? 100}
+                onChange={(v) => patchDrum(i, { ghostChance: v })}
+                min={1}
+                max={100}
+                step={5}
+                format={(v) => (v === 100 ? 'every ghost note plays' : `${v} percent of ghost notes play`)}
+                hint="Each ghost note plays only this often, chosen fresh every time round, so the quiet notes come and go"
+              />
+              <Stepper
                 label={`${d.name} timing looseness`}
                 value={d.looseMs}
                 onChange={(v) => patchDrum(i, { looseMs: v })}

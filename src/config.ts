@@ -53,6 +53,8 @@ export type DrumState = {
   ghostHits: number;
   ghostRotation: number;
   ghostVelocity: number; // 1-127
+  /** Percent chance (1-100) that a ghost note plays; 100 = every one, as before. */
+  ghostChance: number;
   /** Every Nth hit of the main pattern is louder (0 = off, else 2-8), by accentBoost percent. */
   accentEvery: number;
   accentBoost: number; // percent 0-100
@@ -92,7 +94,7 @@ export type EvolveState = {
 export const defaultEvolve: EvolveState = { everyBars: 0, chance: 50, returnAfter: 4 };
 
 /** The pattern extras every drum starts with: all off, so existing sounds do not change. */
-const drumExtras = { rhythm: 0, ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, accentEvery: 0, accentOffset: 0, accentBoost: 30, keepFirst: false, looseMs: 0 };
+const drumExtras = { rhythm: 0, ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, ghostChance: 100, accentEvery: 0, accentOffset: 0, accentBoost: 30, keepFirst: false, looseMs: 0 };
 
 export type DroneState = {
   enabled: boolean;
@@ -486,6 +488,7 @@ export function captureScene(s: SceneSource): SceneData {
       ghostHits: d.ghostHits,
       ghostRotation: d.ghostRotation,
       ghostVelocity: d.ghostVelocity,
+      ghostChance: d.ghostChance,
       accentEvery: d.accentEvery,
       accentBoost: d.accentBoost,
       accentOffset: d.accentOffset,
@@ -1426,6 +1429,7 @@ export function toEngineJson(s: BedState): string {
       ghostHits: Math.min(d.ghostHits, d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].steps : d.steps),
       ghostRotation: d.ghostRotation,
       ghostVelocity: d.ghostVelocity,
+      ghostChance: Math.max(1, Math.min(100, d.ghostChance ?? 100)) / 100,
       accentEvery: d.accentEvery,
       accentBoost: d.accentBoost / 100,
       accentOffset: d.accentOffset,

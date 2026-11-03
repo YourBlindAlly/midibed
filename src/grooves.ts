@@ -21,7 +21,7 @@ export type SlotSpec = {
   /** Chance a hit plays, percent (default 100). */
   chance?: number;
   humanize?: number;
-  ghost?: { hits: number; rotation?: number; velocity?: number };
+  ghost?: { hits: number; rotation?: number; velocity?: number; chance?: number };
   accent?: { every: number; boost?: number; offset?: number };
   looseMs?: number;
   keepFirst?: boolean;
@@ -318,6 +318,7 @@ export function applyGroove(s: BedState, index: number, thin = 0): BedState {
       ghostHits: extra && level > 0 ? 0 : spec.ghost?.hits ?? 0,
       ghostRotation: spec.ghost?.rotation ?? 0,
       ghostVelocity: spec.ghost?.velocity ?? 40,
+      ghostChance: spec.ghost?.chance ?? 100,
       accentEvery: spec.accent?.every ?? 0,
       accentBoost: spec.accent?.boost ?? 30,
       accentOffset: spec.accent?.offset ?? 0,
@@ -360,6 +361,7 @@ function checkSlot(raw: unknown, problems: string[], label: string): SlotSpec | 
   if (r.ghost && typeof r.ghost === 'object') {
     const gh = r.ghost as Record<string, unknown>;
     spec.ghost = { hits: num(gh.hits, 0, 32, 0), rotation: num(gh.rotation, 0, 31, 0), velocity: num(gh.velocity, 1, 127, 40) };
+    if (gh.chance !== undefined) spec.ghost.chance = num(gh.chance, 1, 100, 100);
   }
   if (r.accent && typeof r.accent === 'object') {
     const ac = r.accent as Record<string, unknown>;
@@ -398,7 +400,10 @@ export function captureGroove(s: BedState, name: string): Groove {
     if (d.rotation) spec.rotation = d.rotation;
     if (d.probability < 100) spec.chance = d.probability;
     spec.humanize = d.humanize;
-    if (d.ghostHits > 0) spec.ghost = { hits: d.ghostHits, rotation: d.ghostRotation, velocity: d.ghostVelocity };
+    if (d.ghostHits > 0) {
+      spec.ghost = { hits: d.ghostHits, rotation: d.ghostRotation, velocity: d.ghostVelocity };
+      if ((d.ghostChance ?? 100) < 100) spec.ghost.chance = d.ghostChance;
+    }
     if (d.accentEvery > 0) spec.accent = { every: d.accentEvery, boost: d.accentBoost, offset: d.accentOffset };
     if (d.keepFirst) spec.keepFirst = true;
     if (d.looseMs > 0) spec.looseMs = d.looseMs;
@@ -422,6 +427,7 @@ const PATTERN_FIELDS = [
   'ghostHits',
   'ghostRotation',
   'ghostVelocity',
+  'ghostChance',
   'accentEvery',
   'accentBoost',
   'accentOffset',

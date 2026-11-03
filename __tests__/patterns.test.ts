@@ -3,7 +3,7 @@ import { defaultState, migrateState, switchScene, toEngineJson } from '../src/co
 describe('pattern extras: ghost notes, accents, keep first, looseness, evolving', () => {
   it('start off, so existing sounds do not change', () => {
     for (const d of defaultState.drums) {
-      expect(d).toMatchObject({ ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, accentEvery: 0, accentBoost: 30, keepFirst: false, looseMs: 0 });
+      expect(d).toMatchObject({ ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, ghostChance: 100, accentEvery: 0, accentBoost: 30, keepFirst: false, looseMs: 0 });
     }
     expect(defaultState.evolve).toEqual({ everyBars: 0, chance: 50, returnAfter: 4 });
   });
@@ -13,6 +13,20 @@ describe('pattern extras: ghost notes, accents, keep first, looseness, evolving'
     const j = JSON.parse(toEngineJson({ ...defaultState, drums, evolve: { everyBars: 4, chance: 60, returnAfter: 3 } }));
     expect(j.drums[1]).toMatchObject({ ghostHits: 16, accentEvery: 2, accentBoost: 0.25, keepFirst: true, looseMs: 12 }); // ghost hits cannot exceed the steps
     expect(j.evolve).toEqual({ everyBars: 4, chance: 0.6, returnAfter: 3 });
+  });
+
+  it('a ghost note chance reaches the engine, is saved in a scene, and a saved groove keeps it', () => {
+    const drums = defaultState.drums.map((d, i) => (i === 2 ? { ...d, ghostHits: 3, ghostChance: 40 } : d));
+    const live = { ...defaultState, drums };
+    expect(JSON.parse(toEngineJson(live)).drums[2]).toMatchObject({ ghostHits: 3, ghostChance: 0.4 });
+    expect(JSON.parse(toEngineJson(defaultState)).drums[2].ghostChance).toBe(1);
+    expect(switchScene(switchScene(live, 1), 0).drums[2].ghostChance).toBe(40);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { captureGroove, applyGroove, allGrooves } = require('../src/grooves');
+    const g = captureGroove(live, 'Ghosty');
+    expect(g.slots[2].ghost).toMatchObject({ hits: 3, chance: 40 });
+    expect(allGrooves().length).toBeGreaterThan(0);
+    expect(applyGroove(defaultState, 0).drums[2].ghostChance).toBe(100);
   });
 
   it('are saved per scene', () => {

@@ -107,6 +107,8 @@ def render(groove, kit, notes, rhythms, bpm, bars, thin, exact, seed):
             if not main and ghost and ghost.get('hits', 0) > 0:
                 gpos = (local - ghost.get('rotation', 0)) % steps
                 is_ghost = euclid_hit(gpos, min(steps, ghost['hits']), steps)
+                if is_ghost and not exact and ghost.get('chance', 100) < 100 and rng.random() * 100 > ghost['chance']:
+                    is_ghost = False
             if not (main or is_ghost):
                 continue
             sure = main and spec.get('keepFirst') and pos == 0

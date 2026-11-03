@@ -20,6 +20,7 @@ struct MidiBedDrumConfig: Decodable {
   var ghostHits: Int        // a second, quiet Euclidean layer on the free steps (0 = none)
   var ghostRotation: Int
   var ghostVelocity: Int
+  var ghostChance: Double?  // 0...1 chance a ghost note plays (missing = always)
   var accentEvery: Int      // every Nth hit of the main pattern is louder (0 = off)
   var accentBoost: Double   // 0...1 extra velocity for accents
   var accentOffset: Int     // the hit the accents start on (0 = the first)
@@ -1468,6 +1469,7 @@ final class MidiBedEngine {
       if !mainHit, drum.ghostHits > 0 {
         let gpos = ((local - drum.ghostRotation % steps) % steps + steps) % steps
         ghost = euclidHit(position: gpos, hits: min(steps, drum.ghostHits), steps: steps)
+        if ghost, let gc = drum.ghostChance, gc < 1, Double.random(in: 0..<1, using: &rng) > gc { ghost = false }
       }
       guard mainHit || ghost else { continue }
       let sure = mainHit && drum.keepFirst && pos == 0
