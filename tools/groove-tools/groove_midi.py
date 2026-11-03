@@ -59,6 +59,9 @@ def euclid_hit(pos, hits, steps):
 
 def slot_pattern(spec, rhythms):
     """(steps, set of hit positions) for a drum spec, before rotation."""
+    pat = spec.get('pattern')
+    if pat:
+        return len(pat), {k for k, c in enumerate(pat) if c == 'x'}
     r = next((x for x in rhythms if x['name'] == spec.get('rhythm')), None)
     if r is not None and r['steps'] > 0:
         return r['steps'], set(r['hits'])
@@ -104,7 +107,10 @@ def render(groove, kit, notes, rhythms, bpm, bars, thin, exact, seed):
             pos = (local - rot) % steps
             main = pos in hits
             is_ghost = False
-            if not main and ghost and ghost.get('hits', 0) > 0:
+            pat = spec.get('pattern')
+            if not main and pat and pat[(local - rot) % steps] == 'g':
+                is_ghost = True
+            if not main and not is_ghost and ghost and ghost.get('hits', 0) > 0:
                 gpos = (local - ghost.get('rotation', 0)) % steps
                 is_ghost = euclid_hit(gpos, min(steps, ghost['hits']), steps)
                 if is_ghost and not exact and ghost.get('chance', 100) < 100 and rng.random() * 100 > ghost['chance']:
@@ -115,7 +121,7 @@ def render(groove, kit, notes, rhythms, bpm, bars, thin, exact, seed):
             chance = spec.get('chance', 100) / 100.0
             if not exact and not sure and chance < 1 and rng.random() > chance:
                 continue
-            vel = float(ghost.get('velocity', 40) if is_ghost else spec['velocity'])
+            vel = float((ghost or {}).get('velocity', 40) if is_ghost else spec['velocity'])
             if main and accent and accent.get('every', 0) > 1:
                 rank = sum(1 for j in range(pos) if j in hits)
                 shifted = rank - max(0, accent.get('offset', 0))

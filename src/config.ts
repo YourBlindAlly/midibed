@@ -32,6 +32,7 @@ import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice, getProfile } from './profiles';
 import { BassVoiceState, defaultBassVoice } from './bassvoice';
 import { FillState, defaultFill, fillPalette } from './fill';
+import { cleanCustom, countOf, maskOf } from './stepedit';
 import type { MidiControlState } from './midicontrol';
 import { MixerState, defaultMixer } from './mixer';
 import { Favorite, addFav, favsFromPrograms, parseFavMap, stringifyFavMap } from './soundFavs';
@@ -55,6 +56,8 @@ export type DrumState = {
   ghostVelocity: number; // 1-127
   /** Percent chance (1-100) that a ghost note plays; 100 = every one, as before. */
   ghostChance: number;
+  /** Step by step edits of the pattern ('x' hit, 'g' ghost, '.' off, one character per step); '' = none. See stepedit.ts. */
+  custom: string;
   /** Every Nth hit of the main pattern is louder (0 = off, else 2-8), by accentBoost percent. */
   accentEvery: number;
   accentBoost: number; // percent 0-100
@@ -94,7 +97,10 @@ export type EvolveState = {
 export const defaultEvolve: EvolveState = { everyBars: 0, chance: 50, returnAfter: 4 };
 
 /** The pattern extras every drum starts with: all off, so existing sounds do not change. */
-const drumExtras = { rhythm: 0, ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, ghostChance: 100, accentEvery: 0, accentOffset: 0, accentBoost: 30, keepFirst: false, looseMs: 0 };
+/** What a scene saved before these settings existed gets, so a custom pattern or ghost chance never leaks in from the live drum. */
+const sceneDrumDefaults = { custom: '', ghostChance: 100 };
+
+const drumExtras = { rhythm: 0, ghostHits: 0, ghostRotation: 0, ghostVelocity: 40, ghostChance: 100, custom: '', accentEvery: 0, accentOffset: 0, accentBoost: 30, keepFirst: false, looseMs: 0 };
 
 export type DroneState = {
   enabled: boolean;
@@ -489,6 +495,7 @@ export function captureScene(s: SceneSource): SceneData {
       ghostRotation: d.ghostRotation,
       ghostVelocity: d.ghostVelocity,
       ghostChance: d.ghostChance,
+      custom: d.custom,
       accentEvery: d.accentEvery,
       accentBoost: d.accentBoost,
       accentOffset: d.accentOffset,
@@ -542,7 +549,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     advance: { ...sc.advance },
     transitionUse: { ...sc.transitionUse },
     pad: { ...s.pad, ...sc.pad },
-    drums: s.drums.map((d, i) => ({ ...d, ...sc.drums[i] })),
+    drums: s.drums.map((d, i) => ({ ...d, ...sceneDrumDefaults, ...sc.drums[i] })),
     wanderers: s.wanderers.map((w, i) => ({ ...w, ...sc.wanderers[i] })),
     loops: { ...s.loops, ...sc.loops },
   };
@@ -620,11 +627,11 @@ export function sceneLabel(s: Pick<BedState, 'scenes' | 'activeScene' | 'sceneNa
 }
 
 /** What a silenced drum pattern remembers, so it can be brought back. */
-export type DrumPatternMemory = { hits: number; rhythm: number; ghostHits: number }[];
+export type DrumPatternMemory = { hits: number; rhythm: number; ghostHits: number; custom: string }[];
 
 /** Remember every drum's pattern settings (hits, library rhythm, ghost notes). */
 export function rememberDrumPatterns(s: Pick<BedState, 'drums'>): DrumPatternMemory {
-  return s.drums.map((d) => ({ hits: d.hits, rhythm: d.rhythm, ghostHits: d.ghostHits }));
+  return s.drums.map((d) => ({ hits: d.hits, rhythm: d.rhythm, ghostHits: d.ghostHits, custom: d.custom ?? '' }));
 }
 
 /**
@@ -632,14 +639,14 @@ export function rememberDrumPatterns(s: Pick<BedState, 'drums'>): DrumPatternMem
  * by part. Steps, rotation, velocity, sounds and the on/off switches stay as they are.
  */
 export function silenceDrumPatterns(s: BedState): BedState {
-  return { ...s, drums: s.drums.map((d) => ({ ...d, hits: 0, rhythm: 0, ghostHits: 0 })) };
+  return { ...s, drums: s.drums.map((d) => ({ ...d, hits: 0, rhythm: 0, ghostHits: 0, custom: '' })) };
 }
 
 /** Put the remembered pattern settings back. */
 export function restoreDrumPatterns(s: BedState, memory: DrumPatternMemory): BedState {
   return {
     ...s,
-    drums: s.drums.map((d, i) => (memory[i] ? { ...d, hits: memory[i].hits, rhythm: memory[i].rhythm, ghostHits: memory[i].ghostHits } : d)),
+    drums: s.drums.map((d, i) => (memory[i] ? { ...d, hits: memory[i].hits, rhythm: memory[i].rhythm, ghostHits: memory[i].ghostHits, custom: memory[i].custom ?? '' } : d)),
   };
 }
 
@@ -1412,21 +1419,25 @@ export function toEngineJson(s: BedState): string {
       stopCC: s.loops.stopCC,
       ownPort: s.loops.ownPort,
     },
-    drums: s.drums.map((d) => ({
+    drums: s.drums.map((d) => {
+     const custom = cleanCustom(d.custom);
+     return {
       enabled: (s.solo ? s.solo === 'drums' : s.percussion) && d.enabled,
       role: drumRole(d.name),
       note: d.note,
       channel: d.channel,
       // A library rhythm brings its own number of steps and replaces the Euclidean spread with a fixed mask.
-      steps: d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].steps : d.steps,
-      hits: d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].hits.length : d.hits,
-      mask: d.rhythm > 0 ? rhythmMask(d.rhythm) : 0,
-      useMask: d.rhythm > 0,
+      // Steps edited one by one (custom) take the place of both, and may also hold ghost steps.
+      steps: custom ? custom.length : d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].steps : d.steps,
+      hits: custom ? countOf(custom, 'x') : d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].hits.length : d.hits,
+      mask: custom ? maskOf(custom, 'x') : d.rhythm > 0 ? rhythmMask(d.rhythm) : 0,
+      useMask: custom ? true : d.rhythm > 0,
+      ghostMask: custom ? maskOf(custom, 'g') : 0,
       rotation: d.rotation,
       velocity: d.velocity,
       probability: d.probability / 100,
       humanize: d.humanize / 100,
-      ghostHits: Math.min(d.ghostHits, d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].steps : d.steps),
+      ghostHits: Math.min(d.ghostHits, custom ? custom.length : d.rhythm > 0 ? RHYTHMS[clampRhythm(d.rhythm)].steps : d.steps),
       ghostRotation: d.ghostRotation,
       ghostVelocity: d.ghostVelocity,
       ghostChance: Math.max(1, Math.min(100, d.ghostChance ?? 100)) / 100,
@@ -1435,7 +1446,8 @@ export function toEngineJson(s: BedState): string {
       accentOffset: d.accentOffset,
       keepFirst: d.keepFirst,
       looseMs: d.looseMs,
-    })),
+     };
+    }),
     evolve: {
       everyBars: s.evolve.everyBars,
       chance: s.evolve.chance / 100,

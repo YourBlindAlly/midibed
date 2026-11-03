@@ -79,6 +79,7 @@ import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, 
 import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { RHYTHMS, rhythmDescribe, rhythmText } from './src/rhythms';
+import { STEP_STATE_NAMES, StepState, addUserRhythm, countOf, describeText, patternSteps, patternString, rotatedText, stepName, stepStateAt, withStep } from './src/stepedit';
 import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiDevice, onMidiIn, onMotion, onRecording, onScene, testSweep } from './src/engine';
 import {
   CONTOUR_NAMES,
@@ -1173,6 +1174,8 @@ export default function App() {
   const [partIdx, setPartIdx] = useState(0);
   // Which drum's settings the Drums module shows (one at a time).
   const [drumIdx, setDrumIdx] = useState(0);
+  const [editStep, setEditStep] = useState(0);
+  const [myRhythmName, setMyRhythmName] = useState('');
 
   // ---- Loop player
   const loopLib = parseLibrary(state.loopLib);
@@ -2403,7 +2406,7 @@ export default function App() {
               <Stepper
                 label={`${d.name} rhythm`}
                 value={d.rhythm}
-                onChange={(v) => patchDrum(i, { rhythm: Math.max(0, Math.min(RHYTHMS.length - 1, v)), rotation: 0 })}
+                onChange={(v) => patchDrum(i, { rhythm: Math.max(0, Math.min(RHYTHMS.length - 1, v)), rotation: 0, custom: '' })}
                 min={0}
                 max={RHYTHMS.length - 1}
                 format={(v) => RHYTHMS[v].name}
@@ -2411,15 +2414,15 @@ export default function App() {
               />
               <Stepper
                 label={`${d.name} hits`}
-                value={d.rhythm > 0 ? RHYTHMS[d.rhythm].hits.length : d.hits}
-                onChange={(v) => patchDrum(i, { hits: v, steps: d.rhythm > 0 ? RHYTHMS[d.rhythm].steps : d.steps, rhythm: 0 })}
+                value={d.custom ? countOf(d.custom, 'x') : d.rhythm > 0 ? RHYTHMS[d.rhythm].hits.length : d.hits}
+                onChange={(v) => patchDrum(i, { hits: v, steps: patternSteps(d), rhythm: 0, custom: '' })}
                 min={0}
-                max={d.rhythm > 0 ? RHYTHMS[d.rhythm].steps : d.steps}
+                max={patternSteps(d)}
               />
               <Stepper
                 label={`${d.name} steps`}
-                value={d.rhythm > 0 ? RHYTHMS[d.rhythm].steps : d.steps}
-                onChange={(v) => patchDrum(i, { steps: v, hits: Math.min(d.rhythm > 0 ? RHYTHMS[d.rhythm].hits.length : d.hits, v), rhythm: 0 })}
+                value={patternSteps(d)}
+                onChange={(v) => patchDrum(i, { steps: v, hits: Math.min(d.custom ? countOf(d.custom, 'x') : d.rhythm > 0 ? RHYTHMS[d.rhythm].hits.length : d.hits, v), rhythm: 0, custom: '' })}
                 min={2}
                 max={32}
                 hint="Loop length in sixteenth notes. Different lengths drift against each other."
@@ -2429,17 +2432,70 @@ export default function App() {
                 value={d.rotation}
                 onChange={(v) => patchDrum(i, { rotation: v })}
                 min={0}
-                max={Math.max(0, (d.rhythm > 0 ? RHYTHMS[d.rhythm].steps : d.steps) - 1)}
+                max={Math.max(0, patternSteps(d) - 1)}
               />
               <Stepper label={`${d.name} velocity`} value={d.velocity} onChange={(v) => patchDrum(i, { velocity: v })} min={1} max={127} step={5} />
               <Stepper label={`${d.name} chance`} value={d.probability} onChange={(v) => patchDrum(i, { probability: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
               <View
                 accessible
                 accessibilityLabel={`${d.name} pattern`}
-                accessibilityValue={{ text: d.rhythm > 0 ? rhythmDescribe(d.rhythm, d.rotation) : describePattern(d.hits, d.steps, d.rotation) }}
+                accessibilityValue={{ text: d.custom ? describeText(d.custom, d.rotation) : d.rhythm > 0 ? rhythmDescribe(d.rhythm, d.rotation) : describePattern(d.hits, d.steps, d.rotation) }}
               >
-                <Text style={styles.pattern}>{d.rhythm > 0 ? rhythmText(d.rhythm, d.rotation) : patternText(d.hits, d.steps, d.rotation)}</Text>
+                <Text style={styles.pattern}>{d.custom ? rotatedText(d.custom, d.rotation) : d.rhythm > 0 ? rhythmText(d.rhythm, d.rotation) : patternText(d.hits, d.steps, d.rotation)}</Text>
               </View>
+              <Section title={`${d.name}: edit the pattern step by step`} id={`${d.name}: Edit the pattern step by step`} inner>
+                <Note>Pick a step, then say whether it is off, a hit, or a ghost (a quiet hit). Your edits start from the pattern above and replace it for this drum. Rotation is applied on top of your edits.</Note>
+                <Stepper
+                  label={`${d.name} step to edit`}
+                  value={Math.min(editStep, patternSteps(d) - 1)}
+                  onChange={(v) => setEditStep(v)}
+                  min={0}
+                  max={patternSteps(d) - 1}
+                  format={(v) => `${v + 1}, ${stepName(v, patternSteps(d))}, ${STEP_STATE_NAMES[stepStateAt(patternString(d), v)]}`}
+                  hint="Swipe up or down to move from step to step. Each one says where it falls in the bar and whether it is playing"
+                />
+                <Stepper
+                  label={`${d.name} this step`}
+                  value={stepStateAt(patternString(d), Math.min(editStep, patternSteps(d) - 1))}
+                  onChange={(v) => patchDrum(i, { custom: withStep(d, Math.min(editStep, patternSteps(d) - 1), v as StepState) })}
+                  min={0}
+                  max={2}
+                  format={(v) => STEP_STATE_NAMES[v]}
+                  hint="Off, a hit, or a ghost note, which plays quietly at the ghost velocity and chance set below"
+                />
+                {!!d.custom && (
+                  <ActionButton label={`${d.name} back to the plain pattern`} hint="Throws away your step edits and goes back to the rhythm or hits and steps above" onPress={() => patchDrum(i, { custom: '' })} />
+                )}
+                <View accessible={false} style={styles.nameBox}>
+                  <Text style={styles.note}>Name for saving this pattern as a rhythm</Text>
+                  <TextInput
+                    style={styles.nameInput}
+                    value={myRhythmName}
+                    onChangeText={setMyRhythmName}
+                    accessibilityLabel="Rhythm name"
+                    accessibilityHint="Double tap to type a name for the rhythm you save"
+                    maxLength={36}
+                    autoCorrect={false}
+                    placeholder="My rhythm"
+                    placeholderTextColor={colors.dim}
+                    onBlur={() => engine.reclaimKeys()}
+                  />
+                </View>
+                <ActionButton
+                  label={`Save ${d.name} pattern as my rhythm`}
+                  hint="Adds the hits of this pattern to the rhythm list under your name, to use on any drum. Ghost notes are not kept in a saved rhythm"
+                  onPress={() => {
+                    const r = addUserRhythm(state.userRhythms, patternString(d), myRhythmName);
+                    if (!r) {
+                      announceLater('Nothing to save, the pattern has no hits', 100);
+                      return;
+                    }
+                    setState((s) => ({ ...s, userRhythms: r.list }));
+                    setMyRhythmName('');
+                    announceLater(`Saved as ${r.name}`, 100);
+                  }}
+                />
+              </Section>
               <Section title={`${d.name}: sound of the built-in drum`} id={`${d.name}: Sound of the built-in drum`} inner>
               <Stepper label={`${d.name} built-in sound`} value={d.voice} onChange={(v) => patchDrum(i, { voice: v })} min={0} max={DRUM_TYPES.length - 1} format={(v) => DRUM_TYPES[v]} hint="Which sound the built-in drum plays for this drum, whatever its note. Another app ignores this" />
               {d.voice === SAMPLE_PACK_TYPE && (

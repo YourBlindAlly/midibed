@@ -10,12 +10,15 @@
 
 import type { BedState, DrumState } from './config';
 import { RHYTHMS } from './rhythms';
+import { cleanCustom } from './stepedit';
 
 export type SlotSpec = {
   /** Name of a rhythm in the library (src/rhythms.ts); '' with `euclid` set means the Euclidean spread. */
   rhythm: string;
   /** The Euclidean spread instead of a library rhythm (a groove saved from drums that use hits and steps). */
   euclid?: { hits: number; steps: number };
+  /** A pattern edited step by step (see stepedit.ts): 'x' hit, 'g' ghost, '.' off, one character per step. */
+  pattern?: string;
   velocity: number;
   rotation?: number;
   /** Chance a hit plays, percent (default 100). */
@@ -309,7 +312,8 @@ export function applyGroove(s: BedState, index: number, thin = 0): BedState {
     return {
       ...d,
       enabled: !muted,
-      rhythm: euclid ? 0 : rhythmIndex(spec.rhythm),
+      rhythm: euclid || spec.pattern ? 0 : rhythmIndex(spec.rhythm),
+      custom: cleanCustom(spec.pattern),
       ...(euclid ? { hits: Math.min(euclid.hits, euclid.steps), steps: euclid.steps } : {}),
       rotation: spec.rotation ?? 0,
       velocity: Math.max(1, Math.round(spec.velocity * (extra ? THIN_VELOCITY[level] : 1))),
@@ -346,12 +350,14 @@ function checkSlot(raw: unknown, problems: string[], label: string): SlotSpec | 
     const steps = num(e.steps, 1, 32, 16);
     euclid = { hits: num(e.hits, 0, steps, 0), steps };
   }
-  if (!euclid && !RHYTHMS.some((x) => x.name === rhythm)) {
+  const pattern = cleanCustom(r.pattern);
+  if (!pattern && !euclid && !RHYTHMS.some((x) => x.name === rhythm)) {
     problems.push(`${label}: there is no rhythm called "${rhythm}"`);
     return undefined;
   }
   const spec: SlotSpec = { rhythm, velocity: num(r.velocity, 1, 127, 80) };
   if (euclid) spec.euclid = euclid;
+  if (pattern) spec.pattern = pattern;
   if (r.rotation !== undefined) spec.rotation = num(r.rotation, 0, 31, 0);
   if (r.chance !== undefined) spec.chance = num(r.chance, 1, 100, 100);
   if (r.humanize !== undefined) spec.humanize = num(r.humanize, 0, 100, 20);
@@ -393,14 +399,16 @@ export function checkGroove(raw: unknown): { groove: Groove | null; problems: st
 /** Save the scene's drums as a groove: each drum's pattern as it is now, and the swing. */
 export function captureGroove(s: BedState, name: string): Groove {
   const slots = s.drums.slice(0, 8).map((d): SlotSpec | null => {
-    const spec: SlotSpec =
-      d.rhythm > 0 && RHYTHMS[d.rhythm]
+    const custom = cleanCustom(d.custom);
+    const spec: SlotSpec = custom
+      ? { rhythm: '', pattern: custom, velocity: d.velocity }
+      : d.rhythm > 0 && RHYTHMS[d.rhythm]
         ? { rhythm: RHYTHMS[d.rhythm].name, velocity: d.velocity }
         : { rhythm: '', euclid: { hits: d.hits, steps: d.steps }, velocity: d.velocity };
     if (d.rotation) spec.rotation = d.rotation;
     if (d.probability < 100) spec.chance = d.probability;
     spec.humanize = d.humanize;
-    if (d.ghostHits > 0) {
+    if (d.ghostHits > 0 || custom.includes('g')) {
       spec.ghost = { hits: d.ghostHits, rotation: d.ghostRotation, velocity: d.ghostVelocity };
       if ((d.ghostChance ?? 100) < 100) spec.ghost.chance = d.ghostChance;
     }
@@ -428,6 +436,7 @@ const PATTERN_FIELDS = [
   'ghostRotation',
   'ghostVelocity',
   'ghostChance',
+  'custom',
   'accentEvery',
   'accentBoost',
   'accentOffset',
