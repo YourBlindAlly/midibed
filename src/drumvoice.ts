@@ -7,7 +7,7 @@
  * Only the built-in sound uses this. A drum sent to another app is just its note and channel, as before.
  */
 // New types go at the END so a saved type number keeps its meaning (the native switch uses the same numbers).
-export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Sharp shaker (cabasa-like)', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine', 'Tube shaker', 'Seed shaker (maraca)', 'Egg shaker (small)', 'Sample pack', 'Snare, round analog', 'Snare, bright rattle', 'Snare, crisp digital'];
+export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Sharp shaker (cabasa-like)', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine', 'Tube shaker', 'Seed shaker (maraca)', 'Egg shaker (small)', 'Sample pack', 'Snare, round analog', 'Snare, bright rattle', 'Snare, crisp digital', 'Hat, tight analog', 'Hat, bright crisp', 'Hat, dusty lo-fi'];
 
 /** The sound type that plays recorded sounds from an imported pack (src/packs.ts). */
 export const SAMPLE_PACK_TYPE = 17;
@@ -15,15 +15,18 @@ export const SAMPLE_PACK_TYPE = 17;
 /** The snares with separate body and rattle controls (the original Snare, type 1, keeps its five controls). */
 export const BODY_SNARE_TYPES = [18, 19, 20];
 
+/** The hats with a metal/noise mix and a ring length: they reuse the body and rattle settings (shown as metal and ring length). A new one cuts off any hat still ringing. */
+export const METAL_HAT_TYPES = [21, 22, 23];
+
 export type DrumVoiceSettings = {
   voice: number; // index into DRUM_TYPES
   tune: number; // semitones, -12..12
   decay: number; // percent, 25..300
   tone: number; // percent, 0..100 (brighter)
   snap: number; // percent, 0..100 (noise / click / attack, depending on the type; for the body snares it is the snappy noise amount)
-  /** percent, 0..100, the body snares only: how much tonal body, and how long it rings. */
+  /** percent, 0..100, the body snares (how much tonal body) and the metal hats (how metallic rather than noisy). */
   body?: number;
-  /** percent, 0..100, the body snares only: how long the noise rattle lasts. */
+  /** percent, 0..100, the body snares (how long the rattle lasts) and the metal hats (how long the ring lasts). */
   rattle?: number;
   level: number; // percent, 0..100
   /** percent, 0..100: how much each hit differs from the last. 0 = every hit is exactly the same sound (tight and even); 100 = every hit a little different, as a real shaker is. */

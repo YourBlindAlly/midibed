@@ -65,7 +65,7 @@ import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sec
 import { ENDING_FADE_NAMES, STOP_STYLE_NAMES, barsLeftText, endingJson, endingSentence, nextStopStyle } from './src/ending';
 import { DELAY_NOTES, FxPart, FxPartState, panText, uglyFxJson } from './src/uglyfx';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
-import { DRUM_TYPES, SAMPLE_PACK_TYPE, drumTuneText, drumVoicesJson } from './src/drumvoice';
+import { BODY_SNARE_TYPES, DRUM_TYPES, METAL_HAT_TYPES, SAMPLE_PACK_TYPE, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { MAX_PACK_GROUPS, cleanGroupName, groupNames, levelOf, packNames, parsePacks, setPackDir, withoutPack, type PackSound } from './src/packs';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
@@ -2467,11 +2467,17 @@ export default function App() {
               <Stepper label={`${d.name} tune`} value={d.tune} onChange={(v) => patchDrum(i, { tune: v })} min={-12} max={12} format={drumTuneText} />
               <Stepper label={`${d.name} decay`} value={d.decay} onChange={(v) => patchDrum(i, { decay: v })} min={25} max={300} step={5} bigStep={25} format={(v) => `${v} percent`} hint="How long the sound rings" />
               <Stepper label={`${d.name} tone`} value={d.tone} onChange={(v) => patchDrum(i, { tone: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="Darker or brighter" />
-              <Stepper label={d.voice >= 18 && d.voice <= 20 ? `${d.name} snappy` : `${d.name} snap`} value={d.snap} onChange={(v) => patchDrum(i, { snap: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint={d.voice >= 18 && d.voice <= 20 ? 'How much of the noisy snare rattle is mixed in' : 'How much click, noise or attack the sound has'} />
-              {d.voice >= 18 && d.voice <= 20 && (
+              <Stepper label={BODY_SNARE_TYPES.includes(d.voice) ? `${d.name} snappy` : `${d.name} snap`} value={d.snap} onChange={(v) => patchDrum(i, { snap: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint={BODY_SNARE_TYPES.includes(d.voice) ? 'How much of the noisy snare rattle is mixed in' : METAL_HAT_TYPES.includes(d.voice) ? 'How much of a tiny click there is at the start of each hit' : 'How much click, noise or attack the sound has'} />
+              {BODY_SNARE_TYPES.includes(d.voice) && (
                 <>
                   <Stepper label={`${d.name} body`} value={d.body ?? 50} onChange={(v) => patchDrum(i, { body: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How much of the drum's tonal thump there is, and how long it rings. Low is mostly rattle, high is a fat drum sound" />
                   <Stepper label={`${d.name} rattle length`} value={d.rattle ?? 50} onChange={(v) => patchDrum(i, { rattle: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How long the noisy rattle lasts. Low is short and dry, high is long and sizzly" />
+                </>
+              )}
+              {METAL_HAT_TYPES.includes(d.voice) && (
+                <>
+                  <Stepper label={`${d.name} metal`} value={d.body ?? 50} onChange={(v) => patchDrum(i, { body: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="Low is soft airy noise, high is a ringing, metallic clang like an old drum machine" />
+                  <Stepper label={`${d.name} ring length`} value={d.rattle ?? 50} onChange={(v) => patchDrum(i, { rattle: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="Low is a tight closed hat, high is a long open hat. A new hat always cuts off one that is still ringing" />
                 </>
               )}
               <Stepper

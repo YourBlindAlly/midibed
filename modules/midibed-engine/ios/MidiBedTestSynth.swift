@@ -66,7 +66,7 @@ final class MidiBedTestSynth {
   }
 
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 sharp shaker (cabasa-like), 7 tom,
-  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker, 17 sample pack (a recorded sound from an imported pack), 18 round analog snare, 19 bright rattle snare, 20 crisp digital snare (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
+  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker, 17 sample pack (a recorded sound from an imported pack), 18 round analog snare, 19 bright rattle snare, 20 crisp digital snare, 21 tight analog hat, 22 bright crisp hat, 23 dusty lo-fi hat (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
   private struct DrumVoice {
     var active = false
@@ -87,6 +87,8 @@ final class MidiBedTestSynth {
     var body: Float = 0.5   // snares 18-20: how much tonal body, and how long it rings
     var rattle: Float = 0.5 // snares 18-20: how long the noise rattle lasts
     var level: Float = 1
+    var choking = false     // a newer hat has cut this one off
+    var chokeGain: Float = 1
     var s1: Float = 0   // spare filter state (the tube shaker's body)
     var s2: Float = 0
     var rng: UInt32 = 1 // this hit's own noise (see DrumPatch.variation)
@@ -369,7 +371,7 @@ final class MidiBedTestSynth {
   func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, body: Float, rattle: Float, level: Float, variation: Float, group: Int)]) {
     for i in 0..<128 { drumPatches[i] = DrumPatch() }
     for d in list where d.note >= 0 && d.note < 128 {
-      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(20, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, body: max(0, min(1, d.body)), rattle: max(0, min(1, d.rattle)), level: d.level, variation: max(0, min(1, d.variation)), group: d.group)
+      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(23, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, body: max(0, min(1, d.body)), rattle: max(0, min(1, d.rattle)), level: d.level, variation: max(0, min(1, d.variation)), group: d.group)
     }
   }
 
@@ -800,6 +802,13 @@ final class MidiBedTestSynth {
         case 54: v.kind = 9
         case 70, 82: v.kind = 14
         default: v.kind = 8
+        }
+      }
+      // A new hat of the metal/noise kind cuts off any hat still ringing.
+      if v.kind >= 21 && v.kind <= 23 {
+        for i in 0..<drumCount where drums[i].active {
+          let k = drums[i].kind
+          if k == 4 || k == 5 || (k >= 21 && k <= 23) { drums[i].choking = true }
         }
       }
       // Reuse a free voice, else steal the first one.
@@ -1306,6 +1315,37 @@ final class MidiBedTestSynth {
           if kd == 19 { s += noise * snap * 0.25 * expf(-t * 700) }
           if kd == 20 { s = floorf(s * 48 + 0.5) / 48 } // the 707 grit: a coarse 8-bit-like step
           alive = t <= min(2.0, 6 * D / max(4, min(ring, nRate)))
+        case 21, 22, 23: // hats with a metal/noise mix and a ring length: 21 tight analog, 22 bright crisp, 23 dusty lo-fi (scratchpad hat_check.py)
+          let kd = drums[i].kind
+          let metal = drums[i].body
+          let ringAmt = drums[i].rattle
+          // Six square waves at unrelated pitches (the classic analog hat), doubled in pitch for the crisp one.
+          let mul: Float = (kd == 22 ? 2 : 1) * f
+          var sq: Float = 0
+          sq += sinf(2 * Float.pi * 205.3 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 304.4 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 369.6 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 522.7 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 540.0 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 800.0 * mul * t) >= 0 ? 1 : -1
+          let mix = (sq / 6) * (0.3 + 1.1 * metal) + noise * (1.15 - metal) * (kd == 22 ? 0.9 : 0.55)
+          let fc: Float = kd == 21 ? 5200 + 3600 * tone : (kd == 22 ? 6800 + 3600 * tone : 3200 + 3000 * tone)
+          let r1 = expf(-2 * Float.pi * fc / sr)
+          let r2 = expf(-2 * Float.pi * fc * 0.7 / sr)
+          let h1 = mix - drums[i].xPrev + r1 * drums[i].hpPrev
+          drums[i].xPrev = mix
+          drums[i].hpPrev = h1
+          let h2 = h1 - drums[i].xPrev2 + r2 * drums[i].hp2Prev
+          drums[i].xPrev2 = h1
+          drums[i].hp2Prev = h2
+          drums[i].lp += (kd == 23 ? 0.30 : 0.55) * (h2 - drums[i].lp)
+          let rate = max(4, 65 - 58 * ringAmt) / D
+          var env = expf(-t * rate)
+          if kd == 22 { env = 0.7 * env + 0.3 * expf(-t * rate * 0.35) }
+          let gain: Float = kd == 21 ? 1.5 : (kd == 22 ? 0.95 : 2.0)
+          s = drums[i].lp * env * gain + noise * snap * 0.3 * expf(-t * 900)
+          if kd == 23 { s = floorf(s * 32 + 0.5) / 32 } // lo-fi grit
+          alive = t <= min(2.5, 7 / rate)
         case 2: // rim click: two short tones and a click
           let tones = (sinf(2 * Float.pi * 1700 * f * t) * 0.5 + sinf(2 * Float.pi * 480 * f * t) * 0.5) * expf(-t * 420 / D)
           s = tones * 0.9 + noise * snap * 0.6 * expf(-t * 1500)
@@ -1490,8 +1530,13 @@ final class MidiBedTestSynth {
           alive = t <= 0.25 * D + 0.02
         }
         if !alive { drums[i].active = false }
+        if drums[i].choking {
+          // A newer hat cuts this one off quickly, as on a drum machine.
+          drums[i].chokeGain *= expf(-dt * 500)
+          if drums[i].chokeGain < 0.003 { drums[i].active = false }
+        }
         drums[i].t += dt
-        drumSum += s * drums[i].velocity * 0.45 * drums[i].level
+        drumSum += s * drums[i].velocity * 0.45 * drums[i].level * drums[i].chokeGain
       }
       drumSum *= expCurrent[9] // the drums' level (CC 7 on the drum channel)
 
