@@ -227,7 +227,10 @@ final class MidiBedTestSynth {
   let loops = LoopPlayer()
   /// How the built-in sound leaves: 0 stereo, 1 mono both sides, 2 mono left only, 3 mono right only.
   var outputMode = 0
-  private var partOfChannel = [Int](repeating: 1, count: 16)
+  /// Which part each MIDI channel belongs to (0 bass, 1 pad, 2 dancer). A fixed block of memory that is only ever written in
+  /// place: it used to be a Swift array that was replaced whole from the control side while the audio thread was reading
+  /// it, which let the audio thread read a freed array and trap (the crash seen in the pad loop, builds 6 to 8).
+  private let partOfChannel = UnsafeMutablePointer<Int>.allocate(capacity: 16)
 
   // Filter presets (see setFilterTargets): per part 0 bass, 1 pad, 2 MidiDancer, 3 drums.
   private let fMode = UnsafeMutablePointer<Int>.allocate(capacity: 4)        // wanted: 0 none, 1 LP, 2 HP, 3 BP
@@ -418,7 +421,7 @@ final class MidiBedTestSynth {
   func setPartChannels(bass b: Int, pad p: Int, dancer d: Int) {
     var map = [Int](repeating: 1, count: 16)
     for (ch, part) in [(p, 1), (d, 2), (b, 0)] where ch >= 0 && ch < 16 { map[ch] = part }
-    partOfChannel = map
+    for c in 0..<16 { partOfChannel[c] = map[c] }
   }
 
   /// Control side: switch the bass voice on or off and give it its settings (BassParam order).
@@ -452,6 +455,7 @@ final class MidiBedTestSynth {
     expTarget.initialize(repeating: 1, count: 16)
     expCurrent = UnsafeMutablePointer<Float>.allocate(capacity: 16)
     expCurrent.initialize(repeating: 1, count: 16)
+    partOfChannel.initialize(repeating: 1, count: 16)
     noiseRing = UnsafeMutablePointer<NoiseCommand>.allocate(capacity: noiseCapacity)
     noiseRing.initialize(repeating: NoiseCommand(), count: noiseCapacity)
     noiseVoices = UnsafeMutablePointer<NoiseVoice>.allocate(capacity: noiseVoiceCount)
