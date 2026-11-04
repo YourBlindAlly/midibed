@@ -4,6 +4,8 @@ import { BedState, Journey, MAX_JOURNEYS, SceneData, applyJourney, captureJourne
 import { MAX_CHORDS, MODE_NAMES, chordLabel } from './chords';
 import { LaneState, defaultLane } from './looplib';
 import { RHYTHMS } from './rhythms';
+import { AdvanceRule } from './advance';
+import { allGrooves, applyGroove } from './grooves';
 
 const rhythmIndex = (name: string): number => Math.max(0, RHYTHMS.findIndex((r) => r.name === name));
 
@@ -21,6 +23,12 @@ type SceneSpec = {
   evolve?: { everyBars: number; chance: number; returnAfter: number };
   /** Settings laid over a drum after the standard ones, by drum name. */
   drumOverrides?: Record<string, Record<string, number | boolean>>;
+  /** A groove from the grooves list (by name): it sets the drums, which replace the standard ones. */
+  groove?: string;
+  /** Settings laid over the bass drone (for example no fifth or octave). */
+  drone?: Partial<BedState['drone']>;
+  /** What the scene does after a while (default: stay). */
+  advance?: AdvanceRule;
   barsPerChord: number;
   follow: boolean; // bass and pad follow the chords
   drums: string[]; // names of the drums that are on
@@ -30,8 +38,9 @@ type SceneSpec = {
 
 /** Build one scene on top of the defaults. Key A minor is the journey key C moved down 3 semitones. */
 function minorScene(spec: SceneSpec): SceneData {
-  const b = defaultState;
-  const drums = b.drums.map((d) => {
+  const grooveAt = spec.groove ? allGrooves().findIndex((g) => g.name === spec.groove) : -1;
+  const b = grooveAt >= 0 ? applyGroove(defaultState, grooveAt) : defaultState;
+  const drums = grooveAt >= 0 ? b.drums.map((d) => ({ ...d, ...(spec.drumOverrides?.[d.name] ?? {}) })) : b.drums.map((d) => {
     const on = spec.drums.includes(d.name);
     if (d.name === 'Kick') {
       return { ...d, enabled: on, rhythm: rhythmIndex('Syncopated kick: 1, 2 e, 3'), steps: 16, hits: 3, rotation: 0, velocity: 100, accentEvery: 3, accentOffset: 1, accentBoost: 40, keepFirst: true };
@@ -50,7 +59,8 @@ function minorScene(spec: SceneSpec): SceneData {
     keyOffset: spec.keyOffset ?? -3,
     drums,
     harmony: { ...b.harmony, mode: spec.mode ?? 5, preset: 0, count, degrees: Array.from({ length: MAX_CHORDS }, (_, k) => spec.degrees[k] ?? 1), colors: Array.from({ length: MAX_CHORDS }, (_, k) => spec.colors?.[k] ?? 0), barsPerChord: spec.barsPerChord },
-    drone: { ...b.drone, follow: spec.follow },
+    drone: { ...b.drone, follow: spec.follow, ...(spec.drone ?? {}) },
+    advance: spec.advance ?? b.advance,
     pad: { ...b.pad, follow: spec.follow, style: spec.padStyle ?? b.pad.style },
     evolve: spec.evolve ?? b.evolve,
     motion: { ...b.motion, preset: 0, ...spec.motion },
@@ -204,6 +214,66 @@ function modalJourney(spec: ModalSpec): Journey {
   return { ...captureJourney(defaultState), name: `Ocarina ${MODE_NAMES[spec.mode].split(' ')[0]}`, root: spec.tonic, bpm: spec.bpm, activeScene: 0, scenes };
 }
 
+type TourScene = {
+  name: string;
+  /** Semitones above the journey key C. */
+  offset: number;
+  mode: number;
+  degrees: number[];
+  groove: string;
+  bars: number;
+  /** Style of the drum quiet spots: 0 everything out, 1 kick and snare out, 2 only the kick stays. */
+  quiet: number;
+};
+
+/**
+ * "Play in C": a C major scale (the white notes) over a different tonic in each scene, so the same notes take on a
+ * different mode each time. About ten minutes at 70 BPM: each scene moves on by itself and the last ends the piece.
+ * The bass plays only the tonic (no fifth, no octave); the pad is a steady fifths drone that opens into chords;
+ * both go steady together every so often. The drums come in after a drone start, follow the scene's own groove,
+ * and drop out for a quiet stretch. MidiDancer is off, because you are the melody.
+ */
+function playInC(name: string, scenes: TourScene[]): Journey {
+  const motion = (drums: ReturnType<typeof drumsRule>, pad = noRule, bass = noRule) => ({ bass, pad, drums });
+  const built = scenes.map((t, i) => {
+    const q = Math.max(8, Math.round(t.bars / 6));
+    const on = Math.max(8, Math.round((t.bars - 8 - q) / 2));
+    const last = i === scenes.length - 1;
+    return minorScene({
+      name: t.name,
+      keyOffset: t.offset,
+      mode: t.mode,
+      degrees: t.degrees,
+      barsPerChord: 4,
+      // Starts as a steady drone, then follows the chords for 16 bars, and so on; the pad and bass do it together.
+      follow: false,
+      padStyle: 6,
+      groove: t.groove,
+      drone: { fifth: false, octave: false },
+      drums: [],
+      snare: true,
+      evolve: { everyBars: 8, chance: 50, returnAfter: 3 },
+      advance: { mode: last ? 4 : 1, count: t.bars, unit: 0, target: 0 },
+      motion: motion(drumsRule(8, on, q, t.quiet), rule(8, 16, 0), rule(8, 16, 0)),
+    });
+  });
+  return { ...captureJourney(defaultState), name, root: 36, bpm: 70, activeScene: 0, scenes: built };
+}
+
+const PLAY_IN_C_BRIGHT: TourScene[] = [
+  { name: 'F Lydian, F and G', offset: 5, mode: 3, degrees: [1, 2], groove: 'Half-time ambient', bars: 48, quiet: 0 },
+  { name: 'C major, C and F', offset: 0, mode: 0, degrees: [1, 4], groove: 'Downtempo', bars: 40, quiet: 2 },
+  { name: 'G Mixolydian, G and F', offset: -5, mode: 4, degrees: [1, 7], groove: 'Reggae one-drop', bars: 48, quiet: 1 },
+  { name: 'D Dorian, Dm and G', offset: 2, mode: 1, degrees: [1, 4], groove: 'Lo-fi hip-hop', bars: 40, quiet: 0 },
+];
+
+const PLAY_IN_C_DARK: TourScene[] = [
+  { name: 'D Dorian, Dm and G', offset: 2, mode: 1, degrees: [1, 4], groove: 'Frame drum pulse', bars: 48, quiet: 0 },
+  { name: 'A minor, Am and G', offset: -3, mode: 5, degrees: [1, 7], groove: 'Trip-hop', bars: 48, quiet: 1 },
+  { name: 'E Phrygian, Em and F', offset: 4, mode: 2, degrees: [1, 2], groove: 'Dub steppers', bars: 40, quiet: 2 },
+  { name: 'Home to C major, C and F', offset: 0, mode: 0, degrees: [1, 4], groove: 'Heartbeat', bars: 40, quiet: 0 },
+];
+
 export const STARTER_JOURNEYS: StarterJourney[] = [
   {
     name: 'Go with Guitar',
@@ -254,6 +324,16 @@ export const STARTER_JOURNEYS: StarterJourney[] = [
     name: 'Ocarina Phrygian',
     about: '76 BPM, C ocarina, tonic E (E Phrygian, dark and a little Spanish). Drone, then Em and F, then Em F Em D, then Em and C with a full kit; the breathing there drops to a plain E drone with fifths.',
     build: () => modalJourney({ tonic: 40, mode: 2, bpm: 76, flip: [1, 2], turn: [1, 2, 1, 7], home: [1, 6] }),
+  },
+  {
+    name: 'Play in C: bright',
+    about: 'Play the C major scale (the white notes) all the way through, about 10 minutes at 70 BPM. The tonic changes by itself: F Lydian, C major, G Mixolydian, D Dorian, so your same notes turn dreamy, bright, bluesy and soft. Bass is the tonic only. Each scene has its own groove, and the drums fade in and out with quiet stretches. The last scene ends the piece.',
+    build: () => playInC('Play in C: bright', PLAY_IN_C_BRIGHT),
+  },
+  {
+    name: 'Play in C: dark',
+    about: 'Play the C major scale (the white notes) all the way through, about 10 minutes at 70 BPM. The tonic changes by itself: D Dorian, A minor, E Phrygian, then home to C major, so your same notes turn soft, sad, dark and Spanish and then settle. Bass is the tonic only. Each scene has its own groove, and the drums fade in and out with quiet stretches. The last scene ends the piece.',
+    build: () => playInC('Play in C: dark', PLAY_IN_C_DARK),
   },
 ];
 

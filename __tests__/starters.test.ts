@@ -2,6 +2,7 @@ import { defaultState, keyRoot, applyScene, toEngineJson, migrateState, MAX_JOUR
 import { chordLabel } from '../src/chords';
 import { RHYTHMS } from '../src/rhythms';
 import { STARTER_JOURNEYS, addStarterJourney } from '../src/starters';
+import { barsToSeconds, journeyLength } from '../src/journeylength';
 
 const labels = (s: ReturnType<typeof addStarterJourney>) =>
   s.harmony.degrees.slice(0, s.harmony.count).map((d, i) => chordLabel(keyRoot(s), s.harmony.mode, d, s.pad.style, s.harmony.colors[i]));
@@ -257,7 +258,7 @@ describe('loops in the starter journeys', () => {
 
 describe('every starter has a kick foundation', () => {
   it('a kick on beats 1 and 3 in every scene of every starter', () => {
-    for (let idx = 0; idx < STARTER_JOURNEYS.length; idx++) {
+    for (let idx = 0; idx < 10; idx++) { // the first ten; the Play in C journeys use whole-kit grooves with their own kicks
       const added = addStarterJourney(defaultState, idx);
       added.scenes.forEach((sc, i) => {
         const s = applyScene(added, sc);
@@ -276,5 +277,47 @@ describe('every starter has a kick foundation', () => {
         expect([STARTER_JOURNEYS[idx].name, i, style]).toEqual([STARTER_JOURNEYS[idx].name, i, 2]);
       }
     }
+  });
+});
+
+describe('Play in C journeys (the C scale over different tonics)', () => {
+  const whiteNotes = new Set([0, 2, 4, 5, 7, 9, 11]);
+  const cases: [number, string, number[], number[]][] = [
+    [10, 'Play in C: bright', [5, 0, 7, 2], [3, 0, 4, 1]],
+    [11, 'Play in C: dark', [2, 9, 4, 0], [1, 5, 2, 0]],
+  ];
+  it.each(cases)('journey %i %s: about 10 minutes, tonic only bass, C scale notes, a groove per scene', (idx, name, tonics, modes) => {
+    const added = addStarterJourney(defaultState, idx);
+    expect(added.journeyName).toBe(name);
+    expect(added.bpm).toBe(70);
+    const seen = new Set<string>();
+    for (let i = 0; i < 4; i++) {
+      const s = applyScene(added, added.scenes[i]);
+      expect(keyRoot(s) % 12).toBe(tonics[i]);
+      expect(s.harmony.mode).toBe(modes[i]);
+      expect(s.drone.fifth).toBe(false);
+      expect(s.drone.octave).toBe(false);
+      expect(s.dancer.enabled).toBe(false);
+      expect(s.advance.mode).toBe(i === 3 ? 4 : 1);
+      const j = JSON.parse(toEngineJson(s));
+      for (const list of [...j.drone.chords, ...j.pad.chords] as number[][]) {
+        for (const n of list) expect(whiteNotes.has(n % 12)).toBe(true);
+      }
+      // the bass plays one note per chord
+      for (const list of j.drone.chords as number[][]) expect(list).toHaveLength(1);
+      seen.add(s.drums.map((d) => `${d.enabled}${d.rhythm}${d.hits}${d.steps}`).join('|'));
+      // drums come in after a drone start and drop out for a quiet stretch
+      expect(s.motion.drums.introBars).toBe(8);
+      expect(s.motion.drums.breakBars).toBeGreaterThanOrEqual(8);
+    }
+    expect(seen.size).toBe(4); // every scene has a different groove
+    const len = journeyLength(
+      added.scenes.map((sc) => ({ advance: sc.advance, harmony: sc.harmony })),
+      0,
+    );
+    expect(len.kind).toBe('ends');
+    const minutes = barsToSeconds(len.bars, added.bpm) / 60;
+    expect(minutes).toBeGreaterThan(9.5);
+    expect(minutes).toBeLessThan(10.5);
   });
 });
