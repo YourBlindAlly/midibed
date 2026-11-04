@@ -1,6 +1,6 @@
 // Starter journeys: ready-made journeys Rusty can add and then change. Each is built from the
 // plain defaults plus a few overrides, so it stays valid whenever a new setting is added.
-import { BedState, Journey, MAX_JOURNEYS, SceneData, applyJourney, captureJourney, captureScene, defaultState } from './config';
+import { BedState, DrumState, Journey, MAX_JOURNEYS, SceneData, applyJourney, captureJourney, captureScene, defaultState } from './config';
 import { MAX_CHORDS, MODE_NAMES, chordLabel } from './chords';
 import { LaneState, defaultLane } from './looplib';
 import { RHYTHMS } from './rhythms';
@@ -38,6 +38,24 @@ type SceneSpec = {
   motion: Partial<BedState['motion']>;
 };
 
+const HOUSE_FILL = { enabled: true, everyBars: 8, beforeScene: true, afterBreakdown: true, density: 50, chance: 70, maxBeats: 2 };
+
+/**
+ * House rules for the drums of every starter: the kick, snare and hats always play (chance 100); the hats are steady
+ * eighth notes (or quarter notes when the groove's own hat is already on the quarters); a kick whose pattern lacks
+ * the downbeat gets it back by keeping its first hit. Everything else about a drum (sounds, ghosts, accents) is left as set.
+ */
+function houseDrums(drums: DrumState[]): DrumState[] {
+  const eighths = rhythmIndex('Straight eighths');
+  const quarters = rhythmIndex('Four on the floor');
+  return drums.map((d) => {
+    if (d.name === 'Kick') return { ...d, probability: 100, keepFirst: true };
+    if (d.name === 'Snare') return { ...d, probability: 100 };
+    if (d.name === 'Hat') return { ...d, probability: 100, rhythm: d.rhythm === quarters ? quarters : eighths, steps: 16 };
+    return d;
+  });
+}
+
 /** Build one scene on top of the defaults. Key A minor is the journey key C moved down 3 semitones. */
 function minorScene(spec: SceneSpec): SceneData {
   const grooveAt = spec.groove ? allGrooves().findIndex((g) => g.name === spec.groove) : -1;
@@ -59,13 +77,16 @@ function minorScene(spec: SceneSpec): SceneData {
     ...b,
     sceneName: spec.name,
     keyOffset: spec.keyOffset ?? -3,
-    drums,
+    drums: houseDrums(drums),
     harmony: { ...b.harmony, mode: spec.mode ?? 5, preset: 0, count, degrees: Array.from({ length: MAX_CHORDS }, (_, k) => spec.degrees[k] ?? 1), colors: Array.from({ length: MAX_CHORDS }, (_, k) => spec.colors?.[k] ?? 0), barsPerChord: spec.barsPerChord },
-    drone: { ...b.drone, follow: spec.follow, ...(spec.drone ?? {}) },
+    // House rule: the bass plays the root and its octave, never the fifth.
+    drone: { ...b.drone, follow: spec.follow, ...(spec.drone ?? {}), fifth: false },
     advance: spec.advance ?? b.advance,
-    fill: { ...b.fill, ...(spec.fill ?? {}) },
+    // House rule: a fill leads into scene changes and the return of the drums, and one comes round every 8 bars.
+    fill: { ...b.fill, ...HOUSE_FILL, ...(spec.fill ?? {}) },
     pad: { ...b.pad, follow: spec.follow, style: spec.padStyle ?? b.pad.style },
-    evolve: spec.evolve ?? b.evolve,
+    // House rule: the drum patterns never wander by themselves.
+    evolve: { ...b.evolve, everyBars: 0 },
     motion: { ...b.motion, preset: 0, ...spec.motion },
     dancer: { ...b.dancer, enabled: false },
     loops: { ...b.loops, enabled: false },
@@ -279,6 +300,100 @@ const PLAY_IN_C_DARK: TourScene[] = [
   { name: 'Home to C major, C and F', offset: 0, mode: 0, degrees: [1, 4], groove: 'Heartbeat', bars: 40, quiet: 0 },
 ];
 
+/** Quiet ghost notes on the free steps for the kick and snare (they come and go, never touching the main hits). */
+const ghosts = { Kick: { ghostHits: 2, ghostVelocity: 36, ghostChance: 45 }, Snare: { ghostHits: 3, ghostVelocity: 34, ghostChance: 45 } };
+
+type FriendScene = {
+  name: string;
+  /** Semitones above the journey key. */
+  offset: number;
+  mode: number;
+  degrees: number[];
+  barsPerChord: number;
+  /** Chord type for the pad: 0 triad, 1 sus 2, 3 add 9, 4 seventh, 6 fifths only. */
+  style: number;
+  /** true = bass and pad follow the chords; false = one steady chord. */
+  follow: boolean;
+  groove: string;
+  /** Drums wait this many bars before they come in (0 = from the start). */
+  intro?: number;
+  /** The pad breathes between chords and a fifths drone (default on). */
+  padBreath?: boolean;
+};
+
+/**
+ * A guitar or handpan journey: the house drum rules (steady kick on the downbeat, snare and hats always playing, no
+ * wandering patterns), kick and snare ghosts, fills, a bass of root and octave, and breathing: the drums drop out for a
+ * stretch (kick stays), the pad swaps between chords and a fifths drone, the bass goes steady now and then.
+ */
+function friendJourney(name: string, root: number, bpm: number, list: FriendScene[], withGhosts = true): Journey {
+  const motion = (drums: ReturnType<typeof drumsRule>, pad: ReturnType<typeof rule>, bass: ReturnType<typeof rule>) => ({ bass, pad, drums });
+  const scenes = list.map((t) =>
+    minorScene({
+      name: t.name,
+      keyOffset: t.offset,
+      mode: t.mode,
+      degrees: t.degrees,
+      barsPerChord: t.barsPerChord,
+      follow: t.follow,
+      padStyle: t.style,
+      groove: t.groove,
+      drums: [],
+      snare: true,
+      drumOverrides: withGhosts ? ghosts : {},
+      motion: motion(
+        drumsRule(t.intro ?? 0, t.intro ? 0 : 16, t.intro ? 2 : 8, t.intro ? 0 : 2),
+        t.padBreath === false ? noRule : rule(8, 8, 0),
+        t.degrees.length > 1 ? rule(16, 8, 0) : noRule,
+      ),
+    }),
+  );
+  return { ...captureJourney(defaultState), name, root, bpm, activeScene: 0, scenes };
+}
+
+/**
+ * "G is for Guitar": key of G with no G chord. Em (E bass) and Cmaj7, then D, Am, D, C. Em scenes are built as
+ * E Aeolian (3 semitones below the key), so the bass plays E and its steady version is E too.
+ */
+function gForGuitar(): Journey {
+  return friendJourney('G is for Guitar', 43, 84, [
+    { name: 'Em, bass on E', offset: -3, mode: 5, degrees: [1], barsPerChord: 1, style: 0, follow: true, groove: 'Half-time ambient', intro: 8 },
+    { name: 'Em7, Cmaj7', offset: -3, mode: 5, degrees: [1, 6], barsPerChord: 2, style: 4, follow: true, groove: 'Folk boom-chick' },
+    { name: 'Em add 9, bass on E', offset: -3, mode: 5, degrees: [1], barsPerChord: 1, style: 3, follow: true, groove: 'Downtempo' },
+    { name: 'D, Am, D, C', offset: 0, mode: 0, degrees: [5, 2, 5, 4], barsPerChord: 2, style: 0, follow: true, groove: 'Lo-fi hip-hop' },
+  ]);
+}
+
+/** "D is for Drift": key of D, open and airy for a guitar. */
+function dForDrift(): Journey {
+  return friendJourney('D is for Drift', 38, 80, [
+    { name: 'D drone, sus 2', offset: 0, mode: 0, degrees: [1], barsPerChord: 1, style: 1, follow: false, groove: 'Ambient pulse', intro: 8 },
+    { name: 'G, D', offset: 0, mode: 0, degrees: [4, 1], barsPerChord: 2, style: 0, follow: true, groove: 'Half-time ambient' },
+    { name: 'Bm, G, D, A', offset: 0, mode: 0, degrees: [6, 4, 1, 5], barsPerChord: 2, style: 0, follow: true, groove: 'Organic world' },
+    { name: 'Em, A', offset: 0, mode: 0, degrees: [2, 5], barsPerChord: 2, style: 0, follow: true, groove: 'Bossa lounge' },
+  ]);
+}
+
+/** "Handpan sweet": every note is G, B, C, D or E (a handpan in G with a C). Triads on G, Em and C only. */
+function handpanSweet(): Journey {
+  return friendJourney('Handpan sweet', 43, 72, [
+    { name: 'G drone', offset: 0, mode: 0, degrees: [1], barsPerChord: 1, style: 0, follow: false, groove: 'Ambient pulse', intro: 8 },
+    { name: 'G, Em, C, G', offset: 0, mode: 0, degrees: [1, 6, 4, 1], barsPerChord: 2, style: 0, follow: true, groove: 'Half-time ambient' },
+    { name: 'C, G, fifths only', offset: 0, mode: 0, degrees: [4, 1], barsPerChord: 2, style: 6, follow: true, groove: 'Frame drum pulse', padBreath: false },
+    { name: 'Em, C, G, G', offset: 0, mode: 0, degrees: [6, 4, 1, 1], barsPerChord: 2, style: 0, follow: true, groove: 'Heartbeat' },
+  ], false);
+}
+
+/** "Handpan bright": C major with sevenths where every note is still G, B, C, D or E (Cmaj7, Em7). */
+function handpanBright(): Journey {
+  return friendJourney('Handpan bright', 36, 90, [
+    { name: 'Cmaj7 drone', offset: 0, mode: 0, degrees: [1], barsPerChord: 1, style: 4, follow: false, groove: 'Ambient pulse', intro: 8 },
+    { name: 'Cmaj7, Em7', offset: 0, mode: 0, degrees: [1, 3], barsPerChord: 2, style: 4, follow: true, groove: 'Downtempo' },
+    { name: 'C, G, Em, G', offset: 0, mode: 0, degrees: [1, 5, 3, 5], barsPerChord: 2, style: 0, follow: true, groove: 'Organic world' },
+    { name: 'Cmaj7 drone, full', offset: 0, mode: 0, degrees: [1], barsPerChord: 1, style: 4, follow: false, groove: 'Frame drum pulse' },
+  ], false);
+}
+
 export const STARTER_JOURNEYS: StarterJourney[] = [
   {
     name: 'Go with Guitar',
@@ -339,6 +454,26 @@ export const STARTER_JOURNEYS: StarterJourney[] = [
     name: 'Play in C: dark',
     about: 'Play the C major scale (the white notes) all the way through, about 10 minutes at 70 BPM. The tonic changes by itself: D Dorian, A minor, E Phrygian, then home to C major, so your same notes turn soft, sad, dark and Spanish and then settle. Bass is the tonic and its octave, with no fifth. Each scene has its own groove, and the drums fade in and out with quiet stretches, with a fill leading into each change. The last scene ends the piece.',
     build: () => playInC('Play in C: dark', PLAY_IN_C_DARK),
+  },
+  {
+    name: 'G is for Guitar',
+    about: '84 BPM in the key of G, with no G chord. Scene 1 Em with the bass on E, drums after 8 bars. Scene 2 Em7 and Cmaj7, two bars each. Scene 3 Em add 9. Scene 4 D, Am, D, C. Bass is the root and its octave. Steady kick and snare, hats always playing, quiet ghost notes, fills.',
+    build: gForGuitar,
+  },
+  {
+    name: 'D is for Drift',
+    about: '80 BPM in the key of D, open and airy for guitar. Scene 1 D drone with a sus 2 pad. Scene 2 G and D. Scene 3 Bm, G, D, A. Scene 4 Em and A. Same steady drum rules.',
+    build: dForDrift,
+  },
+  {
+    name: 'Handpan sweet',
+    about: '72 BPM, for a handpan with G, B, C, D and E. Only the chords G, Em and C, so nothing clashes. The pad sometimes plays chords and sometimes just fifths. Soft grooves.',
+    build: handpanSweet,
+  },
+  {
+    name: 'Handpan bright',
+    about: '90 BPM, for a handpan with G, B, C, D and E. Cmaj7 and Em7 (all five of your notes), then C, G, Em, G. The pad sometimes plays chords and sometimes just fifths.',
+    build: handpanBright,
   },
 ];
 

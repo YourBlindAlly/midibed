@@ -109,7 +109,7 @@ describe('Flute G# minor B starter journey', () => {
       const s = at(i);
       expect(s.drone.follow).toBe(false);
       expect(s.pad.follow).toBe(false);
-      expect(s.evolve.everyBars).toBe(4);
+      expect(s.evolve.everyBars).toBe(0); // house rule: patterns never wander
       expect(s.drums.find((d) => d.name === 'Kick')!.enabled).toBe(true);
       expect(s.drums.find((d) => d.name === 'Low tom')!.enabled).toBe(true);
     }
@@ -143,7 +143,7 @@ describe('twelve chords in a progression', () => {
     const s4 = applyScene(added, added.scenes[3]);
     expect([s3.harmony.count, s3.harmony.degrees[0], s3.harmony.degrees[1]]).toEqual([2, 3, 1]);
     expect([s4.harmony.count, s4.harmony.degrees[0], s4.harmony.degrees[1]]).toEqual([2, 4, 1]);
-    expect(applyScene(added, added.scenes[0]).evolve.everyBars).toBe(4);
+    expect(applyScene(added, added.scenes[0]).evolve.everyBars).toBe(0);
   });
 });
 
@@ -322,5 +322,84 @@ describe('Play in C journeys (the C scale over different tonics)', () => {
     const minutes = barsToSeconds(len.bars, added.bpm) / 60;
     expect(minutes).toBeGreaterThan(9.5);
     expect(minutes).toBeLessThan(10.5);
+  });
+});
+
+describe('house rules for every starter', () => {
+  it('no wandering patterns, no bass fifth, fills on, kick/snare/hats always play, hats steady, kick on the downbeat', () => {
+    const quarters = RHYTHMS.findIndex((r) => r.name === 'Four on the floor');
+    const eighths = RHYTHMS.findIndex((r) => r.name === 'Straight eighths');
+    STARTER_JOURNEYS.forEach((st, idx) => {
+      const added = addStarterJourney(defaultState, idx);
+      added.scenes.forEach((sc, i) => {
+        const s = applyScene(added, sc);
+        const tag = `${st.name} scene ${i + 1}`;
+        expect([tag, s.evolve.everyBars]).toEqual([tag, 0]);
+        expect([tag, s.drone.fifth]).toEqual([tag, false]);
+        expect([tag, s.fill.enabled]).toEqual([tag, true]);
+        for (const d of s.drums.filter((x) => x.enabled)) {
+          if (d.name === 'Kick' || d.name === 'Snare' || d.name === 'Hat') expect([tag, d.name, d.probability]).toEqual([tag, d.name, 100]);
+          if (d.name === 'Hat') expect([tag, d.rhythm === quarters || d.rhythm === eighths]).toEqual([tag, true]);
+          if (d.name === 'Kick') {
+            const hasDownbeat = d.keepFirst || (d.rhythm > 0 ? RHYTHMS[d.rhythm].hits.includes(0) : d.hits > 0);
+            expect([tag, hasDownbeat]).toEqual([tag, true]);
+          }
+        }
+      });
+    });
+  });
+});
+
+describe('guitar and handpan starters', () => {
+  const find = (name: string) => STARTER_JOURNEYS.findIndex((s) => s.name === name);
+  const roots = (s: ReturnType<typeof applyScene>) => JSON.parse(toEngineJson(s)).drone.chords as number[][];
+  const names = (s: ReturnType<typeof applyScene>) =>
+    s.harmony.degrees.slice(0, s.harmony.count).map((d, k) => chordLabel(keyRoot(s), s.harmony.mode, d, s.pad.style, s.harmony.colors[k]));
+
+  it('G is for Guitar: Em with the bass on E, Em7 and Cmaj7, then D, Am, D, C', () => {
+    const added = addStarterJourney(defaultState, find('G is for Guitar'));
+    expect(added.bpm).toBe(84);
+    const at = (i: number) => applyScene(added, added.scenes[i]);
+    expect(names(at(0))[0].startsWith('E')).toBe(true);
+    expect(names(at(1)).map((l) => l.split(' ')[0])).toEqual(['E', 'C']);
+    expect(names(at(1))[1]).toMatch(/major 7|maj7|7/i);
+    expect(names(at(3)).map((l) => l.split(' ')[0])).toEqual(['D', 'A', 'D', 'C']);
+    // the bass plays E (and its octave, no fifth) in the Em scenes
+    for (const i of [0, 2]) {
+      expect(at(i).drone.follow).toBe(true);
+      const bass = roots(at(i))[0];
+      expect(bass[0] % 12).toBe(4);
+      expect(bass).toHaveLength(2);
+      expect(bass[1] - bass[0]).toBe(12);
+    }
+    expect(at(0).motion.drums.introBars).toBe(8);
+    expect(at(3).harmony.barsPerChord).toBe(2);
+    // kick and snare ghosts are on, and ghosts may fail to play
+    const kick = at(1).drums.find((d) => d.name === 'Kick')!;
+    expect(kick.ghostHits).toBeGreaterThan(0);
+    expect(kick.ghostChance).toBeLessThan(100);
+  });
+
+  it('D is for Drift is in D at 80 BPM with the chords it names', () => {
+    const added = addStarterJourney(defaultState, find('D is for Drift'));
+    expect(added.bpm).toBe(80);
+    const at = (i: number) => applyScene(added, added.scenes[i]);
+    expect(names(at(1)).map((l) => l.split(' ')[0])).toEqual(['G', 'D']);
+    expect(names(at(2)).map((l) => l.split(' ')[0])).toEqual(['B', 'G', 'D', 'A']);
+    expect(names(at(3)).map((l) => l.split(' ')[0])).toEqual(['E', 'A']);
+  });
+
+  it.each(['Handpan sweet', 'Handpan bright'])('%s: every bass and pad note is G, B, C, D or E, in both pad versions', (name) => {
+    const ok = new Set([7, 11, 0, 2, 4]);
+    const added = addStarterJourney(defaultState, find(name));
+    for (let i = 0; i < 4; i++) {
+      const s = applyScene(added, added.scenes[i]);
+      const j = JSON.parse(toEngineJson(s));
+      for (const list of [...j.drone.chords, ...j.pad.chords, ...(j.pad.altChords ?? []), ...(j.drone.altChords ?? [])] as number[][]) {
+        for (const n of list) expect([name, i, n % 12, ok.has(n % 12)]).toEqual([name, i, n % 12, true]);
+      }
+      // the pad breathes between chords and fifths (except the fifths-only scene of "sweet")
+      if (!(name === 'Handpan sweet' && i === 2)) expect(s.motion.pad.baseBars).toBeGreaterThan(0);
+    }
   });
 });
