@@ -1,7 +1,7 @@
 // The built-in chord pad's sound shape: a gentle way to give the pad some depth and slow movement. Global (not
 // saved in a scene), like the keys' electric piano. The native side (MidiBedTestSynth.swift, configurePad) takes
 // the number list from `padVoiceValues`, in this order: wave, detune (cents), drift, flange mix, flange rate (Hz),
-// flange depth, flange feedback. KEEP THEM IN STEP (a jest test reads the Swift defaults).
+// flange depth, flange feedback, fade in (seconds), fade out (seconds). KEEP THEM IN STEP (a jest test reads the Swift defaults).
 //
 //  wave     0 the original sawtooth pair, 50 a soft triangle, 100 a pure sine; levels are matched all the way
 //  detune   how far apart the pad's two oscillators are tuned; more is wider and slower to beat
@@ -26,11 +26,15 @@ export type PadVoiceState = {
   flangeDepth: number;
   /** percent 0-75: how much of the flange is fed back into itself (more is a stronger, more metallic whoosh) */
   flangeFeedback: number;
+  /** milliseconds, 50-3000: how long a new chord takes to swell in (the time to reach about two thirds of full strength) */
+  fadeIn: number;
+  /** milliseconds, 50-4000: how long a chord that has ended takes to die away (time to fall by about two thirds) */
+  fadeOut: number;
 };
 
 type Settings = Omit<PadVoiceState, 'preset'>;
 
-export const PAD_PRESETS: { name: string; v: Settings }[] = [
+const RAW_PRESETS: { name: string; v: Omit<Settings, 'fadeIn' | 'fadeOut'> }[] = [
   { name: 'Custom', v: { wave: 0, detune: 8.7, drift: 0, flange: 0, flangeRate: 15, flangeDepth: 40, flangeFeedback: 30 } },
   { name: 'Classic, as before', v: { wave: 0, detune: 8.7, drift: 0, flange: 0, flangeRate: 15, flangeDepth: 40, flangeFeedback: 30 } },
   { name: 'Soft', v: { wave: 40, detune: 10, drift: 15, flange: 0, flangeRate: 15, flangeDepth: 40, flangeFeedback: 30 } },
@@ -41,13 +45,20 @@ export const PAD_PRESETS: { name: string; v: Settings }[] = [
   { name: 'Glass', v: { wave: 85, detune: 6, drift: 10, flange: 20, flangeRate: 12, flangeDepth: 30, flangeFeedback: 25 } },
 ];
 
+/** Every preset keeps the pad's original swell (900 ms in, 1600 ms out): the fades are set separately. */
+export const PAD_PRESETS: { name: string; v: Settings }[] = RAW_PRESETS.map((p) => ({ name: p.name, v: { ...p.v, fadeIn: 900, fadeOut: 1600 } }));
+
 export const defaultPadVoice: PadVoiceState = { preset: 1, ...PAD_PRESETS[1].v };
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(v) ? v : lo));
 
 export function applyPadPreset(s: PadVoiceState, preset: number): PadVoiceState {
   const p = clamp(Math.round(preset), 0, PAD_PRESETS.length - 1);
-  return p === 0 ? { ...s, preset: 0 } : { ...s, preset: p, ...PAD_PRESETS[p].v };
+  // A preset shapes the sound only; the fade times you chose stay as they are.
+  const { fadeIn, fadeOut, ...shape } = PAD_PRESETS[p].v;
+  void fadeIn;
+  void fadeOut;
+  return p === 0 ? { ...s, preset: 0 } : { ...s, preset: p, ...shape };
 }
 
 /** Change one setting; the preset becomes Custom. */
@@ -64,6 +75,8 @@ export function padVoiceValues(s: PadVoiceState): number[] {
     clamp(s.flangeRate, 1, 60) / 10,
     clamp(s.flangeDepth, 0, 100) / 100,
     clamp(s.flangeFeedback, 0, 75) / 100,
+    clamp(s.fadeIn, 50, 3000) / 1000,
+    clamp(s.fadeOut, 50, 4000) / 1000,
   ];
 }
 

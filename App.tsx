@@ -446,6 +446,8 @@ export default function App() {
 
   // Tabs. A three-finger swipe (or the braille-keyboard equivalent) moves between them.
   const [tab, setTab] = useState<TabId>('live');
+  // Which build is running (shown on the Setup tab; the install page shows the same number).
+  const [buildText] = useState(() => engine.buildInfo() || 'not available here');
   const selectTab = (id: TabId, announce = false) => {
     setTab(id);
     engine.reclaimKeys();
@@ -875,6 +877,13 @@ export default function App() {
     const t = setTimeout(() => engine.setPadVoice(padVoiceJsonText), 80);
     return () => clearTimeout(t);
   }, [padVoiceJsonText, ready]);
+
+  // Chord changes that start a little early: send it whenever it changes.
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setChordLead(state.chordLead), 80);
+    return () => clearTimeout(t);
+  }, [state.chordLead, ready]);
 
   // The live link to a recording program: send the settings whenever they change.
   const networkJsonText = networkJson(state.network);
@@ -2772,6 +2781,19 @@ export default function App() {
                 <Stepper label="Pad fade out" value={state.fade.padOut} onChange={(v) => patchFade({ padOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
               </>
             )}
+            {(part === 'pad' || part === 'bass') && (
+              <Stepper
+                label="Chord changes start early"
+                value={state.chordLead}
+                onChange={(v) => patch({ chordLead: v })}
+                min={0}
+                max={1000}
+                step={10}
+                bigStep={100}
+                format={(v) => (v === 0 ? 'exactly on the bar line' : `${v} milliseconds before the bar line`)}
+                hint="The chord pad, and a bass drone that follows the chords, start each new chord this long before the bar line, so a slowly swelling sound is at full strength on the beat. Applies to both. Zero is exactly on the bar line."
+              />
+            )}
             {part === 'drums' && (
               <>
                 <Toggle
@@ -2870,6 +2892,8 @@ export default function App() {
                 <Stepper label="Pad wave" value={state.padVoice.wave} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { wave: v }) })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'sawtooth, as before' : v === 50 ? 'soft triangle' : v === 100 ? 'pure sine' : `${v} percent of the way from sawtooth to sine`)} hint="Higher is softer and rounder; the level stays the same" />
                 <Stepper label="Pad detune" value={state.padVoice.detune} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { detune: v }) })} min={0} max={40} step={1} format={(v) => `${v} cents apart`} hint="How far apart the pad's two oscillators are tuned: more is wider and slower to beat" />
                 <Stepper label="Pad drift" value={state.padVoice.drift} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { drift: v }) })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'off' : `${v} percent`)} hint="The detune slowly breathes in and out, about every nine seconds, for gentle movement" />
+                <Stepper label="Pad swell in" value={state.padVoice.fadeIn} onChange={(v) => patch({ padVoice: { ...state.padVoice, fadeIn: v } })} min={50} max={3000} step={50} bigStep={250} format={(v) => `${v} milliseconds`} hint="How slowly a new chord swells in: the time to reach about two thirds of full strength. Lower is faster and nearer the beat. The original is 900." />
+                <Stepper label="Pad die away" value={state.padVoice.fadeOut} onChange={(v) => patch({ padVoice: { ...state.padVoice, fadeOut: v } })} min={50} max={4000} step={50} bigStep={250} format={(v) => `${v} milliseconds`} hint="How slowly a chord that has ended dies away. Shorter is a cleaner change. The original is 1600." />
                 <Stepper label="Pad flange" value={state.padVoice.flange} onChange={(v) => patch({ padVoice: setPadVoice(state.padVoice, { flange: v }) })} min={0} max={100} step={5} format={(v) => (v === 0 ? 'off' : `${v} percent mixed in`)} hint="A slow whoosh of movement. Keep it low for depth" />
                 {state.padVoice.flange > 0 && (
                   <>
@@ -3758,6 +3782,11 @@ export default function App() {
           )}
           {tab === 'setup' && (
             <>
+          <Section title="About this build">
+            <View accessible accessibilityLabel="This build" accessibilityValue={{ text: buildText }}>
+              <Text style={styles.note}>{`This build: ${buildText}`}</Text>
+            </View>
+          </Section>
           <Section title="Explanations">
             <Toggle label="Show explanations" value={state.showNotes} onChange={(v) => patch({ showNotes: v })} hint="The sentences of help text on the screens. Switch off to move through faster" />
             <Toggle label="Read hints" value={state.readHints} onChange={(v) => patch({ readHints: v })} hint="The extra line VoiceOver speaks after a control, such as how to change it" />

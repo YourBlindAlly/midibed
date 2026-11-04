@@ -112,6 +112,10 @@ public class MidiBedEngineModule: Module {
       self.engine.setPadVoice(json: json)
     }
 
+    Function("setChordLead") { (ms: Double) in
+      self.engine.setChordLead(ms: ms)
+    }
+
     Function("setScenes") { (json: String) in
       self.engine.setScenes(json: json)
     }
@@ -130,6 +134,15 @@ public class MidiBedEngineModule: Module {
 
     Function("playFill") { () in
       self.engine.playFill()
+    }
+
+    // Which build is running, as the install page shows it: the version and the build number (the same number the
+    // crash reports and the bucket install page use).
+    Function("buildInfo") { () -> String in
+      let info = Bundle.main.infoDictionary
+      let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+      let build = info?["CFBundleVersion"] as? String ?? "unknown"
+      return "version \(version), build \(build)"
     }
 
     // Give keyboard focus back to the key-catching view after a text field has had it.

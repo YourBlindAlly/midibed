@@ -102,16 +102,16 @@ describe('the chord pad sound shape', () => {
     expect(edited.wave).toBe(85);
   });
 
-  it('sends seven numbers in the order the synth reads them, in range', () => {
+  it('sends nine numbers in the order the synth reads them, in range', () => {
     const v = padVoiceValues({ ...defaultPadVoice, wave: 200, detune: 99, drift: 50, flange: 35, flangeRate: 15, flangeDepth: 40, flangeFeedback: 90 });
-    expect(v).toEqual([1, 40, 0.5, 0.35, 1.5, 0.4, 0.75]);
-    expect(JSON.parse(padVoiceJson(defaultPadVoice)).values).toEqual([0, 8.7, 0, 0, 1.5, 0.4, 0.3]);
+    expect(v).toEqual([1, 40, 0.5, 0.35, 1.5, 0.4, 0.75, 0.9, 1.6]);
+    expect(JSON.parse(padVoiceJson(defaultPadVoice)).values).toEqual([0, 8.7, 0, 0, 1.5, 0.4, 0.3, 0.9, 1.6]);
   });
 
   it('is global, saved, and the Swift synth starts with the same numbers and plays it', () => {
     const fs = require('fs');
     const swift = fs.readFileSync('modules/midibed-engine/ios/MidiBedTestSynth.swift', 'utf8');
-    expect(swift).toContain('padParams.initialize(from: [0, 8.7, 0, 0, 1.5, 0.4, 0.3, 0], count: 8)');
+    expect(swift).toContain('padParams.initialize(from: [0, 8.7, 0, 0, 1.5, 0.4, 0.3, 0.9, 1.6, 0], count: 10)');
     expect(swift).toContain('func configurePad(');
     expect(swift).toContain('private func padOsc(');
     expect(swift).toContain('A slow flange on the chord pad');

@@ -181,8 +181,10 @@ final class MidiBedTestSynth {
   /// attack seconds; velocity response 0...1; release seconds. The same order as keysVoiceValues in src/keysvoice.ts.
   private let keysParams = UnsafeMutablePointer<Float>.allocate(capacity: 8)
   /// The chord pad's sound shape: wave 0...1 (sawtooth, triangle, sine), detune in cents, drift 0...1, flange mix
-  /// 0...1, flange rate Hz, flange width 0...1, flange feedback 0...0.75. The order of padVoiceValues in src/padvoice.ts.
-  private let padParams = UnsafeMutablePointer<Float>.allocate(capacity: 8)
+  /// 0...1, flange rate Hz, flange width 0...1, flange feedback 0...0.75, then the swell-in and die-away times of a chord in
+  /// seconds (the time constants of the pad's envelope: 0.9 and 1.6 are the original sound). The order of padVoiceValues in
+  /// src/padvoice.ts.
+  private let padParams = UnsafeMutablePointer<Float>.allocate(capacity: 10)
   private var padDriftPhase: Float = 0
   private let flangeBuf = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
   private var flangeIdx = 0
@@ -380,7 +382,7 @@ final class MidiBedTestSynth {
 
   /// Control side: the chord pad's sound shape (see padParams).
   func configurePad(_ values: [Float]) {
-    for i in 0..<min(7, values.count) { padParams[i] = values[i] }
+    for i in 0..<min(9, values.count) { padParams[i] = values[i] }
   }
 
   /// One oscillator of a pad voice: sawtooth at 0, triangle at 0.5, sine at 1, blended in between.
@@ -449,7 +451,7 @@ final class MidiBedTestSynth {
     keysVoices = UnsafeMutablePointer<KeysVoice>.allocate(capacity: keysCount)
     keysVoices.initialize(repeating: KeysVoice(), count: keysCount)
     keysParams.initialize(from: [0, 0.4, 0.2, 4.8, 1.0, 0.002, 0.6, 0.12], count: 8)
-    padParams.initialize(from: [0, 8.7, 0, 0, 1.5, 0.4, 0.3, 0], count: 8)
+    padParams.initialize(from: [0, 8.7, 0, 0, 1.5, 0.4, 0.3, 0.9, 1.6, 0], count: 10)
     flangeBuf.initialize(repeating: 0, count: 4096)
     expTarget = UnsafeMutablePointer<Float>.allocate(capacity: 16)
     expTarget.initialize(repeating: 1, count: 16)
@@ -1132,8 +1134,8 @@ final class MidiBedTestSynth {
     for part in 0..<4 {
       prepareFilter(part, ccFc: part == 3 ? drumCcFc : ccFc, ccRes: part == 3 ? drumCcRes : ccRes, bufDur: bufDur, sr: sr)
     }
-    let attack = 1 - expf(-dt / 0.9)
-    let release = 1 - expf(-dt / 1.6)
+    let attack = 1 - expf(-dt / max(0.02, min(5, padParams[7])))
+    let release = 1 - expf(-dt / max(0.05, min(8, padParams[8])))
     let expSmooth = 1 - expf(-dt / 0.03)
     // The electric piano's settings for this buffer. Each type is a recipe of two modulators on a sine carrier: the
     // body (a ratio, a start and a velocity-driven index that dies away) and the tine (a ratio and a quick ping).

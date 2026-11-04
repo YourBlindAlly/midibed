@@ -20,11 +20,13 @@ type Native = {
   setFX(json: string): void;
   setKeysVoice(json: string): void;
   setPadVoice(json: string): void;
+  setChordLead(ms: number): void;
   setFilter(json: string): void;
   setOutputMode(mode: number): void;
   probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number; peak: number; rms: number } | null>;
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;
+  buildInfo(): string;
   applyConfig(json: string, queued: boolean): void;
   setScenes(json: string): void;
   sendControlChange(channel: number, cc: number, value: number, loops: boolean): void;
@@ -213,6 +215,8 @@ export const engine = {
   setKeysVoice: (json: string) => native?.setKeysVoice(json),
   /** The chord pad's wave, detune, drift and flange (see src/padvoice.ts). */
   setPadVoice: (json: string) => native?.setPadVoice(json),
+  /** How many milliseconds before the bar line the pad and a following bass start each new chord. */
+  setChordLead: (ms: number) => native?.setChordLead(ms),
   /** The built-in sound's filter presets (see src/filters.ts). */
   setFilter: (json: string) => native?.setFilter(json),
   /** How the built-in sound leaves the phone (see src/outputmode.ts). */
@@ -223,6 +227,14 @@ export const engine = {
   requestEnd: (json: string) => native?.requestEnd(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */
   reclaimKeys: () => native?.reclaimKeyFocus(),
+  /** The running build, e.g. "version 1.0.0, build 12" (empty where there is no native engine). */
+  buildInfo: (): string => {
+    try {
+      return native?.buildInfo() ?? '';
+    } catch {
+      return '';
+    }
+  },
   /** The live link to a recording program: Network MIDI on or off, and the record and stop signals (src/network.ts). */
   setNetwork: (json: string) => native?.setNetwork(json),
   /** Send the record signal (true) or the stop signal (false) now. */

@@ -274,6 +274,9 @@ export type BedState = {
   loopMatchVersion: number;
   /** The built-in sound's output: 0 stereo, 1 mono both sides, 2 mono left only, 3 mono right only (src/outputmode.ts). Global. */
   outputMode: number;
+  /** milliseconds 0-1000: the pad and a bass that follows the chords start each new chord this long before the bar line,
+   *  so a slow-swelling sound is at full strength on the beat. Global; 0 = exactly on the bar line. */
+  chordLead: number;
   /** The filter movement (wanderers) on or off. Saved with the scene. */
   filterMove: boolean;
   /** A static filter preset (src/filters.ts; 0 = the wanderers). Saved with the scene. */
@@ -817,6 +820,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   loopMaster: 100,
   loopMatchVersion: 1,
   outputMode: 0,
+  chordLead: 0,
   filterMove: true,
   filterPreset: 0,
   filterFocus: 0,
@@ -1349,6 +1353,7 @@ export function migrateState(rawInput0: unknown): BedState {
     stayHere: false, // nor staying
     filterHold: false, // nor held
     outputMode: clampOutputMode((merged as { outputMode?: number }).outputMode ?? 0),
+    chordLead: Math.max(0, Math.min(1000, Math.round(Number((merged as { chordLead?: number }).chordLead) || 0))),
     solo: null, // never come back soloed
     sounds,
     activeScene: active,
