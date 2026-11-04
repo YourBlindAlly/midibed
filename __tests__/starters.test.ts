@@ -286,7 +286,7 @@ describe('Play in C journeys (the C scale over different tonics)', () => {
     [10, 'Play in C: bright', [5, 0, 7, 2], [3, 0, 4, 1]],
     [11, 'Play in C: dark', [2, 9, 4, 0], [1, 5, 2, 0]],
   ];
-  it.each(cases)('journey %i %s: about 10 minutes, tonic only bass, C scale notes, a groove per scene', (idx, name, tonics, modes) => {
+  it.each(cases)('journey %i %s: about 10 minutes, bass tonic and octave, fills, C scale notes, a groove per scene', (idx, name, tonics, modes) => {
     const added = addStarterJourney(defaultState, idx);
     expect(added.journeyName).toBe(name);
     expect(added.bpm).toBe(70);
@@ -296,15 +296,18 @@ describe('Play in C journeys (the C scale over different tonics)', () => {
       expect(keyRoot(s) % 12).toBe(tonics[i]);
       expect(s.harmony.mode).toBe(modes[i]);
       expect(s.drone.fifth).toBe(false);
-      expect(s.drone.octave).toBe(false);
+      expect(s.drone.octave).toBe(true);
+      expect(s.fill).toMatchObject({ enabled: true, beforeScene: true, afterBreakdown: true });
+      expect(s.sceneName.length).toBeGreaterThan(5);
       expect(s.dancer.enabled).toBe(false);
       expect(s.advance.mode).toBe(i === 3 ? 4 : 1);
       const j = JSON.parse(toEngineJson(s));
       for (const list of [...j.drone.chords, ...j.pad.chords] as number[][]) {
         for (const n of list) expect(whiteNotes.has(n % 12)).toBe(true);
       }
-      // the bass plays one note per chord
-      for (const list of j.drone.chords as number[][]) expect(list).toHaveLength(1);
+      // the bass plays the tonic and its octave, no fifth
+      for (const list of j.drone.chords as number[][]) expect(list[1] - list[0]).toBe(12);
+      for (const list of j.drone.chords as number[][]) expect(list).toHaveLength(2);
       seen.add(s.drums.map((d) => `${d.enabled}${d.rhythm}${d.hits}${d.steps}`).join('|'));
       // drums come in after a drone start and drop out for a quiet stretch
       expect(s.motion.drums.introBars).toBe(8);

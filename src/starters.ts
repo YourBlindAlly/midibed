@@ -27,6 +27,8 @@ type SceneSpec = {
   groove?: string;
   /** Settings laid over the bass drone (for example no fifth or octave). */
   drone?: Partial<BedState['drone']>;
+  /** Drum fills for this scene (default: the standard, off). */
+  fill?: Partial<BedState['fill']>;
   /** What the scene does after a while (default: stay). */
   advance?: AdvanceRule;
   barsPerChord: number;
@@ -61,6 +63,7 @@ function minorScene(spec: SceneSpec): SceneData {
     harmony: { ...b.harmony, mode: spec.mode ?? 5, preset: 0, count, degrees: Array.from({ length: MAX_CHORDS }, (_, k) => spec.degrees[k] ?? 1), colors: Array.from({ length: MAX_CHORDS }, (_, k) => spec.colors?.[k] ?? 0), barsPerChord: spec.barsPerChord },
     drone: { ...b.drone, follow: spec.follow, ...(spec.drone ?? {}) },
     advance: spec.advance ?? b.advance,
+    fill: { ...b.fill, ...(spec.fill ?? {}) },
     pad: { ...b.pad, follow: spec.follow, style: spec.padStyle ?? b.pad.style },
     evolve: spec.evolve ?? b.evolve,
     motion: { ...b.motion, preset: 0, ...spec.motion },
@@ -229,7 +232,7 @@ type TourScene = {
 /**
  * "Play in C": a C major scale (the white notes) over a different tonic in each scene, so the same notes take on a
  * different mode each time. About ten minutes at 70 BPM: each scene moves on by itself and the last ends the piece.
- * The bass plays only the tonic (no fifth, no octave); the pad is a steady fifths drone that opens into chords;
+ * The bass plays the tonic and its octave (no fifth); the pad is a steady fifths drone that opens into chords;
  * both go steady together every so often. The drums come in after a drone start, follow the scene's own groove,
  * and drop out for a quiet stretch. MidiDancer is off, because you are the melody.
  */
@@ -249,7 +252,9 @@ function playInC(name: string, scenes: TourScene[]): Journey {
       follow: false,
       padStyle: 6,
       groove: t.groove,
-      drone: { fifth: false, octave: false },
+      drone: { fifth: false },
+      // A fill leads into each change of scene and the return of the drums, and one comes round every 8 bars.
+      fill: { enabled: true, everyBars: 8, beforeScene: true, afterBreakdown: true, density: 50, chance: 70, maxBeats: 2 },
       drums: [],
       snare: true,
       evolve: { everyBars: 8, chance: 50, returnAfter: 3 },
@@ -327,12 +332,12 @@ export const STARTER_JOURNEYS: StarterJourney[] = [
   },
   {
     name: 'Play in C: bright',
-    about: 'Play the C major scale (the white notes) all the way through, about 10 minutes at 70 BPM. The tonic changes by itself: F Lydian, C major, G Mixolydian, D Dorian, so your same notes turn dreamy, bright, bluesy and soft. Bass is the tonic only. Each scene has its own groove, and the drums fade in and out with quiet stretches. The last scene ends the piece.',
+    about: 'Play the C major scale (the white notes) all the way through, about 10 minutes at 70 BPM. The tonic changes by itself: F Lydian, C major, G Mixolydian, D Dorian, so your same notes turn dreamy, bright, bluesy and soft. Bass is the tonic and its octave, with no fifth. Each scene has its own groove, and the drums fade in and out with quiet stretches, with a fill leading into each change. The last scene ends the piece.',
     build: () => playInC('Play in C: bright', PLAY_IN_C_BRIGHT),
   },
   {
     name: 'Play in C: dark',
-    about: 'Play the C major scale (the white notes) all the way through, about 10 minutes at 70 BPM. The tonic changes by itself: D Dorian, A minor, E Phrygian, then home to C major, so your same notes turn soft, sad, dark and Spanish and then settle. Bass is the tonic only. Each scene has its own groove, and the drums fade in and out with quiet stretches. The last scene ends the piece.',
+    about: 'Play the C major scale (the white notes) all the way through, about 10 minutes at 70 BPM. The tonic changes by itself: D Dorian, A minor, E Phrygian, then home to C major, so your same notes turn soft, sad, dark and Spanish and then settle. Bass is the tonic and its octave, with no fifth. Each scene has its own groove, and the drums fade in and out with quiet stretches, with a fill leading into each change. The last scene ends the piece.',
     build: () => playInC('Play in C: dark', PLAY_IN_C_DARK),
   },
 ];
