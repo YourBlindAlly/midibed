@@ -1369,7 +1369,11 @@ export default function App() {
         announceLater('No audio files found', 100);
         return;
       }
-      announceLater(`Adding ${found.length} files`, 100);
+      type Item = (typeof found)[number];
+      // Copying happens only after the player has been told what was found and has said yes (see below).
+      const runImport = async (items: Item[]) => {
+        try {
+      announceLater(`Adding ${items.length} files`, 100);
       const added: LibraryLoop[] = [];
       // What the library already holds, by audio fingerprint: a loop that is the same audio as one already here
       // (found again under another folder or name) is not stored twice.
@@ -1380,8 +1384,8 @@ export default function App() {
       }
       const replaced: Record<string, string> = {};
       let skipped = 0;
-      for (let n = 0; n < found.length; n++) {
-        const { file, folder, name, loose } = found[n];
+      for (let n = 0; n < items.length; n++) {
+        const { file, folder, name, loose } = items[n];
         const stored = `${folder}__${name}`.replace(/[\\/:*?"<>|]/g, '_');
         const target = new fsApi.File(dest, stored);
         const existed = target.exists;
@@ -1447,12 +1451,42 @@ export default function App() {
         };
         added.push(entry);
         if (fp) have.set(fp, entry);
-        if (n % 10 === 9) setImportNote(`Added ${n + 1} of ${found.length}`);
+        if (n % 10 === 9) setImportNote(`Added ${n + 1} of ${items.length}`);
       }
       setState((s) => dropLoops({ ...s, loopLib: addToLibrary(s.loopLib, added) }, replaced));
       const said = `Added ${added.length} loops${skipped > 0 ? `, skipped ${skipped} already in the library` : ''}`;
       setImportNote(said);
       announceLater(said, 100);
+        } catch (e) {
+          const why = e instanceof Error && e.message ? e.message.slice(0, 160) : 'no reason given';
+          setImportNote(`Adding loops failed. The reason: ${why}`);
+          announceLater('Adding loops failed', 100);
+        }
+      };
+      // Look before copying: say what was found and ask, so a folder picked by mistake is caught with nothing copied.
+      const storedName = (f: Item) => `${f.folder}__${f.name}`.replace(/[\\/:*?"<>|]/g, '_');
+      const libFiles = new Set(parseLibrary(latest.current.loopLib).map((l) => l.file));
+      const fresh = found.filter((f) => !libFiles.has(storedName(f)));
+      const looseDone = found.filter((f) => libFiles.has(storedName(f)) && f.loose);
+      const alreadyCount = found.length - fresh.length;
+      if (fresh.length === 0 && looseDone.length === 0) {
+        const nothing = `Found ${found.length} audio ${found.length === 1 ? 'file' : 'files'}, and all of them are already in the library. Nothing was added.`;
+        setImportNote(nothing);
+        announceLater(nothing, 100);
+        return;
+      }
+      const folderCount = new Set(fresh.map((f) => f.folder)).size;
+      const summary =
+        `Found ${found.length} audio ${found.length === 1 ? 'file' : 'files'}. ${alreadyCount} already in the library. ${fresh.length} new` +
+        (fresh.length > 0 ? `, in ${folderCount} ${folderCount === 1 ? 'folder' : 'folders'}` : '') +
+        '.' +
+        (looseDone.length > 0 ? ` ${looseDone.length} loose ${looseDone.length === 1 ? 'copy' : 'copies'} of loops already stored will be removed from the MidiBed folder.` : '');
+      setImportNote(summary);
+      announceLater(summary, 100);
+      Alert.alert('Add loops', summary, [
+        { text: 'Cancel', style: 'cancel', onPress: () => setImportNote('Nothing was added') },
+        { text: fresh.length > 0 ? `Add ${fresh.length}` : 'Remove the loose copies', onPress: () => void runImport([...fresh, ...looseDone]) },
+      ]);
     } catch (e) {
       const why = e instanceof Error && e.message ? e.message.slice(0, 160) : 'no reason given';
       setImportNote(`Adding loops was cancelled or failed. The reason: ${why}`);
@@ -3231,7 +3265,7 @@ export default function App() {
             </Note>
             <ActionButton
               label="Add loops from a folder"
-              hint="Choose a folder in the Files app. Every audio file inside it, including sub-folders, is copied in"
+              hint="Choose a folder in the Files app. Open picks the folder you are looking at, not the files you tapped. MidiBed tells you what it found and asks before it copies anything"
               onPress={importLoopFolder}
             />
             <ActionButton
