@@ -1296,16 +1296,30 @@ export default function App() {
       const dest = new fsApi.Directory(fsApi.Paths.document, 'loops');
       dest.create({ intermediates: true, idempotent: true });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const found: { file: any; folder: string }[] = [];
+      const found: { file: any; folder: string; name: string; loose?: boolean }[] = [];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const walk = (d: any, folderName: string, depth: number) => {
         if (depth > 6) return;
         for (const item of d.list()) {
           if (item instanceof fsApi.Directory) walk(item, item.name, depth + 1);
-          else if (isAudioFile(item.name)) found.push({ file: item, folder: folderName });
+          else if (isAudioFile(item.name)) found.push({ file: item, folder: folderName, name: item.name });
         }
       };
       walk(picked, picked.name, 0);
+      if (source) {
+        // Audio files copied straight into MidiBed's folder (iTunes File Sharing cannot add folders): a name like
+        // "Folder name__loop.flac" is filed under "Folder name"; others go under "Loose files".
+        for (const item of new fsApi.Directory(fsApi.Paths.document).list()) {
+          if (item instanceof fsApi.Directory || !isAudioFile(item.name)) continue;
+          const cut = item.name.indexOf('__');
+          found.push({
+            file: item,
+            folder: cut > 0 ? item.name.slice(0, cut) : 'Loose files',
+            name: cut > 0 ? item.name.slice(cut + 2) : item.name,
+            loose: true,
+          });
+        }
+      }
       if (found.length === 0) {
         setImportNote('No audio files found in that folder');
         announceLater('No audio files found', 100);
@@ -1314,19 +1328,27 @@ export default function App() {
       announceLater(`Adding ${found.length} files`, 100);
       const added: LibraryLoop[] = [];
       for (let n = 0; n < found.length; n++) {
-        const { file, folder } = found[n];
-        const stored = `${folder}__${file.name}`.replace(/[\\/:*?"<>|]/g, '_');
+        const { file, folder, name, loose } = found[n];
+        const stored = `${folder}__${name}`.replace(/[\\/:*?"<>|]/g, '_');
         const target = new fsApi.File(dest, stored);
         if (!target.exists) await file.copy(target);
         const info = await engine.probeLoop(loopPath(stored));
         if (!info) continue;
-        const bpm = tempoFromName(file.name) ?? tempoFromName(folder);
+        // A loose file (put there by iTunes) is now safely copied: remove it so it is not stored twice.
+        if (loose) {
+          try {
+            file.delete();
+          } catch {
+            /* leave it where it is */
+          }
+        }
+        const bpm = tempoFromName(name) ?? tempoFromName(folder);
         const fit = barsFromLength(info.seconds, bpm);
         added.push({
           peak: info.peak,
           rms: info.rms,
-          id: `${folder}/${file.name}`,
-          name: file.name.replace(/\.[A-Za-z0-9]+$/, ''),
+          id: `${folder}/${name}`,
+          name: name.replace(/\.[A-Za-z0-9]+$/, ''),
           folder,
           file: stored,
           seconds: info.seconds,
