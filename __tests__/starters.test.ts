@@ -403,3 +403,57 @@ describe('guitar and handpan starters', () => {
     }
   });
 });
+
+describe('quiet percussion and loop pools in the starters', () => {
+  const { STARTER_JOURNEYS, addStarterJourney, QUIET_VELOCITY } = require('../src/starters');
+  const { defaultState } = require('../src/config');
+  const { parsePools } = require('../src/pools');
+  const mk = (name: string, bpm: number, folder = 'SHAKERZ flat FLAC 16 bit') => ({ id: `${folder}/${name}`, name, folder, file: `${folder}__${name}.flac`, seconds: 5, bpm, bars: 2, repeats: 1 });
+  const library = () => {
+    const out: any[] = [];
+    for (const bpm of [80, 90, 100]) {
+      out.push(mk(`CAXIXI QUARTERS ${bpm}bpm`, bpm), mk(`NUTS N BOLTS QUARTERS ${bpm}bpm`, bpm), mk(`MARACAS STR 8THS ${bpm}bpm`, bpm), mk(`CANISTER1 STR 8THS ${bpm}bpm`, bpm), mk(`MARACAS INB 16THS ${bpm}bpm`, bpm));
+      out.push(mk(`TAMBOURINE QUARTERS ${bpm}bpm`, bpm, 'TAMBOREENE flat FLAC 16 bit'), mk(`TAMBOURINE 2 AND 4 ${bpm}bpm`, bpm, 'TAMBOREENE flat FLAC 16 bit'));
+      out.push(mk(`Single Congas - Conga_${bpm}_01`, bpm, 'Pete'), mk(`Single Djembe - Djembe_${bpm}_01`, bpm, 'Pete'));
+    }
+    return JSON.stringify(out);
+  };
+
+  it('every scene of every starter plays the built-in extras only as a whisper', () => {
+    for (let i = 0; i < STARTER_JOURNEYS.length; i++) {
+      const j = STARTER_JOURNEYS[i].build();
+      for (const sc of j.scenes) {
+        // Scene drums are in slot order: 0 kick, 1 snare, 2 hat, then shaker, tambourine and the toms.
+        sc.drums.forEach((d: any, k: number) => {
+          if (k < 3 || !d.enabled) return;
+          expect([STARTER_JOURNEYS[i].name, sc.name, k, d.velocity]).toEqual([STARTER_JOURNEYS[i].name, sc.name, k, Math.min(d.velocity, QUIET_VELOCITY)]);
+        });
+      }
+    }
+    expect(QUIET_VELOCITY).toBeLessThan(20);
+  });
+
+  it('adds pools of loops near the journey tempo, shuffled, changing every 8 bars', () => {
+    const idx = STARTER_JOURNEYS.findIndex((s: any) => s.name === 'Handpan sweet'); // 72 BPM
+    const s0 = { ...defaultState, loopLib: library() };
+    const s = addStarterJourney(s0, idx);
+    const pools = parsePools(s.pools);
+    expect(pools.length).toBe(4);
+    expect(pools.every((p: any) => p.loops.length >= 2)).toBe(true);
+    const lane0 = s.lanes[0];
+    expect(lane0.pool).toBe(pools[0].id);
+    expect(lane0.poolMode).toBe(1);
+    expect(lane0.poolEvery).toBe(8);
+    expect(pools[0].loops.every((id: string) => /QUARTERS/.test(id))).toBe(true);
+    expect(pools[2].loops.every((id: string) => /TAMBOURINE/.test(id))).toBe(true);
+  });
+
+  it('a guitar journey gets no hand-drum pool, and no library means no pools', () => {
+    const idx = STARTER_JOURNEYS.findIndex((s: any) => s.name === 'G is for Guitar');
+    const g = addStarterJourney({ ...defaultState, loopLib: library() }, idx);
+    expect(parsePools(g.pools).length).toBe(3);
+    const none = addStarterJourney({ ...defaultState }, idx);
+    expect(parsePools(none.pools).length).toBe(0);
+    expect(none.lanes[0].pool).toBe('');
+  });
+});

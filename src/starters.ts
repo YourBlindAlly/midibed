@@ -2,7 +2,8 @@
 // plain defaults plus a few overrides, so it stays valid whenever a new setting is added.
 import { BedState, DrumState, Journey, MAX_JOURNEYS, SceneData, applyJourney, captureJourney, captureScene, defaultState } from './config';
 import { MAX_CHORDS, MODE_NAMES, chordLabel } from './chords';
-import { LaneState, defaultLane } from './looplib';
+import { LaneState, LibraryLoop, defaultLane, instrumentOf, kindOf, parseLibrary } from './looplib';
+import { Pool, parsePools, stringifyPools } from './pools';
 import { RHYTHMS } from './rhythms';
 import { AdvanceRule } from './advance';
 import { allGrooves, applyGroove } from './grooves';
@@ -38,6 +39,9 @@ type SceneSpec = {
   motion: Partial<BedState['motion']>;
 };
 
+/** Velocity of the built-in percussion other than kick, snare and hats in a starter (below 20: a hint, not a part). */
+export const QUIET_VELOCITY = 18;
+
 const HOUSE_FILL = { enabled: true, everyBars: 8, beforeScene: true, afterBreakdown: true, density: 50, chance: 70, maxBeats: 2 };
 
 /**
@@ -52,6 +56,8 @@ function houseDrums(drums: DrumState[]): DrumState[] {
     if (d.name === 'Kick') return { ...d, probability: 100, keepFirst: true };
     if (d.name === 'Snare') return { ...d, probability: 100 };
     if (d.name === 'Hat') return { ...d, probability: 100, rhythm: d.rhythm === quarters ? quarters : eighths, steps: 16 };
+    // The recorded loops carry the percussion now, so the built-in shaker, tambourine and toms stay but play very quietly.
+    if (d.enabled) return { ...d, velocity: Math.min(d.velocity, QUIET_VELOCITY), ghostVelocity: Math.min(d.ghostVelocity, QUIET_VELOCITY) };
     return d;
   });
 }
@@ -509,6 +515,64 @@ export function loopLanesFor(bpm: number, scene: number): LaneState[] {
   ];
 }
 
+/** The loops, by role, that suit a journey at this tempo (within 10 BPM), at most 8 of each, nearest first. */
+export type StarterLoopSets = { quarter: LibraryLoop[]; eighth: LibraryLoop[]; tambourine: LibraryLoop[]; hand: LibraryLoop[] };
+
+const HAND_DRUMS = new Set(['Congas', 'Bongos', 'Djembe', 'Cajon', 'Udu', 'Dumbek', 'Tabla', 'Frame drum', 'Kanjira', 'Ghatam']);
+
+export function starterLoopSets(lib: LibraryLoop[], bpm: number): StarterLoopSets {
+  const near = (l: LibraryLoop) => l.bpm !== null && Math.abs(l.bpm - bpm) <= 10 && kindOf(l) === 'rhythm';
+  const pick = (test: (l: LibraryLoop, inst: string) => boolean) =>
+    lib
+      .filter((l) => near(l) && test(l, instrumentOf(l.name, l.folder)))
+      .sort((a, b) => Math.abs((a.bpm ?? 0) - bpm) - Math.abs((b.bpm ?? 0) - bpm) || a.id.localeCompare(b.id))
+      .slice(0, 8);
+  return {
+    quarter: pick((l, inst) => inst === 'Shaker' && /QUARTERS/i.test(l.name)),
+    eighth: pick((l, inst) => inst === 'Shaker' && /STR 8THS/i.test(l.name)),
+    tambourine: pick((l, inst) => inst === 'Tambourine' && /QUARTERS|2 ?AND ?4|STR 8THS NO ACCENT/i.test(l.name)),
+    hand: pick((l, inst) => HAND_DRUMS.has(inst) && !/_Bigtoms/i.test(l.name)),
+  };
+}
+
+const POOL_LANES: { key: keyof StarterLoopSets; lane: number; label: string }[] = [
+  { key: 'quarter', lane: 0, label: 'quarter-note shakers' },
+  { key: 'eighth', lane: 1, label: 'eighth-note shakers' },
+  { key: 'tambourine', lane: 2, label: 'tambourines' },
+  { key: 'hand', lane: 3, label: 'hand drums' },
+];
+
+/** Which scenes the hand-drum lane plays in (world-style journeys only: the guitar journeys leave it out). */
+const HAND_SCENES = [false, false, true, true];
+
+/**
+ * Give a journey's loop lanes pools made from the loops in the library: lane 1 quarter-note shakers, lane 2
+ * eighth-note shakers, lane 3 tambourines, lane 4 hand drums (not for the guitar journeys). A lane whose set has
+ * fewer than two loops keeps its single fallback loop. Returns the journey and the pools to add.
+ */
+export function withLoopPools(j: Journey, lib: LibraryLoop[], firstId: number, handDrums: boolean): { journey: Journey; pools: Pool[] } {
+  const sets = starterLoopSets(lib, j.bpm);
+  const pools: Pool[] = [];
+  const idFor: Record<number, string> = {};
+  let n = firstId;
+  for (const pl of POOL_LANES) {
+    const loops = sets[pl.key];
+    if (loops.length < 2 || (pl.key === 'hand' && !handDrums)) continue;
+    const id = `pool${n++}`;
+    pools.push({ id, name: `${j.name}: ${pl.label}`, loops: loops.map((l) => l.id) });
+    idFor[pl.lane] = id;
+  }
+  const scenes = j.scenes.map((sc, i) => ({
+    ...sc,
+    lanes: sc.lanes.map((lane, k) => {
+      let next = lane;
+      if (k === 3 && idFor[3]) next = { ...defaultLane, on: HAND_SCENES[i] ?? false, level: 55, pan: 20 };
+      return idFor[k] ? { ...next, pool: idFor[k], poolMode: 1, poolEvery: 8 } : next;
+    }),
+  }));
+  return { journey: { ...j, scenes }, pools };
+}
+
 /** A journey with the loop lanes added to each of its four scenes. */
 export function withLoops(j: Journey): Journey {
   return { ...j, scenes: j.scenes.map((sc, i) => ({ ...sc, lanes: loopLanesFor(j.bpm, i) })) };
@@ -525,5 +589,13 @@ export function addStarterJourney(s: BedState, index: number): BedState {
     while (saved.some((j) => j.name === `${starter.name} ${n}`)) n++;
     journey = { ...journey, name: `${starter.name} ${n}` };
   }
-  return { ...applyJourney(s, journey), journeys: [...saved, journey], activeJourney: saved.length };
+  // Pools of loops that suit this tempo, from the loops the phone actually holds (nothing changes if there are none).
+  const existing = parsePools(s.pools);
+  let firstId = existing.length + 1;
+  while (existing.some((p) => p.id === `pool${firstId}`)) firstId++;
+  const guitar = /guitar|drift/i.test(starter.name);
+  const made = withLoopPools(journey, parseLibrary(s.loopLib), firstId, !guitar);
+  journey = made.journey;
+  const next = made.pools.length > 0 ? { ...s, pools: stringifyPools([...existing, ...made.pools]) } : s;
+  return { ...applyJourney(next, journey), journeys: [...saved, journey], activeJourney: saved.length };
 }

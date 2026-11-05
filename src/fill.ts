@@ -49,7 +49,8 @@ export function fillPalette(drums: { note: number; channel: number; velocity: nu
   const out: FillVoice[] = [];
   for (const d of drums) {
     const role = ROLE_OF_VOICE[d.voice];
-    if (role !== undefined) out.push({ note: d.note, channel: d.channel, role, velocity: d.velocity });
+    // A fill keeps its own strength: a tom switched down to a whisper in the groove still plays the fill properly.
+    if (role !== undefined) out.push({ note: d.note, channel: d.channel, role, velocity: Math.max(d.velocity, 72) });
   }
   return out;
 }
