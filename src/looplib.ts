@@ -192,6 +192,48 @@ export function addToLibrary(json: string, entries: LibraryLoop[]): string {
   return JSON.stringify(list);
 }
 
+/**
+ * A fingerprint of a loop's audio: its length, highest sample and RMS as measured when it was added. Two copies of
+ * the same file measure identically, whatever folder or name they were found under. Null when not measured.
+ */
+export function fingerprintOf(seconds: number, peak?: number, rms?: number): string | null {
+  if (!peak || !rms || !(seconds > 0)) return null;
+  return `${seconds.toFixed(3)}|${peak.toFixed(5)}|${rms.toFixed(5)}`;
+}
+
+export function loopFingerprint(l: LibraryLoop): string | null {
+  return fingerprintOf(l.seconds, l.peak, l.rms);
+}
+
+/**
+ * Find loops that are copies of another loop (same audio under another folder or name). From each group the loop
+ * with the shortest stored file name is kept (a name made by importing from the wrong folder level is longer, like
+ * 'loops__Set__x.flac' against 'Set__x.flac'); the rest are listed in `remove`, and `remap` says which kept loop
+ * each removed id should be replaced by in lanes and pools.
+ */
+export function planDuplicates(lib: LibraryLoop[]): { remove: LibraryLoop[]; remap: Record<string, string> } {
+  const groups = new Map<string, LibraryLoop[]>();
+  for (const l of lib) {
+    const fp = loopFingerprint(l);
+    if (!fp) continue;
+    const g = groups.get(fp);
+    if (g) g.push(l);
+    else groups.set(fp, [l]);
+  }
+  const remove: LibraryLoop[] = [];
+  const remap: Record<string, string> = {};
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const sorted = [...g].sort((a, b) => a.file.length - b.file.length || a.id.localeCompare(b.id));
+    const keep = sorted[0];
+    for (const l of sorted.slice(1)) {
+      remove.push(l);
+      remap[l.id] = keep.id;
+    }
+  }
+  return { remove, remap };
+}
+
 /** The tempo filter's choices: how close to the journey tempo a loop's own tempo must be. */
 export const NEAR_NAMES = ['Any tempo', 'Within 3 BPM of the tempo', 'Within 6 BPM of the tempo', 'Within 10 BPM of the tempo'];
 export const NEAR_BPM = [0, 3, 6, 10];

@@ -34,6 +34,7 @@ import {
   newJourney,
   keysChords,
   resolveLaneIds,
+  dropLoops,
   noteName,
   padIsSteadyFifths,
   parseFavorites,
@@ -58,7 +59,7 @@ import {
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
 import { LANE_BREATHE_NAMES } from './src/lanebreath';
-import { AMBIENCE_LANE, BAR_CHOICES, KIND_NAMES, LANE_COUNT, LibraryLoop, SEMI_RANGE, matchGain, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
+import { AMBIENCE_LANE, BAR_CHOICES, KIND_NAMES, LANE_COUNT, LibraryLoop, SEMI_RANGE, matchGain, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, fingerprintOf, folderNames, isAudioFile, loopPath, parseLibrary, planDuplicates, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -1332,16 +1333,24 @@ export default function App() {
       dest.create({ intermediates: true, idempotent: true });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const found: { file: any; folder: string; name: string; loose?: boolean }[] = [];
+      // MidiBed's own storage folders are never read as a source: picking the app's main folder must not
+      // copy the loops it already holds (loops), the sound packs, backups or recordings back into itself.
+      const norm = (uri: string) => String(uri).replace(/\/+$/, '');
+      const docDir = new fsApi.Directory(fsApi.Paths.document);
+      const ownDirs = ['loops', 'packs', 'backup', 'recordings'].map((n) => norm(new fsApi.Directory(fsApi.Paths.document, n).uri));
+      const pickedIsRoot = norm(picked.uri) === norm(docDir.uri);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const walk = (d: any, folderName: string, depth: number) => {
         if (depth > 6) return;
         for (const item of d.list()) {
-          if (item instanceof fsApi.Directory) walk(item, item.name, depth + 1);
-          else if (isAudioFile(item.name)) found.push({ file: item, folder: folderName, name: item.name });
+          if (item instanceof fsApi.Directory) {
+            if (ownDirs.includes(norm(item.uri))) continue;
+            walk(item, item.name, depth + 1);
+          } else if (isAudioFile(item.name) && !(pickedIsRoot && depth === 0)) found.push({ file: item, folder: folderName, name: item.name });
         }
       };
       walk(picked, picked.name, 0);
-      if (source) {
+      if (source || pickedIsRoot) {
         // Audio files copied straight into MidiBed's folder (iTunes File Sharing cannot add folders): a name like
         // "Folder name__loop.flac" is filed under "Folder name"; others go under "Loose files".
         for (const item of new fsApi.Directory(fsApi.Paths.document).list()) {
@@ -1362,13 +1371,58 @@ export default function App() {
       }
       announceLater(`Adding ${found.length} files`, 100);
       const added: LibraryLoop[] = [];
+      // What the library already holds, by audio fingerprint: a loop that is the same audio as one already here
+      // (found again under another folder or name) is not stored twice.
+      const have = new Map<string, LibraryLoop>();
+      for (const l of parseLibrary(latest.current.loopLib)) {
+        const fp = fingerprintOf(l.seconds, l.peak, l.rms);
+        if (fp) have.set(fp, l);
+      }
+      const replaced: Record<string, string> = {};
+      let skipped = 0;
       for (let n = 0; n < found.length; n++) {
         const { file, folder, name, loose } = found[n];
         const stored = `${folder}__${name}`.replace(/[\\/:*?"<>|]/g, '_');
         const target = new fsApi.File(dest, stored);
-        if (!target.exists) await file.copy(target);
+        const existed = target.exists;
+        if (!existed) await file.copy(target);
         const info = await engine.probeLoop(loopPath(stored));
         if (!info) continue;
+        const id = `${folder}/${name}`;
+        const fp = fingerprintOf(info.seconds, info.peak, info.rms);
+        const twin = fp ? have.get(fp) : undefined;
+        if (twin && twin.id !== id) {
+          if (stored.length < twin.file.length) {
+            // The copy already in the library has a longer, clumsier name (it was found from the wrong folder level):
+            // this one replaces it, and lanes and pools that used the old one now use this one.
+            if (twin.file !== stored) {
+              try {
+                new fsApi.File(dest, twin.file).delete();
+              } catch {
+                /* the entry is replaced either way */
+              }
+            }
+            replaced[twin.id] = id;
+          } else {
+            // Already in the library under a better name: drop the copy just made and skip this one.
+            if (!existed) {
+              try {
+                target.delete();
+              } catch {
+                /* harmless */
+              }
+            }
+            if (loose) {
+              try {
+                file.delete();
+              } catch {
+                /* leave it where it is */
+              }
+            }
+            skipped++;
+            continue;
+          }
+        }
         // A loose file (put there by iTunes) is now safely copied: remove it so it is not stored twice.
         if (loose) {
           try {
@@ -1379,10 +1433,10 @@ export default function App() {
         }
         const bpm = tempoFromName(name) ?? tempoFromName(folder);
         const fit = barsFromLength(info.seconds, bpm);
-        added.push({
+        const entry: LibraryLoop = {
           peak: info.peak,
           rms: info.rms,
-          id: `${folder}/${name}`,
+          id,
           name: name.replace(/\.[A-Za-z0-9]+$/, ''),
           folder,
           file: stored,
@@ -1390,12 +1444,15 @@ export default function App() {
           bpm,
           bars: fit.bars,
           repeats: fit.repeats,
-        });
+        };
+        added.push(entry);
+        if (fp) have.set(fp, entry);
         if (n % 10 === 9) setImportNote(`Added ${n + 1} of ${found.length}`);
       }
-      setState((s) => ({ ...s, loopLib: addToLibrary(s.loopLib, added) }));
-      setImportNote(`Added ${added.length} loops`);
-      announceLater(`Added ${added.length} loops`, 100);
+      setState((s) => dropLoops({ ...s, loopLib: addToLibrary(s.loopLib, added) }, replaced));
+      const said = `Added ${added.length} loops${skipped > 0 ? `, skipped ${skipped} already in the library` : ''}`;
+      setImportNote(said);
+      announceLater(said, 100);
     } catch (e) {
       const why = e instanceof Error && e.message ? e.message.slice(0, 160) : 'no reason given';
       setImportNote(`Adding loops was cancelled or failed. The reason: ${why}`);
@@ -1436,6 +1493,47 @@ export default function App() {
     announceLater(`Measured ${done.length} loops`, 100);
   };
   const unmeasuredLoops = loopLib.filter((l) => !(l.peak && l.rms)).length;
+  // Loops that are copies of another loop (same audio under another folder or name): found by their measurements.
+  const dupePlan = planDuplicates(loopLib);
+  const removeDuplicateLoops = () => {
+    const plan = planDuplicates(parseLibrary(latest.current.loopLib));
+    if (plan.remove.length === 0) {
+      setImportNote('There are no duplicate loops');
+      return;
+    }
+    Alert.alert(
+      'Remove duplicate loops',
+      `${plan.remove.length} loops are copies of other loops in the library. Delete the extra copies MidiBed made? The loop you keep is the one with the cleaner name, and any lane or pool that used a copy will use it instead. Your original files are not touched.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            try {
+              if (fsApi) {
+                const dir = new fsApi.Directory(fsApi.Paths.document, 'loops');
+                const keepFiles = new Set(parseLibrary(latest.current.loopLib).filter((l) => !(l.id in plan.remap)).map((l) => l.file));
+                for (const l of plan.remove) {
+                  if (keepFiles.has(l.file)) continue;
+                  try {
+                    new fsApi.File(dir, l.file).delete();
+                  } catch {
+                    /* the entry goes either way */
+                  }
+                }
+              }
+            } catch {
+              /* the entries go either way */
+            }
+            setState((s) => dropLoops(s, plan.remap));
+            setImportNote(`Removed ${plan.remove.length} duplicate loops`);
+            announceLater(`Removed ${plan.remove.length} duplicate loops`, 100);
+          },
+        },
+      ],
+    );
+  };
   const clearLoopLibrary = () => {
     Alert.alert('Clear the loop library', 'Remove every loop from the library and delete the copies MidiBed made? Your original files are not touched.', [
       { text: 'Cancel', style: 'cancel' },
@@ -3151,6 +3249,13 @@ export default function App() {
                 label={`Match the loudness of ${unmeasuredLoops} loops`}
                 hint="Measures loops added earlier, so they come in at the level of the rest of the bed"
                 onPress={measureLibrary}
+              />
+            )}
+            {dupePlan.remove.length > 0 && (
+              <ActionButton
+                label={`Remove ${dupePlan.remove.length} duplicate loops`}
+                hint="These loops are copies of other loops in the library. The copies are deleted and anything that used one uses the loop kept"
+                onPress={removeDuplicateLoops}
               />
             )}
             {loopLib.length > 0 && <ActionButton label="Clear the loop library" onPress={clearLoopLibrary} />}

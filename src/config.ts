@@ -5,6 +5,7 @@ import { presetOwnsChannel } from './filters';
 import { clampOutputMode } from './outputmode';
 import { RHYTHMS, clampRhythm, rhythmMask } from './rhythms';
 import { LaneState, defaultLanes, lanesForEngine, parseLibrary, resolveLoopId } from './looplib';
+import { parsePools, stringifyPools } from './pools';
 import { buildBassChords, buildPadChords, clampColor, clampMode, MAX_CHORDS } from './chords';
 import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance';
 import { DancerState, defaultDancer, makePhrases } from './dancer';
@@ -1159,6 +1160,41 @@ export function mergeDefaults<T>(def: T, raw: unknown): T {
 // Chord-loop settings used to live inside the pad. Carry saved ones over to
 // `harmony` (live settings and every scene) before merging, or they would be lost.
 const HARMONY_KEYS = ['mode', 'preset', 'count', 'degrees', 'barsPerChord'];
+
+/**
+ * Take loops out of the library and point everything that used them at another loop. `remap` maps each removed
+ * loop id to the id that replaces it: lanes (live, in scenes, in journeys) and pool members that named a removed
+ * loop name the replacement instead (a pool never lists a loop twice). Returns the same object when `remap` is empty.
+ */
+export function dropLoops(s: BedState, remap: Record<string, string>): BedState {
+  const ids = Object.keys(remap);
+  if (ids.length === 0) return s;
+  const gone = new Set(ids);
+  const library = parseLibrary(s.loopLib).filter((l) => !gone.has(l.id));
+  const fixLanes = (lanes: LaneState[] | undefined): LaneState[] | undefined =>
+    Array.isArray(lanes) ? lanes.map((l) => (gone.has(l.loop) ? { ...l, loop: remap[l.loop] } : l)) : lanes;
+  const fixScene = (sc: SceneData): SceneData => ({ ...sc, lanes: fixLanes(sc.lanes) as LaneState[] });
+  const pools = parsePools(s.pools).map((p) => {
+    const seen = new Set<string>();
+    const loops: string[] = [];
+    for (const id of p.loops) {
+      const next = gone.has(id) ? remap[id] : id;
+      if (!seen.has(next)) {
+        seen.add(next);
+        loops.push(next);
+      }
+    }
+    return { ...p, loops };
+  });
+  return {
+    ...s,
+    loopLib: JSON.stringify(library),
+    lanes: fixLanes(s.lanes) as LaneState[],
+    scenes: s.scenes.map(fixScene),
+    journeys: s.journeys.map((j) => ({ ...j, scenes: j.scenes.map(fixScene) })),
+    pools: stringifyPools(pools),
+  };
+}
 
 /**
  * Point lanes at the loops the library really has: a lane (live, in a scene, in a journey) that names a loop
