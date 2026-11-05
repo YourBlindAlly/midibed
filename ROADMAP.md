@@ -373,3 +373,7 @@ Rusty found a large collection of free, public-domain loops. The download list i
 
 ### REMIND RUSTY (said 2026-10-23: 'remind me later')
 - The 'Make a groove from this pack' generator (strong beats from solid hits, ticks in between, swells rare; roles read from group names; style + roll again; saved as a groove).
+
+### Swing for loops (Rusty, 2026-11-04: 'would be cool', ROADMAP only)
+- A per-lane swing setting in the Loop player that follows the scene's swing amount. Method: slice the loop at its hits (the same transient finding the time-stretch could use), snap each slice to its sixteenth, and delay the off-beat slices by the swing amount, shortening or cross-fading the slice before so nothing clicks.
+- Best on tight, straight loops (shakers, tambourines, the Pete Lockett sets); loops with long ringing tails and loops that are already swung need care, so the default is off per lane. Plan: test offline on his real loops first and measure where the hits land before and after.
