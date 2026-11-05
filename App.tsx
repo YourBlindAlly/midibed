@@ -3196,7 +3196,7 @@ export default function App() {
             return (
               <Section title="Hear a loop">
                 <Note>
-                  Listen to a loop on its own, at its own speed and tempo, without putting it in a lane. It goes through the loops that pass the filters above. Swipe up or down on the stepper to move to the next loop; if one is playing, the next one starts at once.
+                  Listen to a loop on its own, at its own speed and tempo, without putting it in a lane. It goes through the loops that pass the filters above. Swipe up or down on the stepper to move to the next loop; if one is playing, the next one starts at once. Then swipe up on Hear the loop to start it and down to stop.
                 </Note>
                 <Stepper
                   label="Loop to hear"
@@ -3211,14 +3211,15 @@ export default function App() {
                   max={hearList.length}
                   format={(v) => (v === 0 ? 'none chosen' : `${hearList[v - 1].name}, ${hearList[v - 1].folder}${hearList[v - 1].bpm ? `, ${hearList[v - 1].bpm} BPM` : ''}, ${hearList[v - 1].seconds.toFixed(1)} seconds, ${v} of ${hearList.length}`)}
                 />
-                <ActionButton
-                  label={hearing ? 'Stop hearing the loop' : 'Hear this loop'}
-                  hint="Plays the chosen loop over and over, whether or not MidiBed is playing, until you stop it"
-                  onPress={() => {
-                    if (hearing) stopHearing();
+                <Toggle
+                  label="Hear the loop"
+                  value={hearing !== null}
+                  onChange={(v) => {
+                    if (!v) stopHearing();
                     else if (heard) hearLoop(heard);
                     else AccessibilityInfo.announceForAccessibility('Choose a loop first');
                   }}
+                  hint="Swipe up to play the chosen loop over and over, down to stop. It plays whether or not MidiBed is playing"
                 />
               </Section>
             );
