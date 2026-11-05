@@ -2070,7 +2070,11 @@ final class MidiBedEngine {
       if !toms.isEmpty, Double.random(in: 0..<1, using: &rng) < 0.6 { tomPos = min(toms.count - 1, tomPos + 1) }
       let base = Double(f.palette[voice].velocity)
       let vel = Int((base * (0.7 + 0.4 * p) * (0.92 + 0.16 * Double.random(in: 0..<1, using: &rng))).rounded())
-      hit(at: startTime + Double(s) * stepDur, voice: voice, velocity: vel)
+      // Swing like the groove: every second sixteenth of the bar is pushed later (the fill ends on a bar line,
+      // so the step number counted from the bar's start has the same odd/even pattern as the groove's).
+      let stepInBar = (startTick / ticksPerStep) + s
+      let swingDelay = (stepInBar % 2 == 1) ? max(0, min(1, cfg.swing)) * stepDur * 0.5 : 0
+      hit(at: startTime + Double(s) * stepDur + swingDelay, voice: voice, velocity: vel)
     }
     // The last hit lands on the downbeat of the next bar, where the normal pattern comes back.
     let finalVoice = toms.isEmpty ? snares[0] : toms[toms.count - 1]
