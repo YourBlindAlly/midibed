@@ -56,6 +56,14 @@ public class MidiBedEngineModule: Module {
     }
 
     // Length, sample rate and channels of an audio file (for the loop library); nil if it cannot be read.
+    Function("previewLoop") { (path: String, seconds: Double, level: Double) in
+      self.engine.previewLoop(path: path, seconds: seconds, level: level)
+    }
+
+    Function("stopPreview") {
+      self.engine.stopPreview()
+    }
+
     AsyncFunction("probeLoop") { (path: String) -> [String: Any]? in
       return MidiBedEngine.probeLoop(path: path)
     }

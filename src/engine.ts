@@ -23,6 +23,8 @@ type Native = {
   setChordLead(ms: number): void;
   setFilter(json: string): void;
   setOutputMode(mode: number): void;
+  previewLoop(path: string, seconds: number, level: number): void;
+  stopPreview(): void;
   probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number; peak: number; rms: number } | null>;
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;
@@ -223,6 +225,9 @@ export const engine = {
   setOutputMode: (mode: number) => native?.setOutputMode(mode),
   /** Length of an audio file for the loop library (null if unreadable or no native engine). */
   probeLoop: (path: string) => (native ? native.probeLoop(path) : Promise.resolve(null)),
+  /** Audition a library file on its own (loops until stopped). */
+  previewLoop: (path: string, seconds: number, level: number) => native?.previewLoop(path, seconds, level),
+  stopPreview: () => native?.stopPreview(),
   /** An orchestrated stop (see src/ending.ts). */
   requestEnd: (json: string) => native?.requestEnd(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */

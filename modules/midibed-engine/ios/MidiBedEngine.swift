@@ -532,6 +532,7 @@ final class MidiBedEngine {
   // Drum fills: the normal pattern is silent from fillStartTick up to (not including) fillEndTick.
   private var fillStartTick = 0
   // Loop player: which lanes the engine has started, and the tick each one started on.
+  private var previewToken = 0
   private var laneActive = [Bool](repeating: false, count: LoopPlayer.laneCount)
   private var laneStart = [Int](repeating: 0, count: LoopPlayer.laneCount)
   private var lanePath = [String](repeating: "", count: LoopPlayer.laneCount)
@@ -1947,6 +1948,40 @@ final class MidiBedEngine {
       }
     }
     pendingLoop = later
+  }
+
+  /// Audition a file from the library: it plays on its own at its natural speed, round and round, until
+  /// `stopPreview` (or another preview). It uses a spare slot of the loop player, so it never disturbs the lanes.
+  /// `seconds` is the file's length (from the library). It starts as soon as the file has been decoded.
+  func previewLoop(path: String, seconds: Double, level: Double) {
+    queue.async {
+      self.previewToken += 1
+      let token = self.previewToken
+      let lane = LoopPlayer.previewLane
+      let secs = max(0.2, seconds)
+      self.synth.loops.load(lane: lane, path: path)
+      self.synth.loops.setMix(lane: lane, level: Float(max(0, min(4, level))), pan: 0)
+      self.synth.loops.fit(lane: lane, seconds: secs, repeats: 1, follow: true, semis: 0)
+      DispatchQueue.main.async { self.synth.restartIfNeeded() }
+      var tries = 0
+      func attempt() {
+        guard token == self.previewToken else { return }
+        if self.synth.loops.isReady(lane) {
+          self.synth.loops.start(lane: lane, seconds: secs, repeats: 1, at: 0, fadeIn: 0.02)
+        } else if tries < 100 {
+          tries += 1
+          self.queue.asyncAfter(deadline: .now() + .milliseconds(60)) { attempt() }
+        }
+      }
+      attempt()
+    }
+  }
+
+  func stopPreview() {
+    queue.async {
+      self.previewToken += 1
+      self.synth.loops.stop(lane: LoopPlayer.previewLane, fade: 0.08)
+    }
   }
 
   /// Length, sample rate and channels of an audio file, for the library.

@@ -17,6 +17,9 @@ import Foundation
 /// os_unfair_lock. The audio thread only ever try-locks (one buffer of loops is skipped if the lock is busy).
 final class LoopPlayer {
   static let laneCount = 5
+  /// One extra slot, used only to audition a file from the library; the engine's lane loops never touch it.
+  static let previewLane = 5
+  static let slots = 6
 
   private final class Buf {
     let frames: Int
@@ -64,7 +67,7 @@ final class LoopPlayer {
     var startFade: Float = 0.008
   }
 
-  private var lanes = [Lane](repeating: Lane(), count: LoopPlayer.laneCount)
+  private var lanes = [Lane](repeating: Lane(), count: LoopPlayer.slots)
   private let lock: UnsafeMutablePointer<os_unfair_lock_s>
   private var sampleRate: Float = 44100
   private let blockCapacity = 8192
@@ -101,7 +104,7 @@ final class LoopPlayer {
   /// Make sure `lane` holds this file (decoding it in the background if it is a new one). An empty path
   /// empties the lane. Changing the file stops the lane at once.
   func load(lane: Int, path: String) {
-    guard lane >= 0, lane < LoopPlayer.laneCount else { return }
+    guard lane >= 0, lane < LoopPlayer.slots else { return }
     os_unfair_lock_lock(lock)
     let same = lanes[lane].path == path
     if !same {
@@ -132,7 +135,7 @@ final class LoopPlayer {
   /// Can the lane start now? Its file is decoded and, when it needs a stretched copy, the copy is ready too
   /// (so a loop never starts at the wrong pitch for a moment).
   func isReady(_ lane: Int) -> Bool {
-    guard lane >= 0, lane < LoopPlayer.laneCount else { return false }
+    guard lane >= 0, lane < LoopPlayer.slots else { return false }
     os_unfair_lock_lock(lock)
     defer { os_unfair_lock_unlock(lock) }
     let ln = lanes[lane]
@@ -145,7 +148,7 @@ final class LoopPlayer {
   }
 
   func setMix(lane: Int, level: Float, pan: Float) {
-    guard lane >= 0, lane < LoopPlayer.laneCount else { return }
+    guard lane >= 0, lane < LoopPlayer.slots else { return }
     os_unfair_lock_lock(lock)
     lanes[lane].level = max(0, min(4, level))
     lanes[lane].pan = max(-1, min(1, pan))
@@ -158,7 +161,7 @@ final class LoopPlayer {
   /// there is not one yet. Safe to call as often as the tempo or the settings change; a lane that is playing
   /// keeps its place.
   func fit(lane: Int, seconds: Double, repeats: Int, follow: Bool, semis: Int) {
-    guard lane >= 0, lane < LoopPlayer.laneCount, seconds > 0.05 else { return }
+    guard lane >= 0, lane < LoopPlayer.slots, seconds > 0.05 else { return }
     os_unfair_lock_lock(lock)
     lanes[lane].wantSeconds = seconds
     lanes[lane].wantRepeats = max(1, repeats)
@@ -171,7 +174,7 @@ final class LoopPlayer {
   /// Start from the top. `seconds` is how long the loop's bars last at the current tempo. With `at` (an
   /// engine-clock time, see MidiBedTestSynth.syncClock) the start happens on that exact sample; 0 = now.
   func start(lane: Int, seconds: Double, repeats: Int = 1, at: Double = 0, fadeIn: Float = 0.008) {
-    guard lane >= 0, lane < LoopPlayer.laneCount else { return }
+    guard lane >= 0, lane < LoopPlayer.slots else { return }
     os_unfair_lock_lock(lock)
     if lanes[lane].raw != nil, seconds > 0.05 {
       lanes[lane].startFade = max(0.008, fadeIn)
@@ -190,7 +193,7 @@ final class LoopPlayer {
 
   /// Fade out and stop, at once or (with `at`) at that engine-clock time.
   func stop(lane: Int, fade: Float = 0.03, at: Double = 0) {
-    guard lane >= 0, lane < LoopPlayer.laneCount else { return }
+    guard lane >= 0, lane < LoopPlayer.slots else { return }
     os_unfair_lock_lock(lock)
     if at > 0 {
       lanes[lane].stopPending = true
@@ -289,7 +292,7 @@ final class LoopPlayer {
     guard frames > 0, frames <= blockCapacity, os_unfair_lock_trylock(lock) else { return false }
     defer { os_unfair_lock_unlock(lock) }
     var rendered = false
-    for lane in 0..<LoopPlayer.laneCount {
+    for lane in 0..<LoopPlayer.slots {
       // Commands due in this block, as frame offsets (-1 = none).
       var startOff = -1
       var stopOff = -1

@@ -140,3 +140,18 @@ describe('pack swells as transition sounds', () => {
     expect(app).toContain('A swell from a sound pack');
   });
 });
+
+describe('loop preview bridge', () => {
+  const fs = require('fs');
+  const e = fs.readFileSync('modules/midibed-engine/ios/MidiBedEngine.swift', 'utf8');
+  const m = fs.readFileSync('modules/midibed-engine/ios/MidiBedEngineModule.swift', 'utf8');
+  const l = fs.readFileSync('modules/midibed-engine/ios/LoopPlayer.swift', 'utf8');
+  it('has native previewLoop / stopPreview wired to a spare player slot', () => {
+    expect(e).toContain('func previewLoop(path: String, seconds: Double, level: Double)');
+    expect(e).toContain('func stopPreview()');
+    expect(m).toContain('Function("previewLoop")');
+    expect(m).toContain('Function("stopPreview")');
+    expect(l).toContain('static let previewLane = 5');
+    expect(l).toContain('static let slots = 6');
+  });
+});

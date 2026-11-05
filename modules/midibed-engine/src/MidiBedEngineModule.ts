@@ -20,6 +20,9 @@ declare class MidiBedEngineModule extends NativeModule<MidiBedEngineEvents> {
   setOutputMode(mode: number): void;
   /** Length, sample rate and channels of an audio file, or null if it cannot be read (the loop library). */
   probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number; peak: number; rms: number } | null>;
+  /** Audition a library file on its own, looping at its natural speed, until stopPreview or another preview. */
+  previewLoop(path: string, seconds: number, level: number): void;
+  stopPreview(): void;
   /** An orchestrated stop: JSON {style 1 bar|2 progression|3 scene, fadeBars, finalHit, noise, noiseShape, noiseLevel}. */
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;

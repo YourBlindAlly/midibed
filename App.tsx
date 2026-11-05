@@ -58,7 +58,7 @@ import {
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
 import { LANE_BREATHE_NAMES } from './src/lanebreath';
-import { AMBIENCE_LANE, BAR_CHOICES, LANE_COUNT, LibraryLoop, SEMI_RANGE, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
+import { AMBIENCE_LANE, BAR_CHOICES, LANE_COUNT, LibraryLoop, SEMI_RANGE, matchGain, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -1208,6 +1208,25 @@ export default function App() {
   const [loopNear, setLoopNear] = useState(0);
   const [loopText, setLoopText] = useState('');
   const [loopInstrument, setLoopInstrument] = useState('');
+  // Hearing a loop on its own (Loop player > Hear a loop), without putting it in a lane.
+  const [hearIdx, setHearIdx] = useState(0);
+  const [hearing, setHearing] = useState<string | null>(null);
+  const hearLoop = (l: LibraryLoop) => {
+    const level = (Math.max(0, Math.min(150, state.loopMaster)) / 100) * matchGain(l.peak, l.rms);
+    engine.previewLoop(loopPath(l.file), l.seconds, level);
+    setHearing(l.id);
+  };
+  const stopHearing = () => {
+    engine.stopPreview();
+    setHearing(null);
+  };
+  // Leaving the Loop player tab ends the audition.
+  useEffect(() => {
+    if (tab !== 'player' && hearing) {
+      engine.stopPreview();
+      setHearing(null);
+    }
+  }, [tab, hearing]);
   const patchLane = (i: number, change: Partial<BedState['lanes'][number]>) =>
     setState((s) => ({ ...s, lanes: s.lanes.map((l, k) => (k === i ? { ...l, ...change } : l)) }));
   // Sound packs (Setup > Sound packs): folders of recorded sounds, each subfolder a group.
@@ -3169,6 +3188,41 @@ export default function App() {
               <Text style={styles.note}>{`${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument }).length} of ${loopLib.length} loops match`}</Text>
             </View>
           </Section>
+
+          {(() => {
+            const hearList = filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument });
+            const pos = Math.min(hearIdx, hearList.length);
+            const heard = pos > 0 ? hearList[pos - 1] : undefined;
+            return (
+              <Section title="Hear a loop">
+                <Note>
+                  Listen to a loop on its own, at its own speed and tempo, without putting it in a lane. It goes through the loops that pass the filters above. Swipe up or down on the stepper to move to the next loop; if one is playing, the next one starts at once.
+                </Note>
+                <Stepper
+                  label="Loop to hear"
+                  value={pos}
+                  onChange={(v) => {
+                    const n = Math.max(0, Math.min(hearList.length, v));
+                    setHearIdx(n);
+                    if (hearing && n > 0) hearLoop(hearList[n - 1]);
+                    else if (hearing) stopHearing();
+                  }}
+                  min={0}
+                  max={hearList.length}
+                  format={(v) => (v === 0 ? 'none chosen' : `${hearList[v - 1].name}, ${hearList[v - 1].folder}${hearList[v - 1].bpm ? `, ${hearList[v - 1].bpm} BPM` : ''}, ${hearList[v - 1].seconds.toFixed(1)} seconds, ${v} of ${hearList.length}`)}
+                />
+                <ActionButton
+                  label={hearing ? 'Stop hearing the loop' : 'Hear this loop'}
+                  hint="Plays the chosen loop over and over, whether or not MidiBed is playing, until you stop it"
+                  onPress={() => {
+                    if (hearing) stopHearing();
+                    else if (heard) hearLoop(heard);
+                    else AccessibilityInfo.announceForAccessibility('Choose a loop first');
+                  }}
+                />
+              </Section>
+            );
+          })()}
 
           {Array.from({ length: LANE_COUNT }, (_, i) => {
             const lane = state.lanes[i];
