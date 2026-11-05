@@ -63,6 +63,18 @@ struct MidiBedLaneConfig: Decodable {
   var ambience: Bool?       // the ambience lane: natural speed, never restarts, slow fades
   var seconds: Double?      // the file's own length (ambience lane)
   var breathe: MidiBedLaneBreathe?
+  var pool: [MidiBedPoolChoice]?  // a pool of two or more loops: played in turn (the fields above describe the first)
+  var poolMode: Int?        // 0 in order, 1 shuffled with no repeats until all have played
+  var poolEvery: Int?       // also change loop every this many bars (0 = only when a scene starts)
+}
+
+/// One loop of a lane's pool, described the way the lane would play it.
+struct MidiBedPoolChoice: Decodable {
+  var path: String
+  var bars: Int
+  var repeats: Int
+  var level: Double
+  var seconds: Double?
 }
 
 /// Patterns that change by themselves (kick excluded).
@@ -500,6 +512,7 @@ final class MidiBedEngine {
     var repeats: Int = 1
     var fade: Float = 0.03
     var fadeIn: Float = 0.008
+    var swapPath = ""
   }
   private var pendingLoop: [PendingLoop] = []
 
@@ -533,6 +546,13 @@ final class MidiBedEngine {
   private var fillStartTick = 0
   // Loop player: which lanes the engine has started, and the tick each one started on.
   private var previewToken = 0
+  // Loop pools (per lane): which loop of the lane's pool is playing, which is next, and when it last changed.
+  private var poolSig = [String](repeating: "", count: LoopPlayer.laneCount)
+  private var poolPick = [Int](repeating: 0, count: LoopPlayer.laneCount)
+  private var poolNext = [Int](repeating: 0, count: LoopPlayer.laneCount)
+  private var poolBag = [[Int]](repeating: [], count: LoopPlayer.laneCount)
+  private var poolSince = [Int](repeating: -1, count: LoopPlayer.laneCount)
+  private var poolScene = [Bool](repeating: false, count: LoopPlayer.laneCount)
   private var laneActive = [Bool](repeating: false, count: LoopPlayer.laneCount)
   private var laneStart = [Int](repeating: 0, count: LoopPlayer.laneCount)
   private var lanePath = [String](repeating: "", count: LoopPlayer.laneCount)
@@ -1863,8 +1883,44 @@ final class MidiBedEngine {
   private func stepLanes(tick: Int, time: Double, tickDur: Double, cfg: MidiBedConfig) {
     let barTicks = ticksPerBeat * beatsPerBar
     for i in 0..<min(LoopPlayer.laneCount, cfg.lanes.count) {
-      let lane = cfg.lanes[i]
-      let ready = !lane.path.isEmpty && synth.loops.isReady(i)
+      var lane = effective(i, cfg)
+      // A pool: change to its next loop on a bar line when a scene has started (or every N bars), at a point
+      // where the lane restarts anyway. The next file was decoded ahead of time, so there is no gap.
+      var swapped = false
+      var swapTo = ""
+      if let pool = cfg.lanes[i].pool, pool.count > 1, lane.ambience != true, poolSig[i] != "" {
+        if poolSince[i] < 0 { poolSince[i] = tick }
+        let span = max(1, lane.bars) * barTicks
+        let atBoundary = !laneActive[i] || (tick - laneStart[i]) % span == 0
+        let every = cfg.lanes[i].poolEvery ?? 0
+        let due = poolScene[i] || (every > 0 && tick - poolSince[i] >= every * barTicks)
+        let nxt = min(max(0, poolNext[i]), pool.count - 1)
+        if cfg.lanes[i].on, atBoundary, due, synth.loops.nextReady(lane: i, path: pool[nxt].path) {
+          let np = pool[nxt].path
+          let plain = (lane.follow ?? true) && (lane.semis ?? 0) == 0
+          let seamless = plain && laneActive[i] && synth.loops.isReady(i)
+          poolPick[i] = nxt
+          poolScene[i] = false
+          poolSince[i] = tick
+          lane = effective(i, cfg)
+          synth.loops.setMix(lane: i, level: Float(lane.level), pan: Float(lane.pan))
+          if seamless {
+            swapTo = np
+            swapped = true
+            lanePath[i] = np
+          } else if synth.loops.swapNow(lane: i, path: np) {
+            lanePath[i] = np
+            laneActive[i] = false
+            swapped = true
+            synth.loops.fit(lane: i, seconds: loopSeconds(lane.bars, cfg), repeats: max(1, lane.repeats), follow: lane.follow ?? true, semis: lane.semis ?? 0)
+          }
+          if swapped {
+            poolNext[i] = pickNextPool(i, count: pool.count, mode: cfg.lanes[i].poolMode ?? 0)
+            synth.loops.prepare(lane: i, path: pool[poolNext[i]].path)
+          }
+        }
+      }
+      let ready = !lane.path.isEmpty && (swapTo.isEmpty ? synth.loops.isReady(i) : true)
       let allowed = laneMayPlay(i, lane, cfg)
       if lane.ambience == true {
         // The ambience lane ignores the tempo and the bar count: it fades in when it starts and keeps going across
@@ -1884,8 +1940,8 @@ final class MidiBedEngine {
       }
       if lane.on && ready && allowed {
         let span = max(1, lane.bars) * barTicks
-        if !laneActive[i] || (tick - laneStart[i]) % span == 0 {
-          pendingLoop.append(PendingLoop(time: time, lane: i, start: true, seconds: loopSeconds(lane.bars, cfg), repeats: max(1, lane.repeats)))
+        if !laneActive[i] || swapped || (tick - laneStart[i]) % span == 0 {
+          pendingLoop.append(PendingLoop(time: time, lane: i, start: true, seconds: loopSeconds(lane.bars, cfg), repeats: max(1, lane.repeats), swapPath: swapTo))
           laneActive[i] = true
           laneStart[i] = tick
         }
@@ -1914,11 +1970,56 @@ final class MidiBedEngine {
     }
   }
 
+  /// The lane as it plays right now: for a pool lane, the current loop of its pool.
+  private func effective(_ i: Int, _ cfg: MidiBedConfig) -> MidiBedLaneConfig {
+    var l = cfg.lanes[i]
+    if let pool = l.pool, pool.count > 1, l.ambience != true, i < poolPick.count, poolSig[i] != "" {
+      let c = pool[min(max(0, poolPick[i]), pool.count - 1)]
+      l.path = c.path
+      l.bars = c.bars
+      l.repeats = c.repeats
+      l.level = c.level
+      l.seconds = c.seconds
+    }
+    return l
+  }
+
+  /// The pool lane's next loop: the following one in order, or the next of a shuffled bag that holds each of the
+  /// others once (so nothing repeats until all have played).
+  private func pickNextPool(_ i: Int, count n: Int, mode: Int) -> Int {
+    if n <= 1 { return 0 }
+    if mode == 1 {
+      if poolBag[i].isEmpty {
+        var bag = Array(0..<n).filter { $0 != poolPick[i] }
+        bag.shuffle(using: &rng)
+        poolBag[i] = bag
+      }
+      return poolBag[i].removeFirst()
+    }
+    return (poolPick[i] + 1) % n
+  }
+
   /// The lanes of a configuration just installed: load the files, set the levels, and cut a lane whose file
   /// changed (the new one starts on the next bar line when it has finished loading).
   private func applyLanes(_ cfg: MidiBedConfig) {
     for i in 0..<LoopPlayer.laneCount {
-      let lane = i < cfg.lanes.count ? cfg.lanes[i] : nil
+      let rawLane = i < cfg.lanes.count ? cfg.lanes[i] : nil
+      if let r = rawLane, let pool = r.pool, pool.count > 1, r.ambience != true {
+        // A pool lane keeps its place while the pool stays the same (so a setting change does not restart it).
+        let sig = pool.map { $0.path }.joined(separator: "|") + "#\(r.poolMode ?? 0)"
+        if poolSig[i] != sig {
+          poolSig[i] = sig
+          poolBag[i] = []
+          poolPick[i] = (r.poolMode ?? 0) == 1 ? Int.random(in: 0..<pool.count, using: &rng) : 0
+          poolNext[i] = pickNextPool(i, count: pool.count, mode: r.poolMode ?? 0)
+          poolScene[i] = false
+          poolSince[i] = -1
+        }
+      } else {
+        poolSig[i] = ""
+        poolPick[i] = 0
+      }
+      let lane: MidiBedLaneConfig? = rawLane == nil ? nil : effective(i, cfg)
       let path = lane?.path ?? ""
       if lanePath[i] != path {
         lanePath[i] = path
@@ -1929,6 +2030,9 @@ final class MidiBedEngine {
       }
       synth.loops.load(lane: i, path: path)
       synth.loops.setMix(lane: i, level: Float(lane?.level ?? 1), pan: Float(lane?.pan ?? 0))
+      if poolSig[i] != "", let pool = rawLane?.pool, pool.count > 1 {
+        synth.loops.prepare(lane: i, path: pool[min(max(0, poolNext[i]), pool.count - 1)].path)
+      }
       // A tempo change: the lane keeps its place at its new speed.
       if let l = lane { synth.loops.fit(lane: i, seconds: l.ambience == true ? max(0.5, l.seconds ?? 10) : loopSeconds(l.bars, cfg), repeats: max(1, l.repeats), follow: l.follow ?? true, semis: l.semis ?? 0) }
     }
@@ -1942,7 +2046,7 @@ final class MidiBedEngine {
         // With tight timing the lane starts or stops on the exact sample the bar line falls on, the same lead after
         // its time as the notes (so a loop and the drums land together).
         let at = (config?.tightTiming ?? true) ? p.time + synth.scheduleLead : 0
-        if p.start { synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats, at: at, fadeIn: p.fadeIn) } else { synth.loops.stop(lane: p.lane, fade: p.fade, at: at) }
+        if p.start { synth.loops.start(lane: p.lane, seconds: p.seconds, repeats: p.repeats, at: at, fadeIn: p.fadeIn, swapTo: p.swapPath) } else { synth.loops.stop(lane: p.lane, fade: p.fade, at: at) }
       } else {
         later.append(p)
       }
@@ -2522,6 +2626,11 @@ final class MidiBedEngine {
     // scene-start sound, tag 0, is kept: it is due on this very bar line).
     pendingNoise.removeAll { $0.tag != 0 }
     // The recurring sound: the first boundary is skipped, so nothing recurring plays in the first loop.
+    // Pool lanes move on to their next loop when a scene starts, and count their bars from here.
+    for i in 0..<LoopPlayer.laneCount {
+      poolScene[i] = true
+      poolSince[i] = -1
+    }
     recurBoundary = recurringSpacing(cfg)
     recurPlay = false
     recurScheduled = true

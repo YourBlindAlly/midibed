@@ -58,7 +58,7 @@ import {
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
 import { LANE_BREATHE_NAMES } from './src/lanebreath';
-import { AMBIENCE_LANE, BAR_CHOICES, LANE_COUNT, LibraryLoop, SEMI_RANGE, matchGain, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
+import { AMBIENCE_LANE, BAR_CHOICES, KIND_NAMES, LANE_COUNT, LibraryLoop, SEMI_RANGE, matchGain, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, folderNames, isAudioFile, loopPath, parseLibrary, setLoopDir, tempoFromName } from './src/looplib';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -76,6 +76,7 @@ import { BACKUP_FILE_NAME, backupText, keepFoundLoops, parseBackup } from './src
 import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigger, idForMidi, isToggleAction, parseDoubleMap, parseHoldMap, parseMidiMap, setDouble, setHold, triggerKey } from './src/midicontrol';
 import { levelText, mixerMessages, synthLevelMessages } from './src/mixer';
 import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
+import { POOL_EVERY_CHOICES, POOL_MODE_NAMES, Pool, addLoopToPool, addLoopsToPool, deletePool, newPool, parsePools, removeLoopFromPool, renamePool, stringifyPools } from './src/pools';
 import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { RHYTHMS, rhythmDescribe, rhythmText } from './src/rhythms';
@@ -1210,6 +1211,21 @@ export default function App() {
   const [loopInstrument, setLoopInstrument] = useState('');
   // Hearing a loop on its own (Loop player > Hear a loop), without putting it in a lane.
   const [hearIdx, setHearIdx] = useState(0);
+  // The Kind filter (index into KIND_NAMES) and the pool being worked on (0 = none, else the pool's position + 1).
+  const [loopKind, setLoopKind] = useState(0);
+  const [poolSel, setPoolSel] = useState(0);
+  const [poolHear, setPoolHear] = useState(1);
+  const pools = parsePools(state.pools);
+  const updatePools = (fn: (p: Pool[]) => Pool[]) => setState((s) => ({ ...s, pools: stringifyPools(fn(parsePools(s.pools))) }));
+  // The Kind filter as a loop kind: 'Suited to the lane' gives rhythm loops to lanes 1-4 and beds to the ambience lane,
+  // and shows everything where there is no lane (hearing, pools).
+  const kindFor = (lane: number | null): string => {
+    if (loopKind === 1) return 'rhythm';
+    if (loopKind === 2) return 'bed';
+    if (loopKind === 3) return 'hit';
+    if (loopKind === 4 || lane === null) return '';
+    return lane === AMBIENCE_LANE ? 'bed' : 'rhythm';
+  };
   const [hearing, setHearing] = useState<string | null>(null);
   const hearLoop = (l: LibraryLoop) => {
     const level = (Math.max(0, Math.min(150, state.loopMaster)) / 100) * matchGain(l.peak, l.rms);
@@ -3170,6 +3186,15 @@ export default function App() {
               format={(v) => (v === 0 ? 'Any instrument' : `${instruments[v - 1]}, ${loopLib.filter((l) => instrumentOf(l.name, l.folder) === instruments[v - 1]).length} loops`)}
               hint="Only loops of this instrument, worked out from their names. Swipe up or down to choose, so you do not need to type"
             />
+            <Stepper
+              label="Kind of sound"
+              value={loopKind}
+              onChange={(v) => setLoopKind(Math.max(0, Math.min(KIND_NAMES.length - 1, v)))}
+              min={0}
+              max={KIND_NAMES.length - 1}
+              format={(v) => KIND_NAMES[v]}
+              hint="Rhythm loops have a tempo. Beds are long slow textures such as rain stick or ocean drum; they play at their own speed and are never stretched to the tempo. Hits and effects are short one-shots. Suited to the lane shows rhythm loops in lanes 1 to 4 and beds in the ambience lane"
+            />
             <View accessible={false} style={styles.nameBox}>
               <Text style={styles.note}>Name contains</Text>
               <TextInput
@@ -3184,16 +3209,28 @@ export default function App() {
                 onBlur={() => engine.reclaimKeys()}
               />
             </View>
-            <View accessible accessibilityLabel="Loops that match" accessibilityValue={{ text: `${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument }).length} of ${loopLib.length}` }}>
-              <Text style={styles.note}>{`${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument }).length} of ${loopLib.length} loops match`}</Text>
+            <View accessible accessibilityLabel="Loops that match" accessibilityValue={{ text: `${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument, kind: kindFor(null) }).length} of ${loopLib.length}` }}>
+              <Text style={styles.note}>{`${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument, kind: kindFor(null) }).length} of ${loopLib.length} loops match`}</Text>
             </View>
           </Section>
 
           {(() => {
-            const hearList = filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument });
+            const hearList = filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument, kind: kindFor(null) });
+            const pool = poolSel > 0 ? pools[poolSel - 1] : undefined;
+            const poolLoops = pool ? pool.loops.map((id) => loopLib.find((l) => l.id === id)).filter((l): l is LibraryLoop => !!l) : [];
+            const addToPool = (ids: string[]) => {
+              if (!pool) {
+                AccessibilityInfo.announceForAccessibility('Choose or make a pool first');
+                return;
+              }
+              const fresh = ids.filter((id) => !pool.loops.includes(id)).length;
+              updatePools((ps) => addLoopsToPool(ps, pool.id, ids));
+              AccessibilityInfo.announceForAccessibility(fresh === 0 ? `Already in ${pool.name}` : `Added ${fresh} ${fresh === 1 ? 'loop' : 'loops'} to ${pool.name}`);
+            };
             const pos = Math.min(hearIdx, hearList.length);
             const heard = pos > 0 ? hearList[pos - 1] : undefined;
             return (
+              <>
               <Section title="Hear a loop">
                 <Note>
                   Listen to a loop on its own, at its own speed and tempo, without putting it in a lane. It goes through the loops that pass the filters above. Swipe up or down on the stepper to move to the next loop; if one is playing, the next one starts at once. Then swipe up on Hear the loop to start it and down to stop.
@@ -3221,7 +3258,104 @@ export default function App() {
                   }}
                   hint="Swipe up to play the chosen loop over and over, down to stop. It plays whether or not MidiBed is playing"
                 />
+                <ActionButton
+                  label={pool ? `Add this loop to ${pool.name}` : 'Add this loop to a pool'}
+                  hint="Choose the pool in the Pools section below. The loop stays where it is in the library"
+                  onPress={() => (heard ? addToPool([heard.id]) : AccessibilityInfo.announceForAccessibility('Choose a loop first'))}
+                />
               </Section>
+              <Section title="Pools">
+                <Note>
+                  A pool is a named list of loops. Give a lane a pool instead of a single loop and it plays the pool's loops in turn, changing on a bar line when a scene starts and, if you like, every few bars. Pools are shared by every journey.
+                </Note>
+                <Stepper
+                  label="Pool"
+                  value={Math.min(poolSel, pools.length)}
+                  onChange={(v) => setPoolSel(Math.max(0, Math.min(pools.length, v)))}
+                  min={0}
+                  max={pools.length}
+                  format={(v) => (v === 0 ? 'none chosen' : `${pools[v - 1].name}, ${pools[v - 1].loops.length} ${pools[v - 1].loops.length === 1 ? 'loop' : 'loops'}`)}
+                  hint="Which pool you are working on"
+                />
+                <ActionButton
+                  label="Make a new pool"
+                  onPress={() => {
+                    const made = newPool(pools);
+                    updatePools(() => made);
+                    setPoolSel(made.length);
+                    AccessibilityInfo.announceForAccessibility(`Made ${made[made.length - 1].name}`);
+                  }}
+                />
+                {pool && (
+                  <>
+                    <View accessible={false} style={styles.nameBox}>
+                      <Text style={styles.note}>Pool name</Text>
+                      <TextInput
+                        style={styles.nameInput}
+                        value={pool.name}
+                        onChangeText={(t) => updatePools((ps) => renamePool(ps, pool.id, t))}
+                        accessibilityLabel="Pool name"
+                        autoCorrect={false}
+                        placeholderTextColor={colors.dim}
+                        onBlur={() => engine.reclaimKeys()}
+                      />
+                    </View>
+                    <ActionButton
+                      label={`Add all ${hearList.length} loops shown to ${pool.name}`}
+                      hint="Adds every loop that passes the filters above, so filter first, for example to one instrument"
+                      onPress={() => addToPool(hearList.map((l) => l.id))}
+                    />
+                    <Stepper
+                      label={`Loop in ${pool.name}`}
+                      value={Math.min(poolLoops.length, Math.max(poolLoops.length > 0 ? 1 : 0, poolHear))}
+                      onChange={(v) => {
+                        const n = Math.max(poolLoops.length > 0 ? 1 : 0, Math.min(poolLoops.length, v));
+                        setPoolHear(n);
+                        if (hearing && n > 0) hearLoop(poolLoops[n - 1]);
+                      }}
+                      min={poolLoops.length > 0 ? 1 : 0}
+                      max={poolLoops.length}
+                      format={(v) => (v === 0 ? 'the pool is empty' : `${poolLoops[v - 1].name}, ${poolLoops[v - 1].folder}, ${v} of ${poolLoops.length}`)}
+                      hint="Goes through the loops in the pool. If a loop is playing under Hear the loop, the next one starts"
+                    />
+                    <ActionButton
+                      label="Hear the loop in the pool"
+                      onPress={() => {
+                        const l = poolLoops[Math.max(1, poolHear) - 1];
+                        if (l) hearLoop(l);
+                      }}
+                    />
+                    <ActionButton
+                      label="Take that loop out of the pool"
+                      onPress={() => {
+                        const l = poolLoops[Math.max(1, poolHear) - 1];
+                        if (!l) return;
+                        updatePools((ps) => removeLoopFromPool(ps, pool.id, l.id));
+                        setPoolHear((h) => Math.max(1, h - 1));
+                        AccessibilityInfo.announceForAccessibility(`Took ${l.name} out of ${pool.name}`);
+                      }}
+                    />
+                    <ActionButton
+                      label={`Delete ${pool.name}`}
+                      onPress={() =>
+                        Alert.alert('Delete pool', `Delete ${pool.name}? The loops stay in the library. Lanes using it go back to their own loop.`, [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Delete',
+                            style: 'destructive',
+                            onPress: () => {
+                              updatePools((ps) => deletePool(ps, pool.id));
+                              setState((st) => ({ ...st, lanes: st.lanes.map((l) => (l.pool === pool.id ? { ...l, pool: '' } : l)) }));
+                              setPoolSel(0);
+                            },
+                          },
+                        ])
+                      }
+                    />
+                  </>
+                )}
+              </Section>
+            </>
             );
           })()}
 
@@ -3229,7 +3363,7 @@ export default function App() {
             const lane = state.lanes[i];
             const browseIdx = Math.min(laneBrowse[i] ?? 0, loopFolders.length);
             const current = loopLib.find((l) => l.id === lane.loop);
-            let inFolder = filterLoops(loopLib, { folder: browseIdx === 0 ? '' : loopFolders[browseIdx - 1], near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument });
+            let inFolder = filterLoops(loopLib, { folder: browseIdx === 0 ? '' : loopFolders[browseIdx - 1], near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument, kind: kindFor(i) });
             // The loop already in the lane stays in the list even if the filter would hide it.
             if (current && !inFolder.some((l) => l.id === current.id)) inFolder = [current, ...inFolder];
             const loopIdx = Math.max(0, inFolder.findIndex((l) => l.id === lane.loop) + 1);
@@ -3269,6 +3403,40 @@ export default function App() {
                   format={(v) => (v === 0 ? 'empty' : `${inFolder[v - 1].name}, ${inFolder[v - 1].bars} ${inFolder[v - 1].bars === 1 ? 'bar' : 'bars'}${inFolder[v - 1].bpm ? `, ${inFolder[v - 1].bpm} BPM` : ''}`)}
                   hint="Which loop is in this lane. It goes through the loops that pass the filters"
                 />
+                {!amb && pools.length > 0 && (
+                  <>
+                    <Stepper
+                      label={`${lname} pool`}
+                      value={Math.max(0, pools.findIndex((p) => p.id === lane.pool) + 1)}
+                      onChange={(v) => patchLane(i, { pool: v <= 0 ? '' : pools[Math.min(pools.length, v) - 1].id })}
+                      min={0}
+                      max={pools.length}
+                      format={(v) => (v === 0 ? 'none, it plays its own loop' : `${pools[v - 1].name}, ${pools[v - 1].loops.length} ${pools[v - 1].loops.length === 1 ? 'loop' : 'loops'}`)}
+                      hint="With a pool the lane plays the pool's loops in turn instead of the loop above. A pool with only one loop plays that loop"
+                    />
+                    {lane.pool !== '' && (
+                      <>
+                        <Stepper
+                          label={`${lname} pool order`}
+                          value={lane.poolMode}
+                          onChange={(v) => patchLane(i, { poolMode: v })}
+                          min={0}
+                          max={POOL_MODE_NAMES.length - 1}
+                          format={(v) => POOL_MODE_NAMES[v]}
+                        />
+                        <Stepper
+                          label={`${lname} pool changes`}
+                          value={Math.max(0, POOL_EVERY_CHOICES.indexOf(lane.poolEvery))}
+                          onChange={(v) => patchLane(i, { poolEvery: POOL_EVERY_CHOICES[Math.max(0, Math.min(POOL_EVERY_CHOICES.length - 1, v))] })}
+                          min={0}
+                          max={POOL_EVERY_CHOICES.length - 1}
+                          format={(v) => (POOL_EVERY_CHOICES[v] === 0 ? 'when a scene starts' : `every ${POOL_EVERY_CHOICES[v]} bars, and when a scene starts`)}
+                          hint="The loop changes on a bar line, where the loop would start over anyway"
+                        />
+                      </>
+                    )}
+                  </>
+                )}
                 {!amb && <Stepper
                   label={`${lname} length`}
                   value={Math.max(0, BAR_CHOICES.indexOf(lane.bars))}

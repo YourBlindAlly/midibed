@@ -65,6 +65,11 @@ final class LoopPlayer {
     var stopAt: Double = 0
     var stopFade: Float = 0.03
     var startFade: Float = 0.008
+    // A pool: the next file is decoded ahead of time (`nextRaw`) and swapped in on the exact sample the lane
+    // restarts (`swapPath` set by `start`), so changing loop leaves no gap.
+    var nextPath = ""
+    var nextRaw: Buf?
+    var swapPath = ""
   }
 
   private var lanes = [Lane](repeating: Lane(), count: LoopPlayer.slots)
@@ -119,6 +124,11 @@ final class LoopPlayer {
       lanes[lane].target = 0
       lanes[lane].startPending = false
       lanes[lane].stopPending = false
+      lanes[lane].swapPath = ""
+      if lanes[lane].nextPath != path {
+        lanes[lane].nextPath = ""
+        lanes[lane].nextRaw = nil
+      }
     }
     os_unfair_lock_unlock(lock)
     if same || path.isEmpty { return }
@@ -130,6 +140,67 @@ final class LoopPlayer {
       self.considerStretch(lane)
       self.onLoaded?(lane)
     }
+  }
+
+  /// Decode `path` in the background as the lane's NEXT file (a pool's next loop) without touching what is
+  /// playing. Asking again for the same file does nothing.
+  func prepare(lane: Int, path: String) {
+    guard lane >= 0, lane < LoopPlayer.slots, !path.isEmpty else { return }
+    os_unfair_lock_lock(lock)
+    let known = lanes[lane].nextPath == path || lanes[lane].path == path
+    if !known {
+      lanes[lane].nextPath = path
+      lanes[lane].nextRaw = nil
+    }
+    os_unfair_lock_unlock(lock)
+    if known { return }
+    loader.async { [weak self] in
+      guard let self = self, let decoded = LoopPlayer.decode(path: path) else { return }
+      os_unfair_lock_lock(self.lock)
+      if self.lanes[lane].nextPath == path { self.lanes[lane].nextRaw = decoded }
+      os_unfair_lock_unlock(self.lock)
+    }
+  }
+
+  /// Is the next file (see `prepare`) decoded and waiting?
+  func nextReady(lane: Int, path: String) -> Bool {
+    guard lane >= 0, lane < LoopPlayer.slots else { return false }
+    os_unfair_lock_lock(lock)
+    defer { os_unfair_lock_unlock(lock) }
+    return lanes[lane].nextPath == path && lanes[lane].nextRaw != nil
+  }
+
+  /// Make the prepared file the lane's file at once and stop the lane (for a pool lane that needs a stretched
+  /// copy: it starts again when the copy is ready). False if the file was not prepared.
+  func swapNow(lane: Int, path: String) -> Bool {
+    guard lane >= 0, lane < LoopPlayer.slots else { return false }
+    os_unfair_lock_lock(lock)
+    defer { os_unfair_lock_unlock(lock) }
+    guard lanes[lane].nextPath == path, lanes[lane].nextRaw != nil else { return false }
+    doSwap(lane, path)
+    lanes[lane].playing = false
+    lanes[lane].gain = 0
+    lanes[lane].target = 0
+    lanes[lane].startPending = false
+    lanes[lane].stopPending = false
+    return true
+  }
+
+  /// The prepared file becomes the lane's file (the lock is held).
+  private func doSwap(_ lane: Int, _ path: String) {
+    guard let nr = lanes[lane].nextRaw, lanes[lane].nextPath == path else { return }
+    lanes[lane].raw = nr
+    lanes[lane].path = path
+    lanes[lane].stretched = nil
+    lanes[lane].stretchedFrames = 0
+    lanes[lane].failedFrames = 0
+    lanes[lane].pendingFrames = 0
+    lanes[lane].wantFrames = nr.frames
+    lanes[lane].nextRaw = nil
+    lanes[lane].nextPath = ""
+    lanes[lane].swapPath = ""
+    lanes[lane].pos = 0
+    lanes[lane].posFrames = 0
   }
 
   /// Can the lane start now? Its file is decoded and, when it needs a stretched copy, the copy is ready too
@@ -173,10 +244,11 @@ final class LoopPlayer {
 
   /// Start from the top. `seconds` is how long the loop's bars last at the current tempo. With `at` (an
   /// engine-clock time, see MidiBedTestSynth.syncClock) the start happens on that exact sample; 0 = now.
-  func start(lane: Int, seconds: Double, repeats: Int = 1, at: Double = 0, fadeIn: Float = 0.008) {
+  func start(lane: Int, seconds: Double, repeats: Int = 1, at: Double = 0, fadeIn: Float = 0.008, swapTo: String = "") {
     guard lane >= 0, lane < LoopPlayer.slots else { return }
     os_unfair_lock_lock(lock)
     if lanes[lane].raw != nil, seconds > 0.05 {
+      lanes[lane].swapPath = swapTo
       lanes[lane].startFade = max(0.008, fadeIn)
       lanes[lane].wantSeconds = seconds
       lanes[lane].wantRepeats = max(1, repeats)
@@ -212,6 +284,8 @@ final class LoopPlayer {
   private func applyCommand(_ lane: Int, _ kind: Int) {
     if kind == 1 {
       lanes[lane].startPending = false
+      if !lanes[lane].swapPath.isEmpty { doSwap(lane, lanes[lane].swapPath) }
+      lanes[lane].swapPath = ""
       guard lanes[lane].raw != nil else { return }
       lanes[lane].pos = 0
       lanes[lane].posFrames = 0

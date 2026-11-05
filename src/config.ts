@@ -268,6 +268,8 @@ export type BedState = {
   playerOn: boolean;
   /** The loop library, as JSON text (the audio files MidiBed has copied in). Global. */
   loopLib: string;
+  /** Loop pools as JSON text (src/pools.ts): named lists of library loops a lane can play in turn. Global. */
+  pools: string;
   /** The Loop player's overall level, percent (loops are loudness-matched first). Global. */
   loopMaster: number;
   /** Marks that the lane levels were reset once when loudness matching arrived (see resetLaneLevels). */
@@ -817,6 +819,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   lanes: defaultLanes(),
   playerOn: true,
   loopLib: '[]',
+  pools: '[]',
   loopMaster: 100,
   loopMatchVersion: 1,
   outputMode: 0,
@@ -1403,7 +1406,7 @@ export function toEngineJson(s: BedState): string {
     filterHold: s.filterHold,
     sceneChangeAt: s.sceneChangeAt,
     // The Loop player layer: off (or another layer soloed) silences every lane.
-    lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster, s.bpm).map((l) => ({ ...l, on: l.on && (s.solo ? s.solo === 'player' : s.playerOn) })),
+    lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster, s.bpm, s.pools).map((l) => ({ ...l, on: l.on && (s.solo ? s.solo === 'player' : s.playerOn) })),
     // "Stay on this scene" sets the automatic move-on (or the end of the piece) aside until the scene changes.
     advance: s.stayHere
       ? { mode: 0, bars: 0, target: -1 }

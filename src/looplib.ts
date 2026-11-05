@@ -8,6 +8,8 @@
  *
  * A file is never committed anywhere: loops live only in the app's own storage on the phone.
  */
+import { parsePools } from './pools';
+
 export const LANE_COUNT = 5;
 /** The last lane is the ambience lane: natural speed, ignores the tempo, never restarts, fades in and out slowly. */
 export const AMBIENCE_LANE = 4;
@@ -51,9 +53,15 @@ export type LaneState = {
   breatheOn: number;
   breatheOff: number;
   breatheChance: number;
+  /** A pool id (see pools.ts) or '' for none: with a pool the lane plays the pool's loops in turn instead of `loop`. */
+  pool: string;
+  /** 0 in order, 1 shuffled with no repeats until all have played */
+  poolMode: number;
+  /** Change loop every this many bars as well as when a scene starts (0 = only when a scene starts). */
+  poolEvery: number;
 };
 
-export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100 };
+export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100, pool: '', poolMode: 0, poolEvery: 0 };
 export const SEMI_RANGE = 12;
 export const defaultLanes = (): LaneState[] => Array.from({ length: LANE_COUNT }, () => ({ ...defaultLane }));
 export const BAR_CHOICES = [-1, 0, 1, 2, 4, 8, 16];
@@ -191,6 +199,8 @@ export const NEAR_BPM = [0, 3, 6, 10];
 // Which instrument a loop is, worked out from its name (the part after ' - ' first, then the whole name, then
 // its folder). The first rule that matches wins, so the more specific ones come first. 'Other' is last.
 const INSTRUMENT_RULES: [string, RegExp][] = [
+  ['Rain stick', /rain ?stick/i],
+  ['Ocean drum', /ocean/i],
   ['Tambourine', /tamb|panderio|pandeiro|riq\b/i],
   ['Shaker', /shak|maraca|canister|caxixi|seed|nuts n bolts|cabasa/i],
   ['Guiro', /guiro/i],
@@ -232,6 +242,21 @@ export function instrumentList(lib: LibraryLoop[]): string[] {
   return found.has('Other') ? [...named, 'Other'] : named;
 }
 
+/**
+ * What kind of sound a loop is: a BED (a long, slow texture such as a rain stick or ocean drum; "bed" in its name
+ * or folder, or longer than 12 seconds; its tempo, if the name has one, is ignored and it is never stretched to
+ * fit), a HIT (a short one-shot with no tempo, such as a bell or a swish) or a RHYTHM loop.
+ */
+export type LoopKind = 'rhythm' | 'bed' | 'hit';
+export const BED_SECONDS = 12;
+export function kindOf(l: Pick<LibraryLoop, 'name' | 'folder' | 'seconds' | 'bpm'>): LoopKind {
+  if (/beds?/i.test(l.name) || /beds?/i.test(l.folder) || l.seconds > BED_SECONDS) return 'bed';
+  if (l.bpm === null) return 'hit';
+  return 'rhythm';
+}
+/** The Kind filter's choices; index 0 leaves the choice to the lane (rhythm loops for lanes 1-4, beds for the ambience lane). */
+export const KIND_NAMES = ['Suited to the lane', 'Rhythm loops', 'Beds', 'Hits and effects', 'Everything'];
+
 export type LoopFilter = {
   /** '' = every folder. */
   folder: string;
@@ -243,6 +268,8 @@ export type LoopFilter = {
   text: string;
   /** an instrument from instrumentList (see instrumentOf); '' or left out = any */
   instrument?: string;
+  /** a LoopKind; '' or left out = any */
+  kind?: string;
 };
 
 /**
@@ -258,7 +285,10 @@ export function filterLoops(lib: LibraryLoop[], f: LoopFilter): LibraryLoop[] {
   return lib.filter((l) => {
     if (f.folder && l.folder !== f.folder) return false;
     if (f.instrument && instrumentOf(l.name, l.folder) !== f.instrument) return false;
-    if (range > 0 && (l.bpm === null || Math.abs(l.bpm - f.bpm) > range)) return false;
+    const kind = kindOf(l);
+    if (f.kind && kind !== f.kind) return false;
+    // A bed's tempo does not matter, so the tempo filter leaves beds alone.
+    if (range > 0 && kind !== 'bed' && (l.bpm === null || Math.abs(l.bpm - f.bpm) > range)) return false;
     if (words.length > 0) {
       const hay = `${l.name} ${l.folder}`.toLowerCase();
       if (!words.every((w) => hay.includes(w))) return false;
@@ -308,25 +338,58 @@ export function matchGain(peak?: number, rms?: number): number {
   return Math.max(0.02, Math.min(4, g));
 }
 
+export type EngineLane = {
+  path: string;
+  bars: number;
+  repeats: number;
+  level: number;
+  pan: number;
+  on: boolean;
+  follow: boolean;
+  semis: number;
+  ambience: boolean;
+  seconds: number;
+  breathe: { mode: number; onBars: number; offBars: number; chance: number };
+  /** With a pool of two or more loops: each loop as the lane would play it. The lane's own fields describe the first. */
+  pool?: { path: string; bars: number; repeats: number; level: number; seconds: number }[];
+  poolMode?: number;
+  poolEvery?: number;
+};
+
 /** The lanes as the engine takes them. `master` is the Loop player level in percent. */
 export function lanesForEngine(
   lanes: LaneState[],
   libJson: string,
   master = 100,
   journeyBpm = 0,
-): { path: string; bars: number; repeats: number; level: number; pan: number; on: boolean; follow: boolean; semis: number; ambience: boolean; seconds: number; breathe: { mode: number; onBars: number; offBars: number; chance: number } }[] {
+  poolsJson = '[]',
+): EngineLane[] {
   const lib = parseLibrary(libJson);
+  const pools = parsePools(poolsJson);
   return Array.from({ length: LANE_COUNT }, (_, i) => {
     const lane = lanes[i] ?? defaultLane;
-    const loop = lib.find((l) => l.id === lane.loop);
-    const path = loop ? loopPath(loop.file) : '';
-    const fit = loop && lane.bars < 0 && journeyBpm > 0 ? bestFit(loop, journeyBpm, lane.follow === false) : null;
-    const bars = lane.bars > 0 ? lane.bars : fit ? fit.bars : loop ? loop.bars : 4;
-    const repeats = lane.bars > 0 ? 1 : fit ? fit.repeats : loop ? loop.repeats : 1;
-    const gain = loop ? matchGain(loop.peak, loop.rms) : 1;
-    const level = (Math.max(0, Math.min(150, lane.level)) / 100) * (Math.max(0, Math.min(150, master)) / 100) * gain;
     const amb = i === AMBIENCE_LANE;
-    return { path, bars, repeats, level, ambience: amb, seconds: loop ? loop.seconds : 0, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', follow: amb ? true : lane.follow !== false,
+    const describe = (loop: LibraryLoop | undefined) => {
+      const path = loop ? loopPath(loop.file) : '';
+      const fit = loop && lane.bars < 0 && journeyBpm > 0 ? bestFit(loop, journeyBpm, lane.follow === false) : null;
+      const bars = lane.bars > 0 ? lane.bars : fit ? fit.bars : loop ? loop.bars : 4;
+      const repeats = lane.bars > 0 ? 1 : fit ? fit.repeats : loop ? loop.repeats : 1;
+      const gain = loop ? matchGain(loop.peak, loop.rms) : 1;
+      const level = (Math.max(0, Math.min(150, lane.level)) / 100) * (Math.max(0, Math.min(150, master)) / 100) * gain;
+      return { path, bars, repeats, level, seconds: loop ? loop.seconds : 0 };
+    };
+    // A pool replaces the lane's single loop (the ambience lane does not use pools yet).
+    const pool = !amb && lane.pool ? pools.find((p) => p.id === lane.pool) : undefined;
+    const members = pool
+      ? pool.loops
+          .map((id) => lib.find((l) => l.id === id))
+          .filter((l): l is LibraryLoop => !!l)
+          .map((l) => describe(l))
+          .filter((d) => d.path !== '')
+      : [];
+    const first = members.length > 0 ? members[0] : describe(lib.find((l) => l.id === lane.loop));
+    const { path, bars, repeats, level, seconds } = first;
+    return { path, bars, repeats, level, ambience: amb, seconds, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', follow: amb ? true : lane.follow !== false,
       semis: amb ? 0 : Math.max(-SEMI_RANGE, Math.min(SEMI_RANGE, Math.round(lane.semis || 0))),
       breathe: {
         mode: Math.max(0, Math.min(3, Math.round(lane.breathe || 0))),
@@ -334,6 +397,7 @@ export function lanesForEngine(
         offBars: Math.max(1, Math.min(64, Math.round(lane.breatheOff || 4))),
         chance: Math.max(1, Math.min(100, Math.round(lane.breatheChance || 100))),
       },
+      ...(members.length > 1 ? { pool: members, poolMode: lane.poolMode === 1 ? 1 : 0, poolEvery: Math.max(0, Math.min(128, Math.round(lane.poolEvery || 0))) } : {}),
     };
   });
 }
