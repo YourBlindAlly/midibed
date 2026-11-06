@@ -1815,12 +1815,12 @@ export default function App() {
                       {idx < 0 ? (
                         <>
                           <View style={styles.nameBox}>
-                            <Text style={styles.note}>Favorite name (optional)</Text>
+                            <Text style={styles.note} accessibilityElementsHidden importantForAccessibility="no">Favorite name (optional)</Text>
                             <TextInput
                               style={styles.nameInput}
                               value={favNames[i] ?? ''}
                               onChangeText={(v) => setFavNames((n) => ({ ...n, [i]: v }))}
-                              accessibilityLabel={`${sl.name} favorite name`}
+                              accessibilityLabel={`${sl.name} favorite name, optional`}
                               accessibilityHint="Optional. Type a name, then use the add button"
                               maxLength={40}
                               autoCorrect={false}
@@ -1968,7 +1968,7 @@ export default function App() {
               hint="Swipe up or down to choose a journey"
             />
             <View accessible={false} style={styles.nameBox}>
-              <Text style={styles.note}>Journey name</Text>
+              <Text style={styles.note} accessibilityElementsHidden importantForAccessibility="no">Journey name</Text>
               <TextInput
                 style={styles.nameInput}
                 value={state.journeyName}
@@ -2599,7 +2599,7 @@ export default function App() {
             />
             {grooveMemory !== null && <ActionButton label="Undo the groove" onPress={undoKitGroove} />}
             <View style={styles.nameBox}>
-              <Text style={styles.note}>Name for my groove</Text>
+              <Text style={styles.note} accessibilityElementsHidden importantForAccessibility="no">Name for my groove</Text>
               <TextInput
                 style={styles.nameInput}
                 value={grooveName}
@@ -2720,7 +2720,7 @@ export default function App() {
                   <ActionButton label={`${d.name} back to the plain pattern`} hint="Throws away your step edits and goes back to the rhythm or hits and steps above" onPress={() => patchDrum(i, { custom: '' })} />
                 )}
                 <View accessible={false} style={styles.nameBox}>
-                  <Text style={styles.note}>Name for saving this pattern as a rhythm</Text>
+                  <Text style={styles.note} accessibilityElementsHidden importantForAccessibility="no">Name for saving this pattern as a rhythm</Text>
                   <TextInput
                     style={styles.nameInput}
                     value={myRhythmName}
@@ -3409,7 +3409,7 @@ export default function App() {
               hint="Rhythm loops have a tempo. Beds are long slow textures such as rain stick or ocean drum; they play at their own speed and are never stretched to the tempo. Hits and effects are short one-shots. Suited to the lane shows rhythm loops in lanes 1 to 4 and beds in the ambience lane"
             />
             <View accessible={false} style={styles.nameBox}>
-              <Text style={styles.note}>Name contains</Text>
+              <Text style={styles.note} accessibilityElementsHidden importantForAccessibility="no">Name contains</Text>
               <TextInput
                 style={styles.nameInput}
                 value={loopText}
@@ -3502,7 +3502,7 @@ export default function App() {
                 {pool && (
                   <>
                     <View accessible={false} style={styles.nameBox}>
-                      <Text style={styles.note}>Pool name</Text>
+                      <Text style={styles.note} accessibilityElementsHidden importantForAccessibility="no">Pool name</Text>
                       <TextInput
                         style={styles.nameInput}
                         value={pool.name}
@@ -3776,12 +3776,12 @@ export default function App() {
             </Note>
             <Stepper label="Swing" value={state.swing} onChange={(v) => patch({ swing: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
             <View accessible={false} style={styles.nameBox}>
-              <Text style={styles.note}>Scene name (optional)</Text>
+              <Text style={styles.note} accessibilityElementsHidden importantForAccessibility="no">Scene name (optional)</Text>
               <TextInput
                 style={styles.nameInput}
                 value={state.sceneName}
                 onChangeText={(v) => setState((s) => renameScene(s, v))}
-                accessibilityLabel="Scene name"
+                accessibilityLabel="Scene name, optional"
                 accessibilityHint="Double tap to give this scene a name, or leave it empty"
                 maxLength={30}
                 autoCorrect={false}
