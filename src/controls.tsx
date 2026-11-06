@@ -36,6 +36,8 @@ type StepperProps = {
   step?: number;
   /** Optional bigger jump, exposed as extra VoiceOver custom actions. */
   bigStep?: number;
+  /** Past the last value comes the first, and before the first comes the last (for long lists). */
+  wrap?: boolean;
   /** Text spoken/shown for the value, e.g. "D2" instead of "38". */
   format?: (v: number) => string;
   hint?: string;
@@ -47,9 +49,9 @@ type StepperProps = {
  * a Text, because on-device a Text with these props did not fire the actions.
  * The visible buttons are hidden from VoiceOver so each control is ONE stop.
  */
-export function Stepper({ label, value, onChange, min, max, step = 1, bigStep, format, hint }: StepperProps) {
+export function Stepper({ label, value, onChange, min, max, step = 1, bigStep, wrap, format, hint }: StepperProps) {
   const { hints } = useContext(HelpContext);
-  const clamp = (v: number) => Math.max(min, Math.min(max, v));
+  const clamp = (v: number) => (wrap ? (v > max ? min : v < min ? max : v) : Math.max(min, Math.min(max, v)));
   const text = format ? format(value) : String(value);
 
   const actions = [

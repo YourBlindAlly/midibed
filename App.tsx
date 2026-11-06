@@ -4296,6 +4296,8 @@ export default function App() {
               }}
               min={0}
               max={MIDI_ACTIONS.length - 1}
+              wrap
+              bigStep={10}
               format={(v) => `${MIDI_ACTIONS[v].label}, ${describeTrigger(parseMidiMap(state.midiControl.map)[MIDI_ACTIONS[v].id])}`}
               hint="Choose an action, then press Learn and press a button on the controller"
             />
@@ -4326,6 +4328,8 @@ export default function App() {
               }
               min={0}
               max={MIDI_ACTIONS.length}
+              wrap
+              bigStep={10}
               format={(v) => (v === 0 ? 'nothing extra' : MIDI_ACTIONS[v - 1].label)}
               hint="For the action chosen above. The first press runs at once; a quick second press does this instead of repeating it. If the first press was an on or off switch, it is put back first"
             />
@@ -4340,6 +4344,8 @@ export default function App() {
               }
               min={0}
               max={MIDI_ACTIONS.length}
+              wrap
+              bigStep={10}
               format={(v) => (v === 0 ? 'nothing extra' : MIDI_ACTIONS[v - 1].label)}
               hint="For the action chosen above. Needs the pedal's button in Momentary mode, so it sends a message when you let go. The button then waits to see which you meant: let go quickly and the first action runs as you let go, keep holding and only this runs"
             />
