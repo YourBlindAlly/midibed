@@ -375,6 +375,8 @@ export type BedState = {
   frozen: boolean;
   /** Stay on this scene: its automatic move-on (or end) is set aside until you change scene. Never saved as on. */
   stayHere: boolean;
+  /** Hold this chord: the chord loop (pad, bass, keys) stays on the chord that is sounding, and the scene's countdown waits. Never saved as on. */
+  chordHold: boolean;
   /** Per scene: which of those sounds this scene plays. */
   transitionUse: TransitionUse;
   /** Level-scale version of the saved transition levels (see NOISE_VERSION). */
@@ -941,6 +943,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   advance: defaultAdvance,
   frozen: false,
   stayHere: false,
+  chordHold: false,
   transitionUse: defaultTransitionUse,
   noiseVersion: NOISE_VERSION,
   transitionMinEighths: 1,
@@ -1396,6 +1399,7 @@ export function migrateState(rawInput0: unknown): BedState {
     keyOffset,
     frozen: false, // never come back frozen
     stayHere: false, // nor staying
+    chordHold: false, // nor holding a chord
     filterHold: false, // nor held
     outputMode: clampOutputMode((merged as { outputMode?: number }).outputMode ?? 0),
     chordLead: Math.max(0, Math.min(1000, Math.round(Number((merged as { chordLead?: number }).chordLead) || 0))),

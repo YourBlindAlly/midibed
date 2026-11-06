@@ -22,6 +22,7 @@ type Native = {
   setPadVoice(json: string): void;
   setChordLead(ms: number): void;
   setBassLead(ms: number): void;
+  setChordHold(on: boolean): void;
   setFilter(json: string): void;
   setOutputMode(mode: number): void;
   previewLoop(path: string, seconds: number, level: number): void;
@@ -51,6 +52,7 @@ type Native = {
   addListener(name: 'onEnded', cb: (e: Record<string, never>) => void): unknown;
   addListener(name: 'onRecording', cb: (e: RecordingPayload) => void): unknown;
   addListener(name: 'onMidiDevice', cb: (e: MidiDevicePayload) => void): unknown;
+  addListener(name: 'onChordHold', cb: (e: { on: boolean }) => void): unknown;
 };
 
 let native: Native | null = null;
@@ -162,6 +164,23 @@ export function onRecording(cb: (e: RecordingPayload) => void): () => void {
   };
 }
 
+const holdSubscribers = new Set<(e: { on: boolean }) => void>();
+let holdHooked = false;
+
+/** The engine started or ended a chord hold (it ends by itself when a scene starts or playback stops). */
+export function onChordHold(cb: (e: { on: boolean }) => void): () => void {
+  if (native && !holdHooked) {
+    holdHooked = true;
+    native.addListener('onChordHold', (e) => {
+      holdSubscribers.forEach((fn) => fn(e));
+    });
+  }
+  holdSubscribers.add(cb);
+  return () => {
+    holdSubscribers.delete(cb);
+  };
+}
+
 const deviceSubscribers = new Set<(e: MidiDevicePayload) => void>();
 let deviceHooked = false;
 
@@ -222,6 +241,7 @@ export const engine = {
   setChordLead: (ms: number) => native?.setChordLead(ms),
   /** The same for a held bass drone that follows the chords. */
   setBassLead: (ms: number) => native?.setBassLead(ms),
+  setChordHold: (on: boolean) => native?.setChordHold(on),
   /** The built-in sound's filter presets (see src/filters.ts). */
   setFilter: (json: string) => native?.setFilter(json),
   /** How the built-in sound leaves the phone (see src/outputmode.ts). */

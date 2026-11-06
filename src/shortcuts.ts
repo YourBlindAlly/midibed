@@ -25,6 +25,7 @@ export type ShortcutAction =
   | { type: 'sceneStart'; index: number }
   | { type: 'stopOnly' }
   | { type: 'stay' }
+  | { type: 'chordHold' }
   | { type: 'lane'; index: number }
   | { type: 'layer'; layer: Layer }
   | { type: 'solo'; layer: Layer }

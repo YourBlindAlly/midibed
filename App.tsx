@@ -83,7 +83,7 @@ import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, To
 import { describePattern, patternText } from './src/euclid';
 import { RHYTHMS, rhythmDescribe, rhythmText } from './src/rhythms';
 import { STEP_STATE_NAMES, StepState, addUserRhythm, countOf, describeText, patternSteps, patternString, rotatedText, stepName, stepStateAt, withStep } from './src/stepedit';
-import { engine, hasNativeEngine, onBeat, onEnded, onEnding, onMidiDevice, onMidiIn, onMotion, onRecording, onScene, testSweep } from './src/engine';
+import { engine, hasNativeEngine, onBeat, onEnded, onChordHold, onEnding, onMidiDevice, onMidiIn, onMotion, onRecording, onScene, testSweep } from './src/engine';
 import {
   CONTOUR_NAMES,
   DANCER_MODE_NAMES,
@@ -349,6 +349,14 @@ export default function App() {
     });
   }, []);
 
+  // The engine ends a hold by itself when a scene starts or playback stops; keep the switch in step.
+  useEffect(() => {
+    return onChordHold((e) => {
+      setState((s) => (s.chordHold === e.on ? s : { ...s, chordHold: e.on }));
+      announceLater(e.on ? 'Holding this chord' : 'Chords moving on', 100);
+    });
+  }, []);
+
   useEffect(() => {
     const offEnding = onEnding((e) => setEndingBars(e.reason === 'end' ? 0 : e.barsLeft));
     const offEnded = onEnded(() => {
@@ -418,7 +426,7 @@ export default function App() {
 
   const resetAfterStop = () => {
     setPlaying(false);
-    setState((s) => (s.stayHere ? { ...s, stayHere: false } : s));
+    setState((s) => (s.stayHere || s.chordHold ? { ...s, stayHere: false, chordHold: false } : s));
     setPosition('1.1');
     motionRef.current = { bass: false, pad: false, drums: false };
     setMotionNow(motionRef.current);
@@ -780,7 +788,9 @@ export default function App() {
       : state.advance.mode === 3
         ? -1
         : pickTarget(state.advance, state.activeScene, state.scenes.length, 0);
-  const advanceSentence = state.stayHere
+  const advanceSentence = state.chordHold
+    ? 'Holding this chord. The scene waits and carries on when you let go'
+    : state.stayHere
     ? 'Staying on this scene until you change it. Long press its pedal button again to let it move on'
     : describeAdvance(
     state.advance,
@@ -887,6 +897,10 @@ export default function App() {
     const t = setTimeout(() => engine.setChordLead(state.chordLead), 80);
     return () => clearTimeout(t);
   }, [state.chordLead, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    engine.setChordHold(state.chordHold);
+  }, [state.chordHold, ready]);
   useEffect(() => {
     if (!ready) return;
     const t = setTimeout(() => engine.setBassLead(state.bassLead), 80);
@@ -1037,6 +1051,10 @@ export default function App() {
         break;
       case 'stay':
         if (playing) toggleStay();
+        break;
+      case 'chordHold':
+        // The engine announces when the hold really starts or ends (on a bar line).
+        if (playing) patch({ chordHold: !state.chordHold });
         break;
       case 'solo':
         setSolo(state.solo === action.layer ? null : action.layer);
@@ -1907,6 +1925,12 @@ export default function App() {
               value={state.frozen}
               onChange={(v) => patch({ frozen: v })}
               hint="Holds the bed as it is: the scene stops moving on by itself, and the breathing and the recurring sound pause. The chords and the filters keep going. Switch it off to carry on."
+            />
+            <Toggle
+              label="Hold this chord"
+              value={state.chordHold}
+              onChange={(v) => playing && patch({ chordHold: v })}
+              hint="From the next bar line the pad, the bass and the keys stay on the chord that is sounding, and the scene's countdown waits. Everything else carries on. Switch it off and the chords go on from where they were. Ends by itself when a scene starts."
             />
             <Text style={styles.note}>
               {queuedScene !== null

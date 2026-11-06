@@ -69,6 +69,8 @@ export const MIDI_ACTIONS: MidiActionDef[] = [
   { id: 'stopOnly', label: 'Stop with the chosen ending (does nothing when stopped)', action: { type: 'stopOnly' } },
   { id: 'stay', label: 'Stay on this scene on or off', action: { type: 'stay' } },
   { id: 'lane5', label: 'Ambience lane on or off', action: { type: 'lane', index: 4 } as ShortcutAction },
+  // Hold the chord that is sounding (pad, bass, keys) until you press it again. Made for a long press.
+  { id: 'chordHold', label: 'Hold this chord on or off', action: { type: 'chordHold' } },
 ];
 
 export function triggerKey(m: Pick<MidiMessage, 'kind' | 'channel' | 'number'>): string {
@@ -114,7 +116,7 @@ export function isPress(m: MidiMessage): boolean {
 
 /** Which action ids are an on/off toggle, so a double press can put the first press back before doing its own thing. */
 export function isToggleAction(a: ShortcutAction): boolean {
-  return a.type === 'freeze' || a.type === 'layer' || a.type === 'solo' || a.type === 'filterHold' || a.type === 'lane' || a.type === 'stay';
+  return a.type === 'freeze' || a.type === 'layer' || a.type === 'solo' || a.type === 'filterHold' || a.type === 'lane' || a.type === 'stay' || a.type === 'chordHold';
 }
 
 export function parseDoubleMap(json: string): Record<string, string> {

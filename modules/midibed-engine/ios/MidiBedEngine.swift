@@ -602,6 +602,17 @@ final class MidiBedEngine {
   private var bassLeadMs: Double = 0
   private var earlyPadDone = false
   private var earlyBassDone = false
+  /// "Hold this chord": the chord loop stops moving on, so the pad, the bass, the keys (everything that follows
+  /// chordIndex) stay on the chord that is sounding. `chordHoldWanted` is what the player asked for; `chordHeld` is
+  /// that request latched on a bar line (a hold starts and ends only on bar lines, so the chord changes keep
+  /// landing on the bar). `chordHoldTicks` is the time spent holding: the chord loop is counted from
+  /// `chordStartTick` = scene start + held time, so it picks up exactly where it left off. While held, the
+  /// auto-advance countdown waits like Freeze (but Freeze itself, breathing, drums and loops are not touched).
+  private var chordHoldWanted = false
+  private var chordHeld = false
+  private var chordHoldTicks = 0
+  var onChordHold: (([String: Any?]) -> Void)?
+  private var chordStartTick: Int { padStartTick + chordHoldTicks }
 
   // Breathing state: alt = the layer is currently in its alternate state.
   private struct RuleRuntime {
@@ -942,6 +953,55 @@ final class MidiBedEngine {
   /// The built-in effects (UglyFX): the settings as one list of numbers in `UglyFXParam` order.
   /// Kept out of the main configuration so editing a knob never re-queues a scene.
   /// The chord pad's sound shape (see src/padvoice.ts for the order of the values).
+  /// The player asked to hold (or let go of) the current chord. Takes effect on the next bar line.
+  func setChordHold(_ on: Bool) {
+    queue.async {
+      guard self.running || !on else { return }
+      self.chordHoldWanted = on
+      if !self.running { self.chordHeld = false }
+    }
+  }
+
+  /// On a bar line: make the request real. When a hold starts and the pad or bass had already begun the next chord a
+  /// little early, put the held chord back (common tones stay, the early notes are released).
+  private func latchChordHold(at time: Double) {
+    guard let cfg = config else { return }
+    let was = chordHeld
+    chordHeld = chordHoldWanted
+    if chordHeld, !was {
+      if earlyPadDone {
+        earlyPadDone = false
+        let padList = activePadChords(cfg)
+        if padOn(cfg), !padList.isEmpty {
+          playPad(padList[chordIndex % padList.count], pad: cfg.pad, at: time, retrigger: false)
+        }
+      }
+      if earlyBassDone {
+        earlyBassDone = false
+        if droneOn(cfg), activeDroneChords(cfg).count > 1, !heldDrone.isEmpty {
+          reconcileDrone(keepLevel: true)
+        }
+      }
+      let cb = onChordHold
+      DispatchQueue.main.async { cb?(["on": true]) }
+    } else if !chordHeld, was {
+      let cb = onChordHold
+      DispatchQueue.main.async { cb?(["on": false]) }
+    }
+  }
+
+  /// A hold ends for good (a new scene, or Stop).
+  private func clearChordHold(tellUI: Bool) {
+    let had = chordHeld || chordHoldWanted
+    chordHeld = false
+    chordHoldWanted = false
+    chordHoldTicks = 0
+    if had, tellUI {
+      let cb = onChordHold
+      DispatchQueue.main.async { cb?(["on": false]) }
+    }
+  }
+
   func setChordLead(ms: Double) {
     queue.async { self.chordLeadMs = max(0, min(1000, ms.isFinite ? ms : 0)) }
   }
@@ -1002,6 +1062,8 @@ final class MidiBedEngine {
       self.chordIndex = 0
       self.earlyPadDone = false
       self.earlyBassDone = false
+      self.chordHeld = false
+      self.chordHoldTicks = 0
       self.pendingConfig = nil
       self.loopsPlaying = false
       self.lastLoopSelect = []
@@ -1186,6 +1248,7 @@ final class MidiBedEngine {
       self.endHoldBeats = 0
       self.ended = false
       self.running = false
+      self.clearChordHold(tellUI: true)
       self.pendingLoop.removeAll()
       self.synth.loops.stopAll(fade: soft ? 0.25 : 0.03)
       for i in 0..<LoopPlayer.laneCount { self.laneActive[i] = false }
@@ -1359,9 +1422,13 @@ final class MidiBedEngine {
       eventTime = nextTickTime
       // A queued scene switch lands exactly on a bar line, and the pad's chord
       // loop restarts from its first chord there.
+      if tickIndex % barTicks == 0 { latchChordHold(at: nextTickTime) }
+      if chordHeld { chordHoldTicks += 1 }
       if tickIndex % barTicks == 0 { stepAdvance(atTick: tickIndex) }
       if tickIndex % barTicks == 0, tickIndex >= pendingLandTick, let p = pendingConfig {
         pendingConfig = nil
+        // A new scene starts on its first chord: the hold ends.
+        clearChordHold(tellUI: true)
         // Restart the chord loop first, so installing the new settings starts the
         // drone on chord 1 straight away instead of on the old position.
         chordIndex = 0
@@ -1460,14 +1527,14 @@ final class MidiBedEngine {
     // Common tones are left sounding, never retriggered, so changes glide. Nothing
     // here is rhythmic: these are sustained notes.
     let chordTicks = barTicks * max(1, cfg.harmony.barsPerChord)
-    let rel = tick - padStartTick
+    let rel = tick - chordStartTick
     // Early start: a little before the bar line, start the coming chord on the pad and on a held bass that follows the
     // chords. Not when a scene change is waiting or the scene is on its last bar (the bar line is then about to install
     // other settings), and never closer than half a chord to the previous change.
     let padLeadTicks = min(chordTicks / 2, max(0, Int(((chordLeadMs / 1000) / tickDur).rounded())))
     let bassLeadTicks = min(chordTicks / 2, max(0, Int(((bassLeadMs / 1000) / tickDur).rounded())))
     let earlyAllowed = rel >= 0 && cfg.harmony.count > 1 && pendingConfig == nil
-      && !(cfg.advance.mode > 0 && advanceBarsLeft == 1)
+      && !(cfg.advance.mode > 0 && advanceBarsLeft == 1) && !chordHoldWanted && !chordHeld
     if padLeadTicks > 0, earlyAllowed, (rel + padLeadTicks) % chordTicks == 0 {
       let upcoming = ((rel + padLeadTicks) / chordTicks) % max(1, cfg.harmony.count)
       let padList = activePadChords(cfg)
@@ -1483,7 +1550,7 @@ final class MidiBedEngine {
       }
       earlyBassDone = true
     }
-    if rel >= 0, rel % chordTicks == 0 {
+    if rel >= 0, rel % chordTicks == 0, !chordHeld {
       chordIndex = (rel / chordTicks) % max(1, cfg.harmony.count)
       if earlyPadDone && rel > 0 {
         earlyPadDone = false // already started a little early
@@ -1864,9 +1931,9 @@ final class MidiBedEngine {
       let progression = { () -> Int in
         let chordTicks = barTicks * max(1, cfg.harmony.barsPerChord)
         let loop = chordTicks * max(1, cfg.harmony.count)
-        let rel = firstBar - self.padStartTick
+        let rel = firstBar - self.chordStartTick
         let n = max(1, (rel + loop - 1) / loop)
-        return self.padStartTick + n * loop
+        return self.chordStartTick + n * loop
       }
       switch plan.style {
       case 2:
@@ -2272,9 +2339,9 @@ final class MidiBedEngine {
     func progression() -> Int {
       let chordTicks = barTicks * max(1, cfg.harmony.barsPerChord)
       let loop = chordTicks * max(1, cfg.harmony.count)
-      let rel = first - padStartTick
+      let rel = first - chordStartTick
       if rel <= 0 { return first }
-      return padStartTick + ((rel + loop - 1) / loop) * loop
+      return chordStartTick + ((rel + loop - 1) / loop) * loop
     }
     switch cfg.sceneChangeAt {
     case 1:
@@ -2453,7 +2520,7 @@ final class MidiBedEngine {
     }
     guard tick - padStartTick > 0, pendingConfig == nil else { return }
     var left = advanceBarsLeft <= 0 ? bars : min(advanceBarsLeft, bars)
-    if cfg.frozen {
+    if cfg.frozen || chordHeld {
       // a frozen scene does not run out, so neither does the ending it set up
       if endFromAdvance, endTick >= 0 { endTick += ticksPerBeat * beatsPerBar }
       advanceBarsLeft = left

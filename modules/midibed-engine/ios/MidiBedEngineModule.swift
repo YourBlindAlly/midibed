@@ -8,7 +8,7 @@ public class MidiBedEngineModule: Module {
   public func definition() -> ModuleDefinition {
     Name("MidiBedEngine")
 
-    Events("onBeat", "onMotion", "onScene", "onMidiIn", "onEnding", "onEnded", "onRecording", "onMidiDevice")
+    Events("onBeat", "onMotion", "onScene", "onMidiIn", "onEnding", "onEnded", "onRecording", "onMidiDevice", "onChordHold")
 
     // The screen-wide container that receives VoiceOver's three-finger page swipe.
     View(MidiBedPagerView.self) {
@@ -40,6 +40,9 @@ public class MidiBedEngineModule: Module {
       }
       self.engine.onMidiDevice = { [weak self] body in
         self?.sendEvent("onMidiDevice", body)
+      }
+      self.engine.onChordHold = { [weak self] body in
+        self?.sendEvent("onChordHold", body)
       }
     }
 
@@ -118,6 +121,10 @@ public class MidiBedEngineModule: Module {
 
     Function("setPadVoice") { (json: String) in
       self.engine.setPadVoice(json: json)
+    }
+
+    Function("setChordHold") { (on: Bool) in
+      self.engine.setChordHold(on)
     }
 
     Function("setChordLead") { (ms: Double) in
