@@ -1890,10 +1890,11 @@ export default function App() {
             <Text style={styles.playText}>{playing ? (endingBars !== null ? 'Stop now' : 'Stop') : 'Play'}</Text>
           </Pressable>
 
-          {/* Fixed label: the value changes every beat and must not make
-              VoiceOver re-announce it. */}
-          <View accessible accessibilityLabel="Bar and beat position" style={styles.positionBox}>
-            <Text style={styles.position}>{position}</Text>
+          {/* The journey that is loaded, read as one stop. The bar and beat counter is still drawn for people who look
+              (it changes every beat, so VoiceOver skips it). */}
+          <View accessible accessibilityLabel="Journey" accessibilityValue={{ text: state.journeyName }} style={styles.positionBox}>
+            <Text style={styles.note}>{state.journeyName}</Text>
+            <Text style={styles.position} accessibilityElementsHidden importantForAccessibility="no">{position}</Text>
           </View>
           {playing && endingBars !== null && endingBars > 0 && (
             <View accessible accessibilityLabel="Ending" accessibilityValue={{ text: barsLeftText(endingBars) }}>
