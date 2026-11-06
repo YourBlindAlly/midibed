@@ -21,6 +21,7 @@ type Native = {
   setKeysVoice(json: string): void;
   setPadVoice(json: string): void;
   setChordLead(ms: number): void;
+  setBassLead(ms: number): void;
   setFilter(json: string): void;
   setOutputMode(mode: number): void;
   previewLoop(path: string, seconds: number, level: number): void;
@@ -217,8 +218,10 @@ export const engine = {
   setKeysVoice: (json: string) => native?.setKeysVoice(json),
   /** The chord pad's wave, detune, drift and flange (see src/padvoice.ts). */
   setPadVoice: (json: string) => native?.setPadVoice(json),
-  /** How many milliseconds before the bar line the pad and a following bass start each new chord. */
+  /** How many milliseconds before the bar line the chord pad starts each new chord. */
   setChordLead: (ms: number) => native?.setChordLead(ms),
+  /** The same for a held bass drone that follows the chords. */
+  setBassLead: (ms: number) => native?.setBassLead(ms),
   /** The built-in sound's filter presets (see src/filters.ts). */
   setFilter: (json: string) => native?.setFilter(json),
   /** How the built-in sound leaves the phone (see src/outputmode.ts). */

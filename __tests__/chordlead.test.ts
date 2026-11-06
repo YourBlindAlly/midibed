@@ -16,6 +16,17 @@ describe('chord changes that start early, and the pad fade times', () => {
     expect(migrateState(old).chordLead).toBe(0);
   });
 
+  it('has its own bass setting, off by default, kept when saved and clamped', () => {
+    expect(defaultState.bassLead).toBe(0);
+    expect(migrateState({ ...defaultState, bassLead: 120 }).bassLead).toBe(120);
+    expect(migrateState({ ...defaultState, bassLead: 5000 }).bassLead).toBe(1000);
+    const old: any = { ...defaultState, chordLead: 200 };
+    delete old.bassLead;
+    const m = migrateState(old);
+    expect(m.bassLead).toBe(0);
+    expect(m.chordLead).toBe(200);
+  });
+
   it('keeps the pad swell at the original 900 and 1600 ms, and a preset does not change the times you chose', () => {
     expect(defaultPadVoice.fadeIn).toBe(900);
     expect(defaultPadVoice.fadeOut).toBe(1600);
@@ -35,7 +46,10 @@ describe('chord changes that start early, and the pad fade times', () => {
     const engine = swift('MidiBedEngine.swift');
     expect(engine).toContain('func setChordLead(');
     expect(engine).toContain('reconcileDrone(keepLevel: true, chord: upcoming)');
-    expect(engine).toContain('earlyChordDone');
+    expect(engine).toContain('earlyPadDone');
+    expect(engine).toContain('earlyBassDone');
+    expect(engine).toContain('func setBassLead(');
     expect(swift('MidiBedEngineModule.swift')).toContain('Function("setChordLead")');
+    expect(swift('MidiBedEngineModule.swift')).toContain('Function("setBassLead")');
   });
 });

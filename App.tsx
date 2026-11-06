@@ -886,6 +886,11 @@ export default function App() {
     const t = setTimeout(() => engine.setChordLead(state.chordLead), 80);
     return () => clearTimeout(t);
   }, [state.chordLead, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setBassLead(state.bassLead), 80);
+    return () => clearTimeout(t);
+  }, [state.bassLead, ready]);
 
   // The live link to a recording program: send the settings whenever they change.
   const networkJsonText = networkJson(state.network);
@@ -2970,7 +2975,7 @@ export default function App() {
                 <Stepper label="Pad fade out" value={state.fade.padOut} onChange={(v) => patchFade({ padOut: v })} min={0} max={300} step={5} bigStep={50} format={fadeText} />
               </>
             )}
-            {(part === 'pad' || part === 'bass') && (
+            {part === 'pad' && (
               <Stepper
                 label="Chord changes start early"
                 value={state.chordLead}
@@ -2980,7 +2985,20 @@ export default function App() {
                 step={10}
                 bigStep={100}
                 format={(v) => (v === 0 ? 'exactly on the bar line' : `${v} milliseconds before the bar line`)}
-                hint="The chord pad, and a bass drone that follows the chords, start each new chord this long before the bar line, so a slowly swelling sound is at full strength on the beat. Applies to both. Zero is exactly on the bar line."
+                hint="The chord pad starts each new chord this long before the bar line, so a slowly swelling sound is at full strength on the beat. The bass has its own setting. Zero is exactly on the bar line."
+              />
+            )}
+            {part === 'bass' && (
+              <Stepper
+                label="Bass chord changes start early"
+                value={state.bassLead}
+                onChange={(v) => patch({ bassLead: v })}
+                min={0}
+                max={1000}
+                step={10}
+                bigStep={100}
+                format={(v) => (v === 0 ? 'exactly on the bar line' : `${v} milliseconds before the bar line`)}
+                hint="A bass drone that follows the chords starts each new chord this long before the bar line. Only a held bass; a rhythmic bass stays on the beat. The chord pad has its own setting. Zero is exactly on the bar line."
               />
             )}
             {part === 'drums' && (

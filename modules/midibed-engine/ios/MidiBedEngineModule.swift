@@ -124,6 +124,10 @@ public class MidiBedEngineModule: Module {
       self.engine.setChordLead(ms: ms)
     }
 
+    Function("setBassLead") { (ms: Double) in
+      self.engine.setBassLead(ms: ms)
+    }
+
     Function("setScenes") { (json: String) in
       self.engine.setScenes(json: json)
     }

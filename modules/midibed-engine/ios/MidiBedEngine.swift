@@ -592,11 +592,14 @@ final class MidiBedEngine {
   private var heldPad: [HeldNote] = []
   /// Which chord of the harmony loop we are on.
   private var chordIndex = 0
-  /// 'Chord changes start early' (milliseconds, global): the pad and a following bass start each new chord this long before
-  /// the bar line. `earlyChordDone` remembers that the coming chord has already been started, so the bar line itself only
-  /// moves chordIndex on (everything else, such as a rhythmic bass or the keys, still changes exactly on the bar line).
+  /// 'Chord changes start early' (milliseconds, global; one setting for the pad and one for a held bass that follows the
+  /// chords): each starts a new chord this long before the bar line. `earlyPadDone` / `earlyBassDone` remember that the
+  /// coming chord has already been started, so the bar line itself only moves chordIndex on (everything else, such as a
+  /// rhythmic bass or the keys, still changes exactly on the bar line).
   private var chordLeadMs: Double = 0
-  private var earlyChordDone = false
+  private var bassLeadMs: Double = 0
+  private var earlyPadDone = false
+  private var earlyBassDone = false
 
   // Breathing state: alt = the layer is currently in its alternate state.
   private struct RuleRuntime {
@@ -730,7 +733,8 @@ final class MidiBedEngine {
   private func install(_ decoded: MidiBedConfig, atBar: Bool) {
     let previous = config
     config = decoded
-    earlyChordDone = false
+    earlyPadDone = false
+    earlyBassDone = false
     // A scene that brings a drum in on a bar line: with 'drums hard' it hits at full volume (a strong
     // downbeat) instead of fading up. Drums that were already on are not touched.
     if atBar, decoded.fade.drumsHard {
@@ -940,6 +944,10 @@ final class MidiBedEngine {
     queue.async { self.chordLeadMs = max(0, min(1000, ms.isFinite ? ms : 0)) }
   }
 
+  func setBassLead(ms: Double) {
+    queue.async { self.bassLeadMs = max(0, min(1000, ms.isFinite ? ms : 0)) }
+  }
+
   func setPadVoice(json: String) {
     struct PadVoiceConfig: Decodable { var values: [Double] }
     guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(PadVoiceConfig.self, from: data) else {
@@ -990,7 +998,8 @@ final class MidiBedEngine {
       self.tickIndex = 0
       self.padStartTick = 0
       self.chordIndex = 0
-      self.earlyChordDone = false
+      self.earlyPadDone = false
+      self.earlyBassDone = false
       self.pendingConfig = nil
       self.loopsPlaying = false
       self.lastLoopSelect = []
@@ -1453,30 +1462,40 @@ final class MidiBedEngine {
     // Early start: a little before the bar line, start the coming chord on the pad and on a held bass that follows the
     // chords. Not when a scene change is waiting or the scene is on its last bar (the bar line is then about to install
     // other settings), and never closer than half a chord to the previous change.
-    let leadTicks = min(chordTicks / 2, max(0, Int(((chordLeadMs / 1000) / tickDur).rounded())))
-    if leadTicks > 0, rel >= 0, cfg.harmony.count > 1, pendingConfig == nil,
-      !(cfg.advance.mode > 0 && advanceBarsLeft == 1), (rel + leadTicks) % chordTicks == 0
-    {
-      let upcoming = ((rel + leadTicks) / chordTicks) % max(1, cfg.harmony.count)
+    let padLeadTicks = min(chordTicks / 2, max(0, Int(((chordLeadMs / 1000) / tickDur).rounded())))
+    let bassLeadTicks = min(chordTicks / 2, max(0, Int(((bassLeadMs / 1000) / tickDur).rounded())))
+    let earlyAllowed = rel >= 0 && cfg.harmony.count > 1 && pendingConfig == nil
+      && !(cfg.advance.mode > 0 && advanceBarsLeft == 1)
+    if padLeadTicks > 0, earlyAllowed, (rel + padLeadTicks) % chordTicks == 0 {
+      let upcoming = ((rel + padLeadTicks) / chordTicks) % max(1, cfg.harmony.count)
       let padList = activePadChords(cfg)
       if padOn(cfg), !padList.isEmpty {
         playPad(padList[upcoming % padList.count], pad: cfg.pad, at: time, retrigger: false)
       }
+      earlyPadDone = true
+    }
+    if bassLeadTicks > 0, earlyAllowed, (rel + bassLeadTicks) % chordTicks == 0 {
+      let upcoming = ((rel + bassLeadTicks) / chordTicks) % max(1, cfg.harmony.count)
       if droneOn(cfg), activeDroneChords(cfg).count > 1, !heldDrone.isEmpty {
         reconcileDrone(keepLevel: true, chord: upcoming)
       }
-      earlyChordDone = true
+      earlyBassDone = true
     }
     if rel >= 0, rel % chordTicks == 0 {
       chordIndex = (rel / chordTicks) % max(1, cfg.harmony.count)
-      if earlyChordDone && rel > 0 {
-        earlyChordDone = false // already started a little early
+      if earlyPadDone && rel > 0 {
+        earlyPadDone = false // already started a little early
       } else {
-        earlyChordDone = false
+        earlyPadDone = false
         let padList = activePadChords(cfg)
         if padOn(cfg), !padList.isEmpty {
           playPad(padList[chordIndex % padList.count], pad: cfg.pad, at: time, retrigger: false)
         }
+      }
+      if earlyBassDone && rel > 0 {
+        earlyBassDone = false
+      } else {
+        earlyBassDone = false
         if droneOn(cfg), activeDroneChords(cfg).count > 1, !heldDrone.isEmpty {
           reconcileDrone(keepLevel: true)
         }
