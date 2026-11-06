@@ -1151,6 +1151,9 @@ export default function App() {
 
   // ---- MIDI controller (a foot pedal): learn a message for an action, then run it when it arrives.
   const [learnIdx, setLearnIdx] = useState(0);
+  // The actions a double press or a hold can do: every action except the button's own (a button cannot trigger itself, so
+  // leaving it in the list made the stepper stick there).
+  const otherActions = () => MIDI_ACTIONS.filter((a) => a.id !== MIDI_ACTIONS[learnIdx].id);
   const [learning, setLearning] = useState(false);
   const learningRef = useRef<string | null>(null);
   const [lastMidiText, setLastMidiText] = useState('none yet');
@@ -4319,34 +4322,34 @@ export default function App() {
             />
             <Stepper
               label="A quick double press does"
-              value={Math.max(0, MIDI_ACTIONS.findIndex((a) => a.id === parseDoubleMap(state.midiControl.double)[MIDI_ACTIONS[learnIdx].id]) + 1)}
+              value={Math.max(0, otherActions().findIndex((a) => a.id === parseDoubleMap(state.midiControl.double)[MIDI_ACTIONS[learnIdx].id]) + 1)}
               onChange={(v) =>
                 setState((s) => ({
                   ...s,
-                  midiControl: { ...s.midiControl, double: setDouble(s.midiControl.double, MIDI_ACTIONS[learnIdx].id, v <= 0 ? null : MIDI_ACTIONS[v - 1].id) },
+                  midiControl: { ...s.midiControl, double: setDouble(s.midiControl.double, MIDI_ACTIONS[learnIdx].id, v <= 0 ? null : otherActions()[v - 1].id) },
                 }))
               }
               min={0}
-              max={MIDI_ACTIONS.length}
+              max={otherActions().length}
               wrap
               bigStep={10}
-              format={(v) => (v === 0 ? 'nothing extra' : MIDI_ACTIONS[v - 1].label)}
+              format={(v) => (v === 0 ? 'nothing extra' : otherActions()[v - 1].label)}
               hint="For the action chosen above. The first press runs at once; a quick second press does this instead of repeating it. If the first press was an on or off switch, it is put back first"
             />
             <Stepper
               label="Holding the button does"
-              value={Math.max(0, MIDI_ACTIONS.findIndex((a) => a.id === parseHoldMap(state.midiControl.hold)[MIDI_ACTIONS[learnIdx].id]) + 1)}
+              value={Math.max(0, otherActions().findIndex((a) => a.id === parseHoldMap(state.midiControl.hold)[MIDI_ACTIONS[learnIdx].id]) + 1)}
               onChange={(v) =>
                 setState((s) => ({
                   ...s,
-                  midiControl: { ...s.midiControl, hold: setHold(s.midiControl.hold, MIDI_ACTIONS[learnIdx].id, v <= 0 ? null : MIDI_ACTIONS[v - 1].id) },
+                  midiControl: { ...s.midiControl, hold: setHold(s.midiControl.hold, MIDI_ACTIONS[learnIdx].id, v <= 0 ? null : otherActions()[v - 1].id) },
                 }))
               }
               min={0}
-              max={MIDI_ACTIONS.length}
+              max={otherActions().length}
               wrap
               bigStep={10}
-              format={(v) => (v === 0 ? 'nothing extra' : MIDI_ACTIONS[v - 1].label)}
+              format={(v) => (v === 0 ? 'nothing extra' : otherActions()[v - 1].label)}
               hint="For the action chosen above. Needs the pedal's button in Momentary mode, so it sends a message when you let go. The button then waits to see which you meant: let go quickly and the first action runs as you let go, keep holding and only this runs"
             />
             <Toggle
