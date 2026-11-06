@@ -59,7 +59,8 @@ import {
 import { Favorite, addFav, favLabel, favsFor, removeFav, sameFavorite } from './src/soundFavs';
 import { OUTPUT_MODE_NAMES } from './src/outputmode';
 import { LANE_BREATHE_NAMES } from './src/lanebreath';
-import { AMBIENCE_LANE, BAR_CHOICES, KIND_NAMES, LANE_COUNT, LibraryLoop, SEMI_RANGE, matchGain, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, fingerprintOf, folderNames, isAudioFile, loopPath, parseLibrary, planDuplicates, setLoopDir, tempoFromName } from './src/looplib';
+import { AMBIENCE_LANE, BAR_CHOICES, KIND_NAMES, LANE_COUNT, LibraryLoop, SEMI_RANGE, NUDGE_RANGE, matchGain, NEAR_NAMES, bestFit, filterLoops, instrumentList, instrumentOf, addToLibrary, barsFromLength, fingerprintOf, folderNames, isAudioFile, loopPath, parseLibrary, planDuplicates, setLoopDir, tempoFromName } from './src/looplib';
+import { nudgeFromOnsets } from './src/timing';
 import { SCENE_CHANGE_NAMES, nextSceneChangeAt, sceneChangeWhen } from './src/sceneChange';
 import { FILTER_FOCUS_NAMES, FILTER_PRESETS, filterSummary, filterTargetsJson, focusIncludes, hzToCc, moduleChannels, nextFilterFocus, nextFilterPreset } from './src/filters';
 import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sectionui';
@@ -1453,6 +1454,7 @@ export default function App() {
           bpm,
           bars: fit.bars,
           repeats: fit.repeats,
+          nudge: nudgeFromOnsets(info.onsets, bpm),
         };
         added.push(entry);
         if (fp) have.set(fp, entry);
@@ -1513,9 +1515,10 @@ export default function App() {
       setImportNote('The Add loops folder could not be opened');
     }
   };
-  // Loops added before loudness matching have no measurement: read them again from their copies.
+  // Loops added before loudness matching or timing correction have no measurement: read them again from their copies.
+  const needsMeasuring = (l: LibraryLoop) => !(l.peak && l.rms) || l.nudge === undefined;
   const measureLibrary = async () => {
-    const todo = parseLibrary(latest.current.loopLib).filter((l) => !(l.peak && l.rms));
+    const todo = parseLibrary(latest.current.loopLib).filter(needsMeasuring);
     if (todo.length === 0) {
       setImportNote('Every loop in the library is already measured');
       return;
@@ -1524,14 +1527,37 @@ export default function App() {
     const done: LibraryLoop[] = [];
     for (let n = 0; n < todo.length; n++) {
       const info = await engine.probeLoop(loopPath(todo[n].file));
-      if (info) done.push({ ...todo[n], peak: info.peak, rms: info.rms });
+      if (info) done.push({ ...todo[n], peak: info.peak, rms: info.rms, nudge: nudgeFromOnsets(info.onsets, todo[n].bpm) ?? todo[n].nudge });
       if (n % 10 === 9) setImportNote(`Measured ${n + 1} of ${todo.length}`);
     }
     setState((s) => ({ ...s, loopLib: addToLibrary(s.loopLib, done) }));
     setImportNote(`Measured ${done.length} loops`);
     announceLater(`Measured ${done.length} loops`, 100);
   };
-  const unmeasuredLoops = loopLib.filter((l) => !(l.peak && l.rms)).length;
+  const unmeasuredLoops = loopLib.filter(needsMeasuring).length;
+  // A loop placed on a lane (or in a pool a lane uses) that has no timing measurement yet is measured at once.
+  const timingTried = useRef(new Set<string>());
+  useEffect(() => {
+    if (!ready || !hasNativeEngine) return;
+    const wanted = new Set<string>();
+    for (const l of state.lanes) {
+      if (l.loop) wanted.add(l.loop);
+      const p = l.pool ? pools.find((x) => x.id === l.pool) : undefined;
+      if (p) p.loops.forEach((id) => wanted.add(id));
+    }
+    const todo = loopLib.filter((l) => wanted.has(l.id) && l.nudge === undefined && !timingTried.current.has(l.id));
+    if (todo.length === 0) return;
+    todo.forEach((l) => timingTried.current.add(l.id));
+    void (async () => {
+      const done: LibraryLoop[] = [];
+      for (const l of todo) {
+        const info = await engine.probeLoop(loopPath(l.file));
+        const nudge = info ? nudgeFromOnsets(info.onsets, l.bpm) : undefined;
+        if (nudge !== undefined) done.push({ ...l, nudge });
+      }
+      if (done.length > 0) setState((s) => ({ ...s, loopLib: addToLibrary(s.loopLib, done) }));
+    })();
+  }, [state.lanes, state.pools, state.loopLib, ready]);
   // Loops that are copies of another loop (same audio under another folder or name): found by their measurements.
   const dupePlan = planDuplicates(loopLib);
   const removeDuplicateLoops = () => {
@@ -3298,8 +3324,8 @@ export default function App() {
             )}
             {unmeasuredLoops > 0 && (
               <ActionButton
-                label={`Match the loudness of ${unmeasuredLoops} loops`}
-                hint="Measures loops added earlier, so they come in at the level of the rest of the bed"
+                label={`Measure the loudness and timing of ${unmeasuredLoops} loops`}
+                hint="Measures loops added earlier, so they come in at the level of the rest of the bed and their hits land on the beat"
                 onPress={measureLibrary}
               />
             )}
@@ -3311,6 +3337,12 @@ export default function App() {
               />
             )}
             {loopLib.length > 0 && <ActionButton label="Clear the loop library" onPress={clearLoopLibrary} />}
+            <Toggle
+              label="Fix each loop's timing automatically"
+              value={state.loopAutoNudge}
+              onChange={(v) => patch({ loopAutoNudge: v })}
+              hint="Many loops were played live and sit a little early or late. For the loops I measured, MidiBed moves them so their hits land on the beat. Each lane also has its own nudge"
+            />
             <Stepper
               label="Loop player level"
               value={state.loopMaster}
@@ -3627,6 +3659,16 @@ export default function App() {
                     <Stepper label={`${lname} chance of resting`} value={lane.breatheChance} onChange={(v) => patchLane(i, { breatheChance: v })} min={10} max={100} step={10} format={(v) => `${v} percent`} hint="When its playing turn ends, the chance that it really rests" />
                   </>
                 )}
+                {!amb && <Stepper
+                  label={`${lname} timing nudge`}
+                  value={lane.nudge ?? 0}
+                  onChange={(v) => patchLane(i, { nudge: v })}
+                  min={-NUDGE_RANGE}
+                  max={NUDGE_RANGE}
+                  bigStep={10}
+                  format={(v) => (v === 0 ? 'none' : `${Math.abs(v)} milliseconds ${v > 0 ? 'later' : 'earlier'}`)}
+                  hint="Moves every hit in this lane. Later if the loop sounds ahead of the drums, earlier if it drags. Added to the automatic correction, if that is on"
+                />}
                 {!amb && <Toggle
                   label={`${lname} pitch follows the tempo`}
                   value={lane.follow}

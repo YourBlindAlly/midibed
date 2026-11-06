@@ -26,7 +26,7 @@ type Native = {
   setOutputMode(mode: number): void;
   previewLoop(path: string, seconds: number, level: number): void;
   stopPreview(): void;
-  probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number; peak: number; rms: number } | null>;
+  probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number; peak: number; rms: number; onsets?: number[] } | null>;
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;
   buildInfo(): string;

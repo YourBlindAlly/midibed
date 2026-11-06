@@ -66,6 +66,7 @@ struct MidiBedLaneConfig: Decodable {
   var pool: [MidiBedPoolChoice]?  // a pool of two or more loops: played in turn (the fields above describe the first)
   var poolMode: Int?        // 0 in order, 1 shuffled with no repeats until all have played
   var poolEvery: Int?       // also change loop every this many bars (0 = only when a scene starts)
+  var nudge: Double?        // timing nudge in milliseconds (positive = later); measured offset plus the lane's own
 }
 
 /// One loop of a lane's pool, described the way the lane would play it.
@@ -75,6 +76,7 @@ struct MidiBedPoolChoice: Decodable {
   var repeats: Int
   var level: Double
   var seconds: Double?
+  var nudge: Double?
 }
 
 /// Patterns that change by themselves (kick excluded).
@@ -1923,6 +1925,7 @@ final class MidiBedEngine {
           poolSince[i] = tick
           lane = effective(i, cfg)
           synth.loops.setMix(lane: i, level: Float(lane.level), pan: Float(lane.pan))
+          synth.loops.setNudge(lane: i, ms: lane.nudge ?? 0)
           if seamless {
             swapTo = np
             swapped = true
@@ -1999,6 +2002,7 @@ final class MidiBedEngine {
       l.repeats = c.repeats
       l.level = c.level
       l.seconds = c.seconds
+      l.nudge = c.nudge
     }
     return l
   }
@@ -2049,6 +2053,7 @@ final class MidiBedEngine {
       }
       synth.loops.load(lane: i, path: path)
       synth.loops.setMix(lane: i, level: Float(lane?.level ?? 1), pan: Float(lane?.pan ?? 0))
+      synth.loops.setNudge(lane: i, ms: lane?.nudge ?? 0)
       if poolSig[i] != "", let pool = rawLane?.pool, pool.count > 1 {
         synth.loops.prepare(lane: i, path: pool[min(max(0, poolNext[i]), pool.count - 1)].path)
       }
@@ -2110,7 +2115,7 @@ final class MidiBedEngine {
   /// Length, sample rate and channels of an audio file, for the library.
   static func probeLoop(path: String) -> [String: Any]? {
     guard let p = LoopPlayer.probe(path: path) else { return nil }
-    return ["seconds": p.seconds, "sampleRate": p.sampleRate, "channels": p.channels, "peak": p.peak, "rms": p.rms]
+    return ["seconds": p.seconds, "sampleRate": p.sampleRate, "channels": p.channels, "peak": p.peak, "rms": p.rms, "onsets": p.onsets]
   }
 
   /// Evolving patterns: every `everyBars` bars each drum (except the kick) has a chance to be nudged: one hit

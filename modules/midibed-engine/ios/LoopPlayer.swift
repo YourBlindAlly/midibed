@@ -65,6 +65,9 @@ final class LoopPlayer {
     var stopAt: Double = 0
     var stopFade: Float = 0.03
     var startFade: Float = 0.008
+    // Timing nudge in milliseconds: positive makes the loop sound later, negative earlier. The loop is a circle, so the
+    // lane simply starts that far round it (see applyCommand).
+    var nudgeMs: Double = 0
     // A pool: the next file is decoded ahead of time (`nextRaw`) and swapped in on the exact sample the lane
     // restarts (`swapPath` set by `start`), so changing loop leaves no gap.
     var nextPath = ""
@@ -218,6 +221,15 @@ final class LoopPlayer {
     return ln.stretched != nil && ln.stretchedFrames == ln.wantFrames
   }
 
+  /// Nudge a lane's timing: positive = later, negative = earlier (milliseconds, -150...150). Takes effect the next time
+  /// the lane starts from the top, which the engine does at every restart on a bar line.
+  func setNudge(lane: Int, ms: Double) {
+    guard lane >= 0, lane < LoopPlayer.slots else { return }
+    os_unfair_lock_lock(lock)
+    lanes[lane].nudgeMs = ms.isFinite ? max(-150, min(150, ms)) : 0
+    os_unfair_lock_unlock(lock)
+  }
+
   func setMix(lane: Int, level: Float, pan: Float) {
     guard lane >= 0, lane < LoopPlayer.slots else { return }
     os_unfair_lock_lock(lock)
@@ -287,7 +299,18 @@ final class LoopPlayer {
       if !lanes[lane].swapPath.isEmpty { doSwap(lane, lanes[lane].swapPath) }
       lanes[lane].swapPath = ""
       guard lanes[lane].raw != nil else { return }
-      lanes[lane].pos = 0
+      // Start `nudgeMs` round the circle: a later nudge begins in the tail of the file, an earlier one a little way in,
+      // so every hit arrives that much later or earlier. The position is in frames of the buffer that will play.
+      var startPos = 0.0
+      let nudge = lanes[lane].nudgeMs
+      if nudge != 0, let b = (lanes[lane].stretched ?? lanes[lane].raw), b.frames > 0, lanes[lane].wantSeconds > 0.05 {
+        let n = Double(b.frames)
+        let step = n * Double(max(1, lanes[lane].wantRepeats)) / lanes[lane].wantSeconds / Double(sampleRate)
+        let shift = nudge / 1000 * Double(sampleRate) * step
+        startPos = (-shift).truncatingRemainder(dividingBy: n)
+        if startPos < 0 { startPos += n }
+      }
+      lanes[lane].pos = startPos
       lanes[lane].posFrames = 0
       lanes[lane].playing = true
       lanes[lane].target = lanes[lane].level
@@ -609,7 +632,7 @@ final class LoopPlayer {
 
   /// Length, rate, channels and loudness (the highest sample and the RMS over every channel) of a file,
   /// read in blocks without keeping it, for the library.
-  static func probe(path: String) -> (seconds: Double, sampleRate: Double, channels: Int, peak: Double, rms: Double)? {
+  static func probe(path: String) -> (seconds: Double, sampleRate: Double, channels: Int, peak: Double, rms: Double, onsets: [Double])? {
     guard let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { return nil }
     let format = file.processingFormat
     let rate = format.sampleRate
@@ -619,6 +642,14 @@ final class LoopPlayer {
     var sumSquares = 0.0
     var samples = 0.0
     let block: AVAudioFrameCount = 32768
+    // Hit times, for the loop's timing (see src/timing.ts): the energy of the sample-to-sample difference (a crude
+    // high-pass) is summed per millisecond. Skipped for long files (beds), which have no beat to measure.
+    let hop = max(1, Int(rate / 1000))
+    let wantOnsets = Double(file.length) / rate <= 20
+    var hopEnergy: [Float] = []
+    var hopAcc: Float = 0
+    var hopCount = 0
+    var prevMono: Float = 0
     if let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: block) {
       while file.framePosition < file.length {
         do { try file.read(into: buf, frameCount: block) } catch { break }
@@ -637,9 +668,50 @@ final class LoopPlayer {
           sumSquares += local
           samples += Double(n)
         }
+        if wantOnsets {
+          for i in 0..<n {
+            let m: Float = channels > 1 ? 0.5 * (data[0][i] + data[1][i]) : data[0][i]
+            let y = m - prevMono
+            prevMono = m
+            hopAcc += y * y
+            hopCount += 1
+            if hopCount == hop {
+              hopEnergy.append(hopAcc / Float(hop))
+              hopAcc = 0
+              hopCount = 0
+            }
+          }
+        }
       }
     }
     let rms = samples > 0 ? (sumSquares / samples).squareRoot() : 0
-    return (Double(file.length) / rate, rate, channels, Double(peak), rms)
+    // The steepest rises of the log energy over 6 ms, at least 45 percent as steep as the steepest, 50 ms apart.
+    var onsets: [Double] = []
+    if wantOnsets, hopEnergy.count > 40 {
+      let n = hopEnergy.count
+      var le = [Float](repeating: 0, count: n)
+      for i in 0..<n {
+        let a = hopEnergy[max(0, i - 1)]
+        let b = hopEnergy[i]
+        let c = hopEnergy[min(n - 1, i + 1)]
+        le[i] = logf(((a + b + c) / 3).squareRoot() + 1e-5)
+      }
+      var rise = [Float](repeating: 0, count: n)
+      var maxRise: Float = 0
+      for i in 6..<n {
+        rise[i] = le[i] - le[i - 6]
+        if rise[i] > maxRise { maxRise = rise[i] }
+      }
+      let thr = max(1.0, 0.45 * maxRise)
+      var last = -1000
+      for i in 7..<(n - 1) {
+        if rise[i] >= thr && rise[i] >= rise[i - 1] && rise[i] >= rise[i + 1] && i - last > 50 {
+          onsets.append((Double(i * hop) / rate * 1000).rounded() / 1000)
+          last = i
+          if onsets.count >= 400 { break }
+        }
+      }
+    }
+    return (Double(file.length) / rate, rate, channels, Double(peak), rms, onsets)
   }
 }

@@ -9,6 +9,7 @@
  * A file is never committed anywhere: loops live only in the app's own storage on the phone.
  */
 import { parsePools } from './pools';
+import { LOOP_TIMING } from './looptiming';
 
 export const LANE_COUNT = 5;
 /** The last lane is the ambience lane: natural speed, ignores the tempo, never restarts, fades in and out slowly. */
@@ -31,6 +32,9 @@ export type LibraryLoop = {
   /** Loudness measured when it was added: the highest sample and the RMS (0-1). Missing in older entries. */
   peak?: number;
   rms?: number;
+  /** Timing correction measured when it was added, in milliseconds at the file's own speed (positive = move later,
+   *  negative = earlier, 0 = leave it). Missing = not measured yet (then the built-in table is tried). */
+  nudge?: number;
 };
 
 export type LaneState = {
@@ -59,9 +63,14 @@ export type LaneState = {
   poolMode: number;
   /** Change loop every this many bars as well as when a scene starts (0 = only when a scene starts). */
   poolEvery: number;
+  /** Timing nudge in milliseconds, -60...60: positive makes the loop sound later, negative earlier. Added to the
+   *  loop's own measured correction (see looptiming.ts). */
+  nudge?: number;
 };
 
-export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100, pool: '', poolMode: 0, poolEvery: 0 };
+export const NUDGE_RANGE = 60;
+
+export const defaultLane: LaneState = { loop: '', on: false, level: 100, pan: 0, bars: -1, follow: true, semis: 0, breathe: 0, breatheOn: 8, breatheOff: 4, breatheChance: 100, pool: '', poolMode: 0, poolEvery: 0, nudge: 0 };
 export const SEMI_RANGE = 12;
 export const defaultLanes = (): LaneState[] => Array.from({ length: LANE_COUNT }, () => ({ ...defaultLane }));
 export const BAR_CHOICES = [-1, 0, 1, 2, 4, 8, 16];
@@ -175,6 +184,7 @@ export function parseLibrary(json: string): LibraryLoop[] {
           repeats: Math.max(1, Math.round(Number(e.repeats) || 1)),
           peak: Number(e.peak) > 0 ? Number(e.peak) : undefined,
           rms: Number(e.rms) > 0 ? Number(e.rms) : undefined,
+          nudge: typeof e.nudge === 'number' && Number.isFinite(e.nudge) ? Math.max(-100, Math.min(100, Math.round(e.nudge))) : undefined,
         }));
     }
   } catch {
@@ -380,6 +390,22 @@ export function matchGain(peak?: number, rms?: number): number {
   return Math.max(0.02, Math.min(4, g));
 }
 
+/** The key a loop's name has in the timing table: lower case, no extension, letters and digits only. */
+export function timingKey(name: string): string {
+  return name.replace(/\.(wav|wave|flac|aif|aiff|mp3|m4a|caf)$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** The correction measured for this loop, in milliseconds (0 when it was not measured or already sits on the beat). */
+export function autoNudgeFor(loop: LibraryLoop | undefined): number {
+  if (!loop) return 0;
+  if (typeof loop.nudge === 'number') return loop.nudge;
+  const direct = LOOP_TIMING[timingKey(loop.name)];
+  if (direct !== undefined) return direct;
+  // A stored file is 'Folder__name.ext': try the part after the last double underscore too.
+  const tail = loop.file.includes('__') ? loop.file.slice(loop.file.lastIndexOf('__') + 2) : loop.file;
+  return LOOP_TIMING[timingKey(tail)] ?? 0;
+}
+
 export type EngineLane = {
   path: string;
   bars: number;
@@ -391,9 +417,10 @@ export type EngineLane = {
   semis: number;
   ambience: boolean;
   seconds: number;
+  nudge: number;
   breathe: { mode: number; onBars: number; offBars: number; chance: number };
   /** With a pool of two or more loops: each loop as the lane would play it. The lane's own fields describe the first. */
-  pool?: { path: string; bars: number; repeats: number; level: number; seconds: number }[];
+  pool?: { path: string; bars: number; repeats: number; level: number; seconds: number; nudge: number }[];
   poolMode?: number;
   poolEvery?: number;
 };
@@ -405,6 +432,7 @@ export function lanesForEngine(
   master = 100,
   journeyBpm = 0,
   poolsJson = '[]',
+  autoNudge = true,
 ): EngineLane[] {
   const lib = parseLibrary(libJson);
   const pools = parsePools(poolsJson);
@@ -418,7 +446,13 @@ export function lanesForEngine(
       const repeats = lane.bars > 0 ? 1 : fit ? fit.repeats : loop ? loop.repeats : 1;
       const gain = loop ? matchGain(loop.peak, loop.rms) : 1;
       const level = (Math.max(0, Math.min(150, lane.level)) / 100) * (Math.max(0, Math.min(150, master)) / 100) * gain;
-      return { path, bars, repeats, level, seconds: loop ? loop.seconds : 0 };
+      // The measured correction is in milliseconds of the file's own time; at another speed the same offset is longer
+      // or shorter, so it is scaled by how fast the loop plays.
+      const playSec = journeyBpm > 0 ? (bars * 4 * 60) / journeyBpm : 0;
+      const speed = loop && playSec > 0 ? Math.max(0.5, Math.min(2, (loop.seconds * repeats) / playSec)) : 1;
+      const measured = autoNudge ? autoNudgeFor(loop) / speed : 0;
+      const nudge = amb ? 0 : Math.max(-100, Math.min(100, Math.round(measured + (lane.nudge || 0))));
+      return { path, bars, repeats, level, seconds: loop ? loop.seconds : 0, nudge };
     };
     // A pool replaces the lane's single loop (the ambience lane does not use pools yet).
     const pool = !amb && lane.pool ? pools.find((p) => p.id === lane.pool) : undefined;
@@ -430,8 +464,8 @@ export function lanesForEngine(
           .filter((d) => d.path !== '')
       : [];
     const first = members.length > 0 ? members[0] : describe(lib.find((l) => l.id === lane.loop));
-    const { path, bars, repeats, level, seconds } = first;
-    return { path, bars, repeats, level, ambience: amb, seconds, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', follow: amb ? true : lane.follow !== false,
+    const { path, bars, repeats, level, seconds, nudge } = first;
+    return { path, bars, repeats, level, ambience: amb, seconds, nudge, pan: Math.max(-100, Math.min(100, lane.pan)) / 100, on: lane.on && path !== '', follow: amb ? true : lane.follow !== false,
       semis: amb ? 0 : Math.max(-SEMI_RANGE, Math.min(SEMI_RANGE, Math.round(lane.semis || 0))),
       breathe: {
         mode: Math.max(0, Math.min(3, Math.round(lane.breathe || 0))),

@@ -282,6 +282,8 @@ export type BedState = {
   chordLead: number;
   /** The same for a held bass drone that follows the chords. Global; 0 = exactly on the bar line. */
   bassLead: number;
+  /** Move each loop so its hits land on the beat, by the correction measured for it (src/looptiming.ts). Global. */
+  loopAutoNudge: boolean;
   /** The filter movement (wanderers) on or off. Saved with the scene. */
   filterMove: boolean;
   /** A static filter preset (src/filters.ts; 0 = the wanderers). Saved with the scene. */
@@ -828,6 +830,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   outputMode: 0,
   chordLead: 0,
   bassLead: 0,
+  loopAutoNudge: true,
   filterMove: true,
   filterPreset: 0,
   filterFocus: 0,
@@ -1397,6 +1400,7 @@ export function migrateState(rawInput0: unknown): BedState {
     outputMode: clampOutputMode((merged as { outputMode?: number }).outputMode ?? 0),
     chordLead: Math.max(0, Math.min(1000, Math.round(Number((merged as { chordLead?: number }).chordLead) || 0))),
     bassLead: Math.max(0, Math.min(1000, Math.round(Number((merged as { bassLead?: number }).bassLead) || 0))),
+    loopAutoNudge: (merged as { loopAutoNudge?: boolean }).loopAutoNudge !== false,
     solo: null, // never come back soloed
     sounds,
     activeScene: active,
@@ -1446,7 +1450,7 @@ export function toEngineJson(s: BedState): string {
     filterHold: s.filterHold,
     sceneChangeAt: s.sceneChangeAt,
     // The Loop player layer: off (or another layer soloed) silences every lane.
-    lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster, s.bpm, s.pools).map((l) => ({ ...l, on: l.on && (s.solo ? s.solo === 'player' : s.playerOn) })),
+    lanes: lanesForEngine(s.lanes, s.loopLib, s.loopMaster, s.bpm, s.pools, s.loopAutoNudge).map((l) => ({ ...l, on: l.on && (s.solo ? s.solo === 'player' : s.playerOn) })),
     // "Stay on this scene" sets the automatic move-on (or the end of the piece) aside until the scene changes.
     advance: s.stayHere
       ? { mode: 0, bars: 0, target: -1 }
