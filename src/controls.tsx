@@ -15,7 +15,7 @@ export const colors = {
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 /** After a change made with a VoiceOver gesture: once the screen has redrawn, make VoiceOver look at it again. */
-function refreshSoon() {
+export function refreshSoon() {
   if (refreshTimer) clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
     refreshTimer = null;
@@ -109,12 +109,12 @@ export function Stepper({ label, value, onChange, min, max, step = 1, bigStep, w
     >
       <Text style={styles.label}>{label}</Text>
       <View style={styles.buttons} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-        <Pressable hitSlop={SLOP} style={styles.btn} onPress={() => onChange(clamp(value - step))}>
-          <Text style={styles.btnText}>-</Text>
+        <Pressable accessible={false} hitSlop={SLOP} style={styles.btn} onPress={() => onChange(clamp(value - step))}>
+          <Text accessible={false} style={styles.btnText}>-</Text>
         </Pressable>
-        <Text style={styles.value}>{text}</Text>
-        <Pressable hitSlop={SLOP} style={styles.btn} onPress={() => onChange(clamp(value + step))}>
-          <Text style={styles.btnText}>+</Text>
+        <Text accessible={false} style={styles.value}>{text}</Text>
+        <Pressable accessible={false} hitSlop={SLOP} style={styles.btn} onPress={() => onChange(clamp(value + step))}>
+          <Text accessible={false} style={styles.btnText}>+</Text>
         </Pressable>
       </View>
     </View>
@@ -157,7 +157,10 @@ export function Toggle({ label, value, onChange, hint }: ToggleProps) {
         const next = toggleAdjust(value, e.nativeEvent.actionName);
         if (next !== value) onChange(next);
       }}
-      onPress={() => onChange(!value)}
+      onPress={() => {
+        refreshSoon();
+        onChange(!value);
+      }}
     >
       <Text style={styles.label}>{label}</Text>
       <View style={[styles.pill, value && { backgroundColor: colors.on }]}>
@@ -176,7 +179,10 @@ export function ActionButton({ label, onPress, hint }: { label: string; onPress:
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={hints ? hint : undefined}
-      onPress={onPress}
+      onPress={() => {
+        refreshSoon();
+        onPress();
+      }}
     >
       <Text style={styles.actionText}>{label}</Text>
     </Pressable>
@@ -222,7 +228,10 @@ export function Section({
       // The state is IN the label so it is always spoken (the expanded state alone was not read on the device).
       accessibilityLabel={`${title}, ${closed ? 'collapsed' : 'expanded'}`}
       accessibilityHint={closed ? 'Double tap to open' : 'Double tap to close'}
-      onPress={() => toggle(key)}
+      onPress={() => {
+        toggle(key);
+        refreshSoon();
+      }}
       style={styles.sectionHead}
     >
       <Text style={inner ? styles.innerTitle : styles.sectionTitle}>{`${closed ? '▸' : '▾'} ${title}${closed ? ' (closed)' : ''}`}</Text>

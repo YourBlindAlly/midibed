@@ -79,7 +79,7 @@ import { MIDI_ACTIONS, assignTrigger, clearTrigger, describeMidi, describeTrigge
 import { levelText, mixerMessages, synthLevelMessages } from './src/mixer';
 import { COLOR_NAMES, MAX_CHORDS, MODE_NAMES, PRESETS, STYLE_NAMES, chordLabel, presetsForMode } from './src/chords';
 import { POOL_EVERY_CHOICES, POOL_MODE_NAMES, Pool, addLoopToPool, addLoopsToPool, deletePool, newPool, parsePools, removeLoopFromPool, renamePool, stringifyPools } from './src/pools';
-import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, Toggle, colors } from './src/controls';
+import { ActionButton, HelpContext, Note, Section, SectionUiContext, Stepper, Toggle, colors, refreshSoon } from './src/controls';
 import { describePattern, patternText } from './src/euclid';
 import { RHYTHMS, rhythmDescribe, rhythmText } from './src/rhythms';
 import { STEP_STATE_NAMES, StepState, addUserRhythm, countOf, describeText, patternSteps, patternString, rotatedText, stepName, stepStateAt, withStep } from './src/stepedit';
@@ -1828,7 +1828,10 @@ export default function App() {
                               maxLength={40}
                               autoCorrect={false}
                               placeholderTextColor={colors.dim}
-                              onBlur={() => engine.reclaimKeys()}
+                              onBlur={() => {
+                  engine.reclaimKeys();
+                  refreshSoon();
+                }}
                             />
                           </View>
                           <ActionButton
@@ -1982,7 +1985,10 @@ export default function App() {
                 maxLength={40}
                 autoCorrect={false}
                 placeholderTextColor={colors.dim}
-                onBlur={() => engine.reclaimKeys()}
+                onBlur={() => {
+                  engine.reclaimKeys();
+                  refreshSoon();
+                }}
               />
             </View>
             <View accessible accessibilityLabel="Journey length" accessibilityValue={{ text: `${journeyLengthSentence} ${journeyLengthDetail}` }}>
@@ -2613,7 +2619,10 @@ export default function App() {
                 maxLength={40}
                 autoCorrect={false}
                 placeholderTextColor={colors.dim}
-                onBlur={() => engine.reclaimKeys()}
+                onBlur={() => {
+                  engine.reclaimKeys();
+                  refreshSoon();
+                }}
               />
             </View>
             <ActionButton
@@ -2735,7 +2744,10 @@ export default function App() {
                     autoCorrect={false}
                     placeholder="My rhythm"
                     placeholderTextColor={colors.dim}
-                    onBlur={() => engine.reclaimKeys()}
+                    onBlur={() => {
+                  engine.reclaimKeys();
+                  refreshSoon();
+                }}
                   />
                 </View>
                 <ActionButton
@@ -3423,7 +3435,10 @@ export default function App() {
                 autoCorrect={false}
                 autoCapitalize="none"
                 placeholderTextColor={colors.dim}
-                onBlur={() => engine.reclaimKeys()}
+                onBlur={() => {
+                  engine.reclaimKeys();
+                  refreshSoon();
+                }}
               />
             </View>
             <View accessible accessibilityLabel="Loops that match" accessibilityValue={{ text: `${filterLoops(loopLib, { folder: '', near: loopNear, bpm: state.bpm, text: loopText, instrument: loopInstrument, kind: kindFor(null) }).length} of ${loopLib.length}` }}>
@@ -3514,7 +3529,10 @@ export default function App() {
                         accessibilityLabel="Pool name"
                         autoCorrect={false}
                         placeholderTextColor={colors.dim}
-                        onBlur={() => engine.reclaimKeys()}
+                        onBlur={() => {
+                  engine.reclaimKeys();
+                  refreshSoon();
+                }}
                       />
                     </View>
                     <ActionButton
@@ -3791,7 +3809,10 @@ export default function App() {
                 autoCorrect={false}
                 placeholder={`Scene ${state.activeScene + 1}`}
                 placeholderTextColor={colors.dim}
-                onBlur={() => engine.reclaimKeys()}
+                onBlur={() => {
+                  engine.reclaimKeys();
+                  refreshSoon();
+                }}
               />
             </View>
           </Section>
@@ -4687,7 +4708,10 @@ export default function App() {
                 maxLength={40}
                 autoCorrect={false}
                 placeholderTextColor={colors.dim}
-                onBlur={() => engine.reclaimKeys()}
+                onBlur={() => {
+                  engine.reclaimKeys();
+                  refreshSoon();
+                }}
               />
             </View>
             <ActionButton
