@@ -388,3 +388,8 @@ Rusty: a pool system for one-shots, swells and transitions, drawing on the sound
 - Decisions to make: (1) stereo, because the pack loader reads sounds as mono and a stereo swell loses its width (leaning to a stereo transition player for pool sounds); (2) loudness: reuse the loop loudness matching so quiet swells and loud impacts sit at the slot's level; (3) each slot picks its own pool (a lift/swell pool, an impact pool, an ending pool) rather than one shared list; (4) one-shots play once, are not tempo-fitted and do not loop.
 - Watch out: an impact placed in a lead-in slot lands late; naming the pools by purpose avoids it.
 Related: 'Pool tempo window' above.
+
+## Ideas from Rusty, 2026-11-07 (future, not built)
+1. **Rhythmic bass in the breathing.** Let the bass breathing rule switch between the held drone and the rhythmic bass (drone.rhythm 0 <-> 1/2), so some stretches or scenes are drone and others rhythmic. Fits the existing bass breathing kinds (flip follow / drop out): a third kind "swap rhythm".
+2. **Random sound drift for pads (and maybe bass, keys).** Small random adjustments to the built-in synth sound itself (wave mix, detune, tone, flange, tremolo, decay), either once per scene, every N bars, or as slow wandering, with a range and a "return to my sound" setting. Build on padVoice / bassVoice / keysVoice params.
+3. **Keep developing the keys engine for rhythmic playing.** More patterns and generator options, runs/licks, keys inside the starter journeys, a keys-follows-the-bass option, a Rhodes voice editor.

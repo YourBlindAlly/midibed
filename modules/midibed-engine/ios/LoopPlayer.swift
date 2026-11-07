@@ -326,6 +326,19 @@ final class LoopPlayer {
     for i in 0..<LoopPlayer.laneCount { stop(lane: i, fade: fade) }
   }
 
+  /// Cut every lane dead (after a stop has had time to fade them): nothing keeps playing or waiting to start.
+  func silenceNow() {
+    os_unfair_lock_lock(lock)
+    for i in 0..<LoopPlayer.laneCount {
+      lanes[i].playing = false
+      lanes[i].gain = 0
+      lanes[i].target = 0
+      lanes[i].startPending = false
+      lanes[i].stopPending = false
+    }
+    os_unfair_lock_unlock(lock)
+  }
+
   /// A stretch of less than this much (0.3 percent) is not worth making: the file already has the right length.
   private static func closeEnough(_ want: Int, _ have: Int) -> Bool {
     have > 0 && abs(Double(want) / Double(have) - 1) <= 0.003

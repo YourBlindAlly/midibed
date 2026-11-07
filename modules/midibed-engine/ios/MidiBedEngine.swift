@@ -1112,7 +1112,26 @@ final class MidiBedEngine {
   }
 
   func stop() {
-    queue.async { self.stopOnQueue(soft: false) }
+    queue.async {
+      // Even if the engine thinks it is already stopped (e.g. after the phone slept), a Stop must silence any
+      // loop lane that is still sounding.
+      if !self.running {
+        self.pendingLoop.removeAll()
+        self.synth.loops.stopAll(fade: 0.03)
+        for i in 0..<LoopPlayer.laneCount { self.laneActive[i] = false }
+      }
+      self.stopOnQueue(soft: false)
+      self.silenceLoopsSoon()
+    }
+  }
+
+  /// A safety net after a stop: a moment later, any lane that is somehow still marked as playing is cut dead.
+  private func silenceLoopsSoon() {
+    queue.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+      guard let self = self, !self.running else { return }
+      self.pendingLoop.removeAll()
+      self.synth.loops.silenceNow()
+    }
   }
 
   // MARK: Live link (Network MIDI) and the record signal
@@ -1251,6 +1270,7 @@ final class MidiBedEngine {
       self.clearChordHold(tellUI: true)
       self.pendingLoop.removeAll()
       self.synth.loops.stopAll(fade: soft ? 0.25 : 0.03)
+      self.silenceLoopsSoon()
       for i in 0..<LoopPlayer.laneCount { self.laneActive[i] = false }
       self.timer?.cancel()
       self.timer = nil
