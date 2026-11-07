@@ -2644,7 +2644,7 @@ export default function App() {
             />
           </Section>
           {state.drums.map((d, i) => i !== Math.min(drumIdx, state.drums.length - 1) ? null : (
-            <Section key={d.name} title={d.name} fixed>
+            <Section key="drum-settings" title={d.name} fixed>
               <Toggle label={`${d.name} on`} value={d.enabled} onChange={(v) => patchDrum(i, { enabled: v })} />
               <Stepper
                 label={`${d.name} note`}

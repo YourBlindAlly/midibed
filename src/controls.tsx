@@ -1,5 +1,6 @@
 import React, { createContext, useContext } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { engine } from './engine';
 import { SectionUi, defaultSectionUi, isCollapsed } from './sectionui';
 
 export const colors = {
@@ -11,6 +12,20 @@ export const colors = {
   accent: '#7fb7ff',
   on: '#2f7d4f',
 };
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+/** After a change made with a VoiceOver gesture: once the screen has redrawn, make VoiceOver look at it again. */
+function refreshSoon() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    try {
+      engine.refreshAccessibility();
+    } catch {
+      // no native engine here
+    }
+  }, 250);
+}
 
 const SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
 
@@ -75,6 +90,7 @@ export function Stepper({ label, value, onChange, min, max, step = 1, bigStep, w
       accessibilityHint={hints ? hint ?? 'Swipe up or down to adjust' : undefined}
       accessibilityActions={actions}
       onAccessibilityAction={(e) => {
+        refreshSoon();
         switch (e.nativeEvent.actionName) {
           case 'increment':
             onChange(clamp(value + step));
@@ -137,6 +153,7 @@ export function Toggle({ label, value, onChange, hint }: ToggleProps) {
       accessibilityHint={hints ? (hint ? `${hint}. ${flickHint}` : flickHint) : undefined}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={(e) => {
+        refreshSoon();
         const next = toggleAdjust(value, e.nativeEvent.actionName);
         if (next !== value) onChange(next);
       }}

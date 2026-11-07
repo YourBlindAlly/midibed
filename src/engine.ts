@@ -30,6 +30,7 @@ type Native = {
   probeLoop(path: string): Promise<{ seconds: number; sampleRate: number; channels: number; peak: number; rms: number; onsets?: number[] } | null>;
   requestEnd(json: string): void;
   reclaimKeyFocus(): void;
+  refreshAccessibility?(): void;
   buildInfo(): string;
   applyConfig(json: string, queued: boolean): void;
   setScenes(json: string): void;
@@ -255,6 +256,8 @@ export const engine = {
   requestEnd: (json: string) => native?.requestEnd(json),
   /** Take keyboard focus back after a text field (otherwise shortcut keys stop arriving). */
   reclaimKeys: () => native?.reclaimKeyFocus(),
+  /** Tell VoiceOver the controls changed, keeping its focus where it is (older builds without it ignore this). */
+  refreshAccessibility: () => native?.refreshAccessibility?.(),
   /** The running build, e.g. "version 1.0.0, build 12" (empty where there is no native engine). */
   buildInfo: (): string => {
     try {

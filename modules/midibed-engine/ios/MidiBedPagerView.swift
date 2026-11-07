@@ -41,6 +41,13 @@ class MidiBedPagerView: ExpoView {
     if window != nil { becomeFirstResponder() }
   }
 
+  /// After a setting changed the controls on screen (some appear, some go), tell VoiceOver the layout changed
+  /// and keep it on the control the player is using, so it re-reads the screen without jumping to the top.
+  static func refreshAccessibility() {
+    guard let el = UIAccessibility.focusedElement(using: .notificationVoiceOver) else { return }
+    UIAccessibility.post(notification: .layoutChanged, argument: el)
+  }
+
   func reclaimFirstResponder() {
     if !isFirstResponder { becomeFirstResponder() }
   }

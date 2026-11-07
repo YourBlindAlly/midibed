@@ -164,6 +164,10 @@ public class MidiBedEngineModule: Module {
       return "version \(version), build \(build)"
     }
 
+    Function("refreshAccessibility") { () in
+      DispatchQueue.main.async { MidiBedPagerView.refreshAccessibility() }
+    }
+
     // Give keyboard focus back to the key-catching view after a text field has had it.
     Function("reclaimKeyFocus") { () in
       DispatchQueue.main.async { MidiBedPagerView.current?.reclaimFirstResponder() }
