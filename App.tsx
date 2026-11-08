@@ -217,6 +217,7 @@ export default function App() {
   // Always-current copy of the settings for event handlers that outlive a render.
   const latest = useRef(state);
   latest.current = state;
+  const lastWarned = useRef('');
 
   // The engine needs every scene to be able to move on by itself. A short pause avoids
   // rebuilding them on every swipe of a stepper.
@@ -229,6 +230,17 @@ export default function App() {
   useEffect(() => {
     return onScene((e) => {
       setAdvanceInfo({ barsLeft: e.barsLeft, target: e.target });
+      // Warn which scene is coming, a chosen number of bars before the scene moves on by itself.
+      const ahead = latest.current.nextSceneAhead;
+      if (ahead > 0 && e.reason === 'tick' && e.target >= 0 && e.barsLeft === ahead) {
+        const key = `${e.index}>${e.target}`;
+        if (lastWarned.current !== key) {
+          lastWarned.current = key;
+          announceLater(`Next, ${sceneLabel(latest.current, e.target)}`, 50);
+        }
+      } else if (e.barsLeft > ahead) {
+        lastWarned.current = '';
+      }
       if (e.reason === 'auto' && latest.current.activeScene !== e.index) {
         // The engine has already moved to this scene: follow it, without asking it to switch again.
         setState((s) => switchScene(s, e.index));
@@ -2092,6 +2104,15 @@ export default function App() {
           </Section>
 
           <Section title="Changing scenes">
+            <Stepper
+              label="Say the next scene ahead"
+              value={state.nextSceneAhead}
+              onChange={(v) => patch({ nextSceneAhead: v })}
+              min={0}
+              max={8}
+              format={(v) => (v === 0 ? 'Off' : v === 1 ? '1 bar before' : `${v} bars before`)}
+              hint="When a scene is set to move on by itself, MidiBed says which scene is coming this many bars before it happens"
+            />
             <Stepper
               label="Scenes change at"
               value={state.sceneChangeAt}

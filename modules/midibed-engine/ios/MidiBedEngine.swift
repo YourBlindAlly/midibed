@@ -710,6 +710,7 @@ final class MidiBedEngine {
             self.pendingLandTick = self.landingTick(cur)
             self.scheduleTransition(decoded.transitions.entrance, tag: 0, barTime: self.timeOfTick(self.pendingLandTick, cur), cfg: decoded)
           }
+          self.preloadLanes(decoded)
         }
         return
       }
@@ -2109,6 +2110,18 @@ final class MidiBedEngine {
     return (poolPick[i] + 1) % n
   }
 
+  /// A scene switch is waiting for its bar line: start decoding the loops it will use now, so they are ready when it
+  /// lands. Only plain lanes that are switched on and whose file differs from what the lane holds; pool lanes are
+  /// left alone (they use the same hold-ready slot for their own next loop).
+  private func preloadLanes(_ cfg: MidiBedConfig) {
+    for i in 0..<min(LoopPlayer.laneCount, cfg.lanes.count) {
+      let l = cfg.lanes[i]
+      guard l.on, !l.path.isEmpty, poolSig[i] == "", l.path != lanePath[i] else { continue }
+      if let pool = l.pool, pool.count > 1, l.ambience != true { continue }
+      synth.loops.prepare(lane: i, path: l.path)
+    }
+  }
+
   /// The lanes of a configuration just installed: load the files, set the levels, and cut a lane whose file
   /// changed (the new one starts on the next bar line when it has finished loading).
   private func applyLanes(_ cfg: MidiBedConfig) {
@@ -2588,6 +2601,8 @@ final class MidiBedEngine {
         }
       }
     }
+    // The scene it is going to: get its loops decoded during the last bars (asking again is harmless).
+    if left > 0, left <= 4, target >= 0, target < sceneConfigs.count { preloadLanes(sceneConfigs[target]) }
     if left > 0 { emitScene(index: cfg.sceneIndex, reason: "tick") }
   }
 

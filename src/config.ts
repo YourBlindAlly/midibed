@@ -296,6 +296,8 @@ export type BedState = {
   filterHold: boolean;
   /** When a scene or journey change lands: 0 next bar, 1 end of the progression, 2 end of the scene (src/sceneChange.ts). Global. */
   sceneChangeAt: number;
+  /** Say which scene is coming this many bars before the scene moves on by itself (0 = don't). Global. */
+  nextSceneAhead: number;
   /** A MIDI controller (foot pedal) running the same actions as the keyboard shortcuts. Global. */
   midiControl: MidiControlState;
   /** The built-in bass voice (see bassvoice.ts). Global. */
@@ -839,6 +841,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   filterGlide: 2,
   filterHold: false,
   sceneChangeAt: 0,
+  nextSceneAhead: 2,
   midiControl: { enabled: true, channel: -1, map: '{}', double: '{}', doubleMs: 400, hold: '{}', holdMs: 700, releases: false, announceDevices: true },
   bassVoice: defaultBassVoice,
   fx: defaultFx,

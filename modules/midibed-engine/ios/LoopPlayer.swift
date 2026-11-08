@@ -115,9 +115,17 @@ final class LoopPlayer {
     guard lane >= 0, lane < LoopPlayer.slots else { return }
     os_unfair_lock_lock(lock)
     let same = lanes[lane].path == path
+    var adopted = false
     if !same {
       lanes[lane].path = path
       lanes[lane].raw = nil
+      // A file already decoded ahead of time (a queued scene's loop, see `prepare`) is used at once.
+      if lanes[lane].nextPath == path, let nr = lanes[lane].nextRaw {
+        lanes[lane].raw = nr
+        lanes[lane].nextRaw = nil
+        lanes[lane].nextPath = ""
+        adopted = true
+      }
       lanes[lane].stretched = nil
       lanes[lane].stretchedFrames = 0
       lanes[lane].failedFrames = 0
@@ -135,6 +143,14 @@ final class LoopPlayer {
     }
     os_unfair_lock_unlock(lock)
     if same || path.isEmpty { return }
+    if adopted {
+      loader.async { [weak self] in
+        guard let self = self else { return }
+        self.considerStretch(lane)
+        self.onLoaded?(lane)
+      }
+      return
+    }
     loader.async { [weak self] in
       guard let self = self, let decoded = LoopPlayer.decode(path: path) else { return }
       os_unfair_lock_lock(self.lock)
