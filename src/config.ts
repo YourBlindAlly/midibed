@@ -33,7 +33,8 @@ import { GM_DRUMS } from './gm';
 import { ProfileChoice, defaultProfileChoice, getProfile } from './profiles';
 import { BassVoiceState, defaultBassVoice } from './bassvoice';
 import { FillState, defaultFill, fillPalette } from './fill';
-import { cleanCustom, countOf, maskOf } from './stepedit';
+import { cleanCustom, countOf, hasStepExtras, maskOf } from './stepedit';
+import { HAT_VOICES } from './drumvoice';
 import type { MidiControlState } from './midicontrol';
 import { MixerState, defaultMixer } from './mixer';
 import { Favorite, addFav, favsFromPrograms, parseFavMap, stringifyFavMap } from './soundFavs';
@@ -57,8 +58,12 @@ export type DrumState = {
   ghostVelocity: number; // 1-127
   /** Percent chance (1-100) that a ghost note plays; 100 = every one, as before. */
   ghostChance: number;
-  /** Step by step edits of the pattern ('x' hit, 'g' ghost, '.' off, one character per step); '' = none. See stepedit.ts. */
+  /** Step by step edits of the pattern ('x' hit, 'g' ghost, 'o' open hat, '2'-'4' ratchet, '.' off, one character per step); '' = none. See stepedit.ts. */
   custom: string;
+  /** The note an open hat step plays (a hat drum; default 46, the General MIDI open hat). Global like the note. */
+  openNote?: number;
+  /** How the quick hits of a ratchet step are shaped: 0 rising, 1 even, 2 fading. Global. */
+  ratchetShape?: number;
   /** Every Nth hit of the main pattern is louder (0 = off, else 2-8), by accentBoost percent. */
   accentEvery: number;
   accentBoost: number; // percent 0-100
@@ -1492,6 +1497,10 @@ export function toEngineJson(s: BedState): string {
       mask: custom ? maskOf(custom, 'x') : d.rhythm > 0 ? rhythmMask(d.rhythm) : 0,
       useMask: custom ? true : d.rhythm > 0,
       ghostMask: custom ? maskOf(custom, 'g') : 0,
+      // Only sent when the steps use open hits or ratchets, so a pattern without them reads exactly as before.
+      ...(custom && hasStepExtras(custom)
+        ? { stepText: custom, openNote: HAT_VOICES.includes(d.voice) ? d.openNote ?? 46 : d.note, ratchetShape: d.ratchetShape ?? 0 }
+        : {}),
       rotation: d.rotation,
       velocity: d.velocity,
       probability: d.probability / 100,

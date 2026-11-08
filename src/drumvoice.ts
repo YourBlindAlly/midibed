@@ -18,6 +18,9 @@ export const BODY_SNARE_TYPES = [18, 19, 20];
 /** The hats with a metal/noise mix and a ring length: they reuse the body and rattle settings (shown as metal and ring length). A new one cuts off any hat still ringing. */
 export const METAL_HAT_TYPES = [21, 22, 23];
 
+/** Every sound type that is a hat: an open hat step can play these with a long ring (see stepedit.ts). */
+export const HAT_VOICES = [4, 5, 21, 22, 23];
+
 export type DrumVoiceSettings = {
   voice: number; // index into DRUM_TYPES
   tune: number; // semitones, -12..12
@@ -31,6 +34,8 @@ export type DrumVoiceSettings = {
   level: number; // percent, 0..100
   /** percent, 0..100: how much each hit differs from the last. 0 = every hit is exactly the same sound (tight and even); 100 = every hit a little different, as a real shaker is. */
   variation: number;
+  /** The note an open hat step plays, for a hat sound (the built-in sound rings longer for it). */
+  openNote?: number;
   /** For the sample pack sound: which pack and which group of it (src/packs.ts). */
   packId?: string;
   packGroup?: string;
@@ -75,6 +80,10 @@ export function drumVoicesJson(
       rattle: clamp(d.rattle ?? 50, 0, 100) / 100,
       level: clamp(d.level ?? 100, 0, 100) / 100,
       variation: clamp(d.variation ?? 100, 0, 100) / 100,
+      // A hat that is not already the open hat gets a second sound for its open steps, on this note.
+      ...(HAT_VOICES.includes(d.voice ?? 0) && d.voice !== 5 && clamp(Math.round(d.openNote ?? 46), 0, 127) !== clamp(Math.round(d.note), 0, 127)
+        ? { openNote: clamp(Math.round(d.openNote ?? 46), 0, 127) }
+        : {}),
     })),
   );
 }

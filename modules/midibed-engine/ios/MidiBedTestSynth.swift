@@ -811,7 +811,7 @@ final class MidiBedTestSynth {
         }
       }
       // A new hat of the metal/noise kind cuts off any hat still ringing.
-      if v.kind >= 21 && v.kind <= 23 {
+      if v.kind == 4 || (v.kind >= 21 && v.kind <= 23) {
         for i in 0..<drumCount where drums[i].active {
           let k = drums[i].kind
           if k == 4 || k == 5 || (k >= 21 && k <= 23) { drums[i].choking = true }

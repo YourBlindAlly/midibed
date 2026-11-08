@@ -85,3 +85,36 @@ describe('editing a pattern one step at a time', () => {
     expect(addUserRhythm('not json', 'x...', '')?.name).toBe('My rhythm');
   });
 });
+
+describe('open hits and ratchets in the step text', () => {
+  it('keeps o, 2, 3 and 4 and counts them as hits', () => {
+    expect(cleanCustom('x.o.2.3.4.g...')).toBe('x.o.2.3.4.g...');
+    expect(countOf('xo234g.', 'x')).toBe(5);
+    expect(maskOf('xo234g.', 'x')).toBe(31);
+    expect(maskOf('xo234g.', 'g')).toBe(32);
+  });
+  it('steps through the states', () => {
+    expect(stepStateAt('.xg234o'.slice(1), 0)).toBe(1);
+    const base = { rhythm: 0, hits: 0, steps: 4, custom: '....' };
+    expect(withStep(base, 1, 6)).toBe('.o..');
+    expect(withStep(base, 2, 4)).toBe('..3.');
+    expect(stepStateAt('.o', 1)).toBe(6);
+    expect(stepStateAt('3', 0)).toBe(4);
+  });
+  it('is only sent to the engine when it uses them', () => {
+    const { defaultState, toEngineJson } = require('../src/config');
+    const plain = JSON.parse(toEngineJson({ ...defaultState, drums: defaultState.drums.map((d: any, k: number) => (k === 2 ? { ...d, custom: 'x.x.x.x.x.x.x.x.' } : d)) }));
+    expect(plain.drums[2].stepText).toBeUndefined();
+    const hat = JSON.parse(toEngineJson({ ...defaultState, drums: defaultState.drums.map((d: any, k: number) => (k === 2 ? { ...d, custom: 'x.x.x.x.x.x.x.o3' } : d)) }));
+    expect(hat.drums[2].stepText).toBe('x.x.x.x.x.x.x.o3');
+    expect(hat.drums[2].openNote).toBe(46);
+    expect(hat.drums[2].mask).toBe(2 ** 16 - 1 - (2 ** 1 + 2 ** 3 + 2 ** 5 + 2 ** 7 + 2 ** 9 + 2 ** 11 + 2 ** 13));
+  });
+  it('gives a hat its open sound only when it has a different open note', () => {
+    const { drumVoicesJson } = require('../src/drumvoice');
+    expect(JSON.parse(drumVoicesJson([{ note: 42, channel: 9, voice: 21 }]))[0].openNote).toBe(46);
+    expect(JSON.parse(drumVoicesJson([{ note: 46, channel: 9, voice: 21 }]))[0].openNote).toBeUndefined();
+    expect(JSON.parse(drumVoicesJson([{ note: 42, channel: 9, voice: 5 }]))[0].openNote).toBeUndefined();
+    expect(JSON.parse(drumVoicesJson([{ note: 36, channel: 9, voice: 0 }]))[0].openNote).toBeUndefined();
+  });
+});

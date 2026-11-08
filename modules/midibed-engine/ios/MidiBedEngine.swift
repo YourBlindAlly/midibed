@@ -27,6 +27,9 @@ struct MidiBedDrumConfig: Decodable {
   var accentOffset: Int     // the hit the accents start on (0 = the first)
   var keepFirst: Bool       // the pattern's first hit ignores the chance
   var looseMs: Double       // each hit up to this many ms late, at random
+  var stepText: String?     // steps edited one by one with open hits ('o') or ratchets ('2' '3' '4'); one character per step
+  var openNote: Int?        // the note an open step plays
+  var ratchetShape: Int?    // 0 rising, 1 even, 2 fading
 }
 
 /// An orchestrated stop: where it lands and how it sounds.
@@ -884,14 +887,25 @@ final class MidiBedEngine {
       var level: Double
       var variation: Double?
       var group: Int?
+      var openNote: Int?
     }
     guard let data = json.data(using: .utf8), let list = try? JSONDecoder().decode([DrumVoiceConfig].self, from: data) else {
       NSLog("MidiBedEngine: could not decode drum voices")
       return
     }
     queue.async {
+      // A hat that has an open note gets a second sound on it: the same hat with a long ring (the plain closed hat
+      // becomes the open hat). They come first, so a drum that really uses that note wins.
+      let opens = list.compactMap { d -> DrumVoiceConfig? in
+        guard let on = d.openNote, on >= 0, on < 128, [4, 21, 22, 23].contains(d.type) else { return nil }
+        var o = d
+        o.note = on
+        o.openNote = nil
+        if d.type == 4 { o.type = 5 } else { o.rattle = max(d.rattle ?? 0.5, 0.85) }
+        return o
+      }
       self.synth.configureDrums(
-        list.map { (note: $0.note, kind: $0.type, tune: Float($0.tune), decay: Float($0.decay), tone: Float($0.tone), snap: Float($0.snap), body: Float($0.body ?? 0.5), rattle: Float($0.rattle ?? 0.5), level: Float($0.level), variation: Float($0.variation ?? 1), group: $0.group ?? -1) })
+        (opens + list).map { (note: $0.note, kind: $0.type, tune: Float($0.tune), decay: Float($0.decay), tone: Float($0.tone), snap: Float($0.snap), body: Float($0.body ?? 0.5), rattle: Float($0.rattle ?? 0.5), level: Float($0.level), variation: Float($0.variation ?? 1), group: $0.group ?? -1) })
     }
   }
 
@@ -1656,12 +1670,35 @@ final class MidiBedEngine {
       if i < drumLevels.count { vel *= drumLevels[i] }
       vel *= endFade
       guard vel >= 1 else { continue }
-      let v = UInt8(max(1, min(127, Int(vel))))
       let ch = UInt8(max(0, min(15, drum.channel)))
       let loose = drum.looseMs > 0 ? Double.random(in: 0..<1, using: &rng) * drum.looseMs / 1000 : 0
       let start = time + swingDelay + loose
-      pending.append(Pending(time: start, status: 0x90 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: v))
-      pending.append(Pending(time: start + 0.09, status: 0x80 | ch, d1: UInt8(max(0, min(127, drum.note))), d2: 0))
+      // A step edited as an open hit plays the open note; a double, triple or four-hit step plays that many quick
+      // hits, evenly spread over the step, shaped rising, even or fading.
+      var noteToPlay = drum.note
+      var count = 1
+      if !ghost, let st = drum.stepText?.utf8, pos >= 0, pos < st.count {
+        let c = st[st.index(st.startIndex, offsetBy: pos)]
+        if c == UInt8(ascii: "o") { noteToPlay = drum.openNote ?? drum.note }
+        if c == UInt8(ascii: "2") { count = 2 } else if c == UInt8(ascii: "3") { count = 3 } else if c == UInt8(ascii: "4") { count = 4 }
+      }
+      let nb = UInt8(max(0, min(127, noteToPlay)))
+      let sub = stepDur / Double(count)
+      for k in 0..<count {
+        var kv = vel
+        if count > 1 {
+          let f = Double(k) / Double(count - 1)
+          switch drum.ratchetShape ?? 0 {
+          case 0: kv *= 0.55 + 0.45 * f
+          case 2: kv *= 1 - 0.45 * f
+          default: break
+          }
+        }
+        let v = UInt8(max(1, min(127, Int(kv))))
+        let t0 = start + Double(k) * sub
+        pending.append(Pending(time: t0, status: 0x90 | ch, d1: nb, d2: v))
+        pending.append(Pending(time: t0 + min(0.09, sub * 0.8), status: 0x80 | ch, d1: nb, d2: 0))
+      }
     }
   }
 

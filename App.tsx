@@ -67,7 +67,7 @@ import { collapseAll, expandAll, parseSectionUi, toggleSection } from './src/sec
 import { ENDING_FADE_NAMES, STOP_STYLE_NAMES, barsLeftText, endingJson, endingSentence, nextStopStyle } from './src/ending';
 import { DELAY_NOTES, FxPart, FxPartState, panText, uglyFxJson } from './src/uglyfx';
 import { BASS_PARAMS, BASS_PRESETS, BassParamDef, applyBassPreset, bassVoiceJson, paramText, setBassParam } from './src/bassvoice';
-import { BODY_SNARE_TYPES, DRUM_TYPES, METAL_HAT_TYPES, SAMPLE_PACK_TYPE, drumTuneText, drumVoicesJson } from './src/drumvoice';
+import { BODY_SNARE_TYPES, DRUM_TYPES, HAT_VOICES, METAL_HAT_TYPES, SAMPLE_PACK_TYPE, drumTuneText, drumVoicesJson } from './src/drumvoice';
 import { MAX_PACK_GROUPS, cleanGroupName, groupNames, levelOf, packNames, parsePacks, setPackDir, withoutPack, type PackSound } from './src/packs';
 import { FillState, describeFill, fillPalette } from './src/fill';
 import { LAYER_NAMES, Layer, SHORTCUT_HELP, ShortcutAction, actionForKey } from './src/shortcuts';
@@ -2731,7 +2731,7 @@ export default function App() {
                 <Text style={styles.pattern}>{d.custom ? rotatedText(d.custom, d.rotation) : d.rhythm > 0 ? rhythmText(d.rhythm, d.rotation) : patternText(d.hits, d.steps, d.rotation)}</Text>
               </View>
               <Section title={`${d.name}: edit the pattern step by step`} id={`${d.name}: Edit the pattern step by step`} inner>
-                <Note>Pick a step, then say whether it is off, a hit, or a ghost (a quiet hit). Your edits start from the pattern above and replace it for this drum. Rotation is applied on top of your edits.</Note>
+                <Note>Pick a step, then say what it is: off, a hit, a ghost (a quiet hit), a double, triple or four-hit roll (quick hits inside the step), or for a hat an open hit. Your edits start from the pattern above and replace it for this drum. Rotation is applied on top of your edits.</Note>
                 <Stepper
                   label={`${d.name} step to edit`}
                   value={Math.min(editStep, patternSteps(d) - 1)}
@@ -2746,9 +2746,29 @@ export default function App() {
                   value={stepStateAt(patternString(d), Math.min(editStep, patternSteps(d) - 1))}
                   onChange={(v) => patchDrum(i, { custom: withStep(d, Math.min(editStep, patternSteps(d) - 1), v as StepState) })}
                   min={0}
-                  max={2}
+                  max={HAT_VOICES.includes(d.voice) ? 6 : 5}
                   format={(v) => STEP_STATE_NAMES[v]}
-                  hint="Off, a hit, or a ghost note, which plays quietly at the ghost velocity and chance set below"
+                  hint="Off, a hit, a ghost note (quiet, at the ghost velocity and chance set below), a double, triple or four-hit roll, or an open hat hit that rings until the next hat cuts it off"
+                />
+                {HAT_VOICES.includes(d.voice) && (
+                  <Stepper
+                    label={`${d.name} open hat note`}
+                    value={d.openNote ?? 46}
+                    onChange={(v) => patchDrum(i, { openNote: v })}
+                    min={0}
+                    max={127}
+                    format={(v) => noteLabel(v)}
+                    hint="The note an open hat step plays. 46 is the General MIDI open hat, for other apps. The built-in sound rings longer for it"
+                  />
+                )}
+                <Stepper
+                  label={`${d.name} roll shape`}
+                  value={d.ratchetShape ?? 0}
+                  onChange={(v) => patchDrum(i, { ratchetShape: v })}
+                  min={0}
+                  max={2}
+                  format={(v) => ['Rising', 'Even', 'Fading'][v]}
+                  hint="How loud the quick hits of a double, triple or four-hit step are: rising, even, or fading"
                 />
                 {!!d.custom && (
                   <ActionButton label={`${d.name} back to the plain pattern`} hint="Throws away your step edits and goes back to the rhythm or hits and steps above" onPress={() => patchDrum(i, { custom: '' })} />
