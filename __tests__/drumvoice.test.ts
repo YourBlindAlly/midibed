@@ -59,8 +59,8 @@ describe('built-in drum sounds', () => {
     const path = require('path');
     const swift: string = fs.readFileSync(path.join(__dirname, '..', 'modules', 'midibed-engine', 'ios', 'MidiBedTestSynth.swift'), 'utf8');
     const doc = swift.slice(swift.indexOf('/// One drum hit.'), swift.indexOf('private struct DrumVoice'));
-    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 sharp shaker', '7 tom', '8 wood block', '9 tambourine', '10 low tom', '11 mid tom', '12 high tom', '13 jingle tambourine', '14 tube shaker', '15 seed shaker', '16 egg shaker', '17 sample pack', '18 round analog snare', '19 bright rattle snare', '20 crisp digital snare', '21 tight analog hat', '22 bright crisp hat', '23 dusty lo-fi hat'].forEach((s) => expect(doc).toContain(s));
-    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'sharp shaker (cabasa-like)', 'tom', 'wood block', 'tambourine', 'low tom', 'mid tom', 'high tom', 'jingle tambourine', 'tube shaker', 'seed shaker (maraca)', 'egg shaker (small)', 'sample pack', 'snare, round analog', 'snare, bright rattle', 'snare, crisp digital', 'hat, tight analog', 'hat, bright crisp', 'hat, dusty lo-fi']);
+    ['0 kick', '1 snare', '2 rim click', '3 clap', '4 closed hat', '5 open hat', '6 sharp shaker', '7 tom', '8 wood block', '9 tambourine', '10 low tom', '11 mid tom', '12 high tom', '13 jingle tambourine', '14 tube shaker', '15 seed shaker', '16 egg shaker', '17 sample pack', '18 round analog snare', '19 bright rattle snare', '20 crisp digital snare', '21 tight analog hat', '22 bright crisp hat', '23 dusty lo-fi hat', '24 606 style hat'].forEach((s) => expect(doc).toContain(s));
+    expect(DRUM_TYPES.map((n) => n.toLowerCase())).toEqual(['kick', 'snare', 'rim click', 'clap', 'closed hat', 'open hat', 'sharp shaker (cabasa-like)', 'tom', 'wood block', 'tambourine', 'low tom', 'mid tom', 'high tom', 'jingle tambourine', 'tube shaker', 'seed shaker (maraca)', 'egg shaker (small)', 'sample pack', 'snare, round analog', 'snare, bright rattle', 'snare, crisp digital', 'hat, tight analog', 'hat, bright crisp', 'hat, dusty lo-fi', 'hat, 606 style']);
   });
 
   it('the three body snares take body and rattle, and still count as snares in fills', () => {
@@ -74,10 +74,10 @@ describe('built-in drum sounds', () => {
     BODY_SNARE_TYPES.forEach((v: number) => expect(fillPalette([{ note: 38, channel: 9, velocity: 90, voice: v }])).toEqual([{ note: 38, channel: 9, role: 0, velocity: 90 }]));
   });
 
-  it('the three metal hats are named, and take metal and ring length through body and rattle', () => {
+  it('the four metal hats are named, and take metal and ring length through body and rattle', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { METAL_HAT_TYPES } = require('../src/drumvoice');
-    expect(METAL_HAT_TYPES.map((n: number) => DRUM_TYPES[n])).toEqual(['Hat, tight analog', 'Hat, bright crisp', 'Hat, dusty lo-fi']);
+    expect(METAL_HAT_TYPES.map((n: number) => DRUM_TYPES[n])).toEqual(['Hat, tight analog', 'Hat, bright crisp', 'Hat, dusty lo-fi', 'Hat, 606 style']);
     const j = JSON.parse(drumVoicesJson([{ note: 42, channel: 9, voice: 21, body: 70, rattle: 100 }]));
     expect(j[0]).toMatchObject({ type: 21, body: 0.7, rattle: 1 });
   });

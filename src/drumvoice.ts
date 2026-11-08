@@ -7,7 +7,7 @@
  * Only the built-in sound uses this. A drum sent to another app is just its note and channel, as before.
  */
 // New types go at the END so a saved type number keeps its meaning (the native switch uses the same numbers).
-export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Sharp shaker (cabasa-like)', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine', 'Tube shaker', 'Seed shaker (maraca)', 'Egg shaker (small)', 'Sample pack', 'Snare, round analog', 'Snare, bright rattle', 'Snare, crisp digital', 'Hat, tight analog', 'Hat, bright crisp', 'Hat, dusty lo-fi'];
+export const DRUM_TYPES = ['Kick', 'Snare', 'Rim click', 'Clap', 'Closed hat', 'Open hat', 'Sharp shaker (cabasa-like)', 'Tom', 'Wood block', 'Tambourine', 'Low tom', 'Mid tom', 'High tom', 'Jingle tambourine', 'Tube shaker', 'Seed shaker (maraca)', 'Egg shaker (small)', 'Sample pack', 'Snare, round analog', 'Snare, bright rattle', 'Snare, crisp digital', 'Hat, tight analog', 'Hat, bright crisp', 'Hat, dusty lo-fi', 'Hat, 606 style'];
 
 /** The sound type that plays recorded sounds from an imported pack (src/packs.ts). */
 export const SAMPLE_PACK_TYPE = 17;
@@ -16,10 +16,10 @@ export const SAMPLE_PACK_TYPE = 17;
 export const BODY_SNARE_TYPES = [18, 19, 20];
 
 /** The hats with a metal/noise mix and a ring length: they reuse the body and rattle settings (shown as metal and ring length). A new one cuts off any hat still ringing. */
-export const METAL_HAT_TYPES = [21, 22, 23];
+export const METAL_HAT_TYPES = [21, 22, 23, 24];
 
 /** Every sound type that is a hat: an open hat step can play these with a long ring (see stepedit.ts). */
-export const HAT_VOICES = [4, 5, 21, 22, 23];
+export const HAT_VOICES = [4, 5, 21, 22, 23, 24];
 
 export type DrumVoiceSettings = {
   voice: number; // index into DRUM_TYPES

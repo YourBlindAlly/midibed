@@ -66,7 +66,7 @@ final class MidiBedTestSynth {
   }
 
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 sharp shaker (cabasa-like), 7 tom,
-  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker, 17 sample pack (a recorded sound from an imported pack), 18 round analog snare, 19 bright rattle snare, 20 crisp digital snare, 21 tight analog hat, 22 bright crisp hat, 23 dusty lo-fi hat (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
+  /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker, 17 sample pack (a recorded sound from an imported pack), 18 round analog snare, 19 bright rattle snare, 20 crisp digital snare, 21 tight analog hat, 22 bright crisp hat, 23 dusty lo-fi hat, 24 606 style hat (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
   private struct DrumVoice {
     var active = false
@@ -376,7 +376,7 @@ final class MidiBedTestSynth {
   func configureDrums(_ list: [(note: Int, kind: Int, tune: Float, decay: Float, tone: Float, snap: Float, body: Float, rattle: Float, level: Float, variation: Float, group: Int)]) {
     for i in 0..<128 { drumPatches[i] = DrumPatch() }
     for d in list where d.note >= 0 && d.note < 128 {
-      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(23, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, body: max(0, min(1, d.body)), rattle: max(0, min(1, d.rattle)), level: d.level, variation: max(0, min(1, d.variation)), group: d.group)
+      drumPatches[d.note] = DrumPatch(valid: true, kind: max(0, min(24, d.kind)), tune: d.tune, decay: d.decay, tone: d.tone, snap: d.snap, body: max(0, min(1, d.body)), rattle: max(0, min(1, d.rattle)), level: d.level, variation: max(0, min(1, d.variation)), group: d.group)
     }
   }
 
@@ -811,10 +811,10 @@ final class MidiBedTestSynth {
         }
       }
       // A new hat of the metal/noise kind cuts off any hat still ringing.
-      if v.kind == 4 || (v.kind >= 21 && v.kind <= 23) {
+      if v.kind == 4 || (v.kind >= 21 && v.kind <= 24) {
         for i in 0..<drumCount where drums[i].active {
           let k = drums[i].kind
-          if k == 4 || k == 5 || (k >= 21 && k <= 23) { drums[i].choking = true }
+          if k == 4 || k == 5 || (k >= 21 && k <= 24) { drums[i].choking = true }
         }
       }
       // Reuse a free voice, else steal the first one.
@@ -1352,7 +1352,49 @@ final class MidiBedTestSynth {
           s = drums[i].lp * env * gain + noise * snap * 0.3 * expf(-t * 900)
           if kd == 23 { s = floorf(s * 32 + 0.5) / 32 } // lo-fi grit
           alive = t <= min(2.5, 7 / rate)
+        case 24: // 606 style hat: a swarm of six square waves, a resonant peak (tone moves it 4-7 kHz), distortion (metal = crunch), a quick burst, then a high-pass at 3.4 kHz (scratchpad hat606.py)
+          let crunch = drums[i].body
+          let ringAmt = drums[i].rattle
+          let mul: Float = f
+          var sq: Float = 0
+          sq += sinf(2 * Float.pi * 328.5 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 487.0 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 591.4 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 836.3 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 864.0 * mul * t) >= 0 ? 1 : -1
+          sq += sinf(2 * Float.pi * 1280.0 * mul * t) >= 0 ? 1 : -1
+          sq /= 6
+          // resonant band-pass (state-variable filter) added to the swarm
+          let fc: Float = 4000 + 3000 * tone
+          let g = tanf(Float.pi * min(fc, 0.45 * sr) / sr)
+          let kq: Float = 1 / 3.5
+          let a1 = 1 / (1 + g * (g + kq))
+          let a2 = g * a1
+          let a3 = g * a2
+          let v3 = sq - drums[i].s2
+          let v1 = a1 * drums[i].s1 + a2 * v3
+          let v2 = drums[i].s2 + a2 * drums[i].s1 + a3 * v3
+          drums[i].s1 = 2 * v1 - drums[i].s1
+          drums[i].s2 = 2 * v2 - drums[i].s2
+          let x = sq * 0.35 + v1 * 1.6
+          // high-pass at 400 Hz, gentle roll-off above 10 kHz
+          let r1 = expf(-2 * Float.pi * 400 / sr)
+          let h1 = x - drums[i].xPrev + r1 * drums[i].hpPrev
+          drums[i].xPrev = x
+          drums[i].hpPrev = h1
+          drums[i].lp += (1 - expf(-2 * Float.pi * 10000 / sr)) * (h1 - drums[i].lp)
+          let drive: Float = 1 + 6 * crunch
+          let y = tanhf(drums[i].lp * drive) / tanhf(drive)
+          let rate = max(8, 70 - 62 * ringAmt) / D
+          let z = y * expf(-t * rate)
+          let r2 = expf(-2 * Float.pi * 3400 / sr)
+          let h2 = z - drums[i].xPrev2 + r2 * drums[i].hp2Prev
+          drums[i].xPrev2 = z
+          drums[i].hp2Prev = h2
+          s = h2 * 0.30 + noise * snap * 0.12 * expf(-t * 900)
+          alive = t <= min(2.5, 7 / rate)
         case 2: // rim click: two short tones and a click
+
           let tones = (sinf(2 * Float.pi * 1700 * f * t) * 0.5 + sinf(2 * Float.pi * 480 * f * t) * 0.5) * expf(-t * 420 / D)
           s = tones * 0.9 + noise * snap * 0.6 * expf(-t * 1500)
           alive = t <= 0.05 * D + 0.02

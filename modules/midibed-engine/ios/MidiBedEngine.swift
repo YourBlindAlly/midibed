@@ -897,7 +897,7 @@ final class MidiBedEngine {
       // A hat that has an open note gets a second sound on it: the same hat with a long ring (the plain closed hat
       // becomes the open hat). They come first, so a drum that really uses that note wins.
       let opens = list.compactMap { d -> DrumVoiceConfig? in
-        guard let on = d.openNote, on >= 0, on < 128, [4, 21, 22, 23].contains(d.type) else { return nil }
+        guard let on = d.openNote, on >= 0, on < 128, [4, 21, 22, 23, 24].contains(d.type) else { return nil }
         var o = d
         o.note = on
         o.openNote = nil
