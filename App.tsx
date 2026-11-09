@@ -3,6 +3,7 @@ import { KEYS_FOLLOW_NAMES, KEYS_RHYTHMS, KEYS_SKIP_NAMES, KeysState, keysPatter
 import { PAD_PRESETS, applyPadPreset, padVoiceJson, setPadVoice } from './src/padvoice';
 import { PREROLLS, networkJson } from './src/network';
 import { KEYS_PRESETS, KEYS_TYPE_NAMES, applyKeysPreset, keysVoiceJson, setKeysVoice } from './src/keysvoice';
+import { FM_PRESETS, applyFMPreset, fmLayerJson, setFMPart } from './src/fmlayer';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -487,6 +488,38 @@ export default function App() {
 
   const patch = (p: Partial<BedState>) => setState((s) => ({ ...s, ...p }));
 
+  // The FM layer (sizzle) section for the chord pad or the Keys.
+  const renderFM = (which: 'pad' | 'keys') => {
+    const fm = state.fmLayer[which];
+    const name = which === 'pad' ? 'Chord pad' : 'Keys';
+    const setFM = (change: Parameters<typeof setFMPart>[1]) => patch({ fmLayer: { ...state.fmLayer, [which]: setFMPart(fm, change) } });
+    return (
+      <Section inner title={`${name}: FM layer (sizzle)`}>
+        <Note>
+          A little FM air laid over the {name.toLowerCase()}'s own sound: a high, slightly out-of-tune sparkle that blooms in after each note and slowly pulses. It goes through this part's level, filter and effects. Keep the level low, it is meant as a touch. Built-in sound only.
+        </Note>
+        <Stepper
+          label={`${name} FM layer preset`}
+          value={fm.preset}
+          onChange={(v) => patch({ fmLayer: { ...state.fmLayer, [which]: applyFMPreset(fm, v) } })}
+          min={0}
+          max={FM_PRESETS.length - 1}
+          format={(v) => FM_PRESETS[v].name}
+          hint="Sets every FM layer setting at once. Off switches the layer off. Changing any setting yourself makes it Custom"
+        />
+        <Stepper label={`${name} FM layer level`} value={fm.level} onChange={(v) => setFM({ level: v })} min={0} max={100} step={2} format={(v) => (v === 0 ? 'off' : `${v} percent`)} hint="How loud the sparkle is under the part's own sound. 0 switches the layer off" />
+        {fm.level > 0 && (
+          <>
+            <Stepper label={`${name} FM sizzle`} value={fm.sizzle} onChange={(v) => setFM({ sizzle: v })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How much high sparkle there is. Low is a soft shine, high is a fizzy bell" />
+            <Stepper label={`${name} FM shimmer speed`} value={fm.shimmer} onChange={(v) => setFM({ shimmer: v })} min={1} max={80} step={1} format={(v) => `${(v / 10).toFixed(1)} per second`} hint="How fast the sparkle pulses. Slow is a gentle breathing, fast is a shimmer" />
+            <Stepper label={`${name} FM octave`} value={fm.octave} onChange={(v) => setFM({ octave: v })} min={-1} max={2} format={(v) => (v === 0 ? 'same octave' : v === -1 ? 'one octave down' : v === 1 ? 'one octave up' : 'two octaves up')} hint="Where the sparkle sits compared with the notes. Up gives air, the same octave gives thickness" />
+            <Stepper label={`${name} FM bloom time`} value={fm.bloom} onChange={(v) => setFM({ bloom: v })} min={1} max={80} step={1} format={(v) => `${(v / 10).toFixed(1)} seconds`} hint="How long after a note starts the sparkle takes to arrive. Longer is a slower, softer bloom" />
+          </>
+        )}
+      </Section>
+    );
+  };
+
 
   // Device profiles: names and shortcuts for the apps being driven (src/profiles.ts).
   const drumProfile = getProfile(state.profiles.drums);
@@ -894,6 +927,14 @@ export default function App() {
     const t = setTimeout(() => engine.setKeysVoice(keysVoiceJsonText), 80);
     return () => clearTimeout(t);
   }, [keysVoiceJsonText, ready]);
+
+  // The FM layer (sizzle) on the pad and the keys: send it whenever it changes.
+  const fmLayerJsonText = fmLayerJson(state.fmLayer);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setFMLayer(fmLayerJsonText), 80);
+    return () => clearTimeout(t);
+  }, [fmLayerJsonText, ready]);
 
   // The chord pad's sound shape: send it whenever it changes.
   const padVoiceJsonText = padVoiceJson(state.padVoice);
@@ -3242,6 +3283,7 @@ export default function App() {
                 <Stepper label="Release" value={state.keysVoice.release} onChange={(v) => patch({ keysVoice: setKeysVoice(state.keysVoice, { release: v }) })} min={20} max={1000} step={10} bigStep={100} format={(v) => `${v} milliseconds`} hint="How quickly a note dies away after its key is let go" />
               </Section>
             )}
+            {(part === 'pad' || part === 'keys') && renderFM(part)}
             <Section inner title={`${partName}: Ugly FX`}>
               <Stepper
                 label={`${partName} pan`}

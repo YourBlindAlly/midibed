@@ -19,6 +19,7 @@ type Native = {
   setBassVoice(json: string): void;
   setFX(json: string): void;
   setKeysVoice(json: string): void;
+  setFMLayer(json: string): void;
   setPadVoice(json: string): void;
   setChordLead(ms: number): void;
   setBassLead(ms: number): void;
@@ -236,6 +237,7 @@ export const engine = {
   setFX: (json: string) => native?.setFX(json),
   /** The Keys' electric piano type and sound controls (see src/keysvoice.ts). */
   setKeysVoice: (json: string) => native?.setKeysVoice(json),
+  setFMLayer: (json: string) => native?.setFMLayer(json),
   /** The chord pad's wave, detune, drift and flange (see src/padvoice.ts). */
   setPadVoice: (json: string) => native?.setPadVoice(json),
   /** How many milliseconds before the bar line the chord pad starts each new chord. */

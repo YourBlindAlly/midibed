@@ -65,6 +65,27 @@ final class MidiBedTestSynth {
     var channel: UInt8 = 0
   }
 
+  /// One note of the FM layer (sizzle): a sine carrier an octave or so above the note, phase-modulated by two modulators
+  /// near 3.5 times the pitch that beat against each other at the shimmer rate, plus a faint one at 7.13 times. The
+  /// modulation index blooms in over the bloom time, so the note starts clean and the air arrives after it. It sits on a part
+  /// (0 the chord pad, 1 the keys) and goes through that part's level, filter and effects. Designed and level-checked
+  /// offline (scratchpad fm_layer.py): the carrier lands on pitch, sizzle 0 to 100 raises the energy above 4 kHz from none
+  /// to about a tenth, and the shimmer rate shows as a pulse at that rate in the 3-9 kHz band.
+  private struct FMVoice {
+    var active = false
+    var gate = false
+    var part = 0          // 0 chord pad, 1 keys
+    var note: Int = 0
+    var phaseC: Float = 0
+    var phaseA: Float = 0
+    var phaseB: Float = 0
+    var phaseS: Float = 0
+    var t: Float = 0
+    var env: Float = 0
+    var velocity: Float = 0
+    var channel: UInt8 = 0
+  }
+
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 sharp shaker (cabasa-like), 7 tom,
   /// 8 wood block, 9 tambourine, 10 low tom, 11 mid tom, 12 high tom, 13 jingle tambourine, 14 tube shaker, 15 seed shaker, 16 egg shaker, 17 sample pack (a recorded sound from an imported pack), 18 round analog snare, 19 bright rattle snare, 20 crisp digital snare, 21 tight analog hat, 22 bright crisp hat, 23 dusty lo-fi hat, 24 606 style hat (the same numbers as DRUM_TYPES in src/drumvoice.ts). tune/decay/tone/snap/level come from the
   /// drum's settings; the recipes were designed and level-checked offline (scratchpad drum_check.py).
@@ -174,6 +195,14 @@ final class MidiBedTestSynth {
   private let packQueue = DispatchQueue(label: "midibed.packs", qos: .userInitiated)
   private var keysVoices: UnsafeMutablePointer<KeysVoice>
   private let keysCount = 12
+  private var fmVoices: UnsafeMutablePointer<FMVoice>
+  private let fmCount = 24
+  /// The FM layer's settings, five per part (pad first, then keys): level 0...1 (0 = the layer is off), sizzle 0...1,
+  /// shimmer rate in Hz, octave offset, bloom time in seconds. The order of fmLayerValues in src/fmlayer.ts.
+  private let fmParams = UnsafeMutablePointer<Float>.allocate(capacity: 10)
+  private var fmLP: (Float, Float) = (0, 0)
+  private var fmIc1: Float = 0
+  private var fmIc2: Float = 0
   private var keysTremPhase: Float = 0
   private var keysLP: Float = 0
   /// The electric piano's controls (written from the control side, read on the audio thread): type 0 Rhodes,
@@ -399,6 +428,11 @@ final class MidiBedTestSynth {
     return tri * (1 - u) + (-cosf(2 * Float.pi * p)) * u
   }
 
+  /// Control side: the FM layer's settings (see fmParams).
+  func configureFM(_ values: [Float]) {
+    for i in 0..<min(10, values.count) { fmParams[i] = values[i] }
+  }
+
   /// Control side: the electric piano's type and controls (see keysParams).
   func configureKeys(_ values: [Float]) {
     for i in 0..<min(8, values.count) { keysParams[i] = values[i] }
@@ -450,6 +484,9 @@ final class MidiBedTestSynth {
     drumPatches.initialize(repeating: DrumPatch(), count: 128)
     keysVoices = UnsafeMutablePointer<KeysVoice>.allocate(capacity: keysCount)
     keysVoices.initialize(repeating: KeysVoice(), count: keysCount)
+    fmVoices = UnsafeMutablePointer<FMVoice>.allocate(capacity: fmCount)
+    fmVoices.initialize(repeating: FMVoice(), count: fmCount)
+    fmParams.initialize(from: [0, 0.5, 0.8, 1, 1.5, 0, 0.5, 0.8, 1, 1.5], count: 10)
     keysParams.initialize(from: [0, 0.4, 0.2, 4.8, 1.0, 0.002, 0.6, 0.12], count: 8)
     padParams.initialize(from: [0, 8.7, 0, 0, 1.5, 0.4, 0.3, 0.9, 1.6, 0], count: 10)
     flangeBuf.initialize(repeating: 0, count: 4096)
@@ -495,6 +532,8 @@ final class MidiBedTestSynth {
     packLast.deallocate()
     packLock.deallocate()
     keysVoices.deallocate()
+    fmVoices.deallocate()
+    fmParams.deallocate()
     keysParams.deallocate()
     padParams.deallocate()
     flangeBuf.deallocate()
@@ -838,8 +877,10 @@ final class MidiBedTestSynth {
         }
       }
       keysVoices[kslot] = KeysVoice(active: true, gate: true, note: note, phase: 0, phaseB: 0, phaseT: 0, t: 0, rel: 1, velocity: velocity, channel: channel)
+      startFM(part: 1, channel: channel, note: note, velocity: velocity)
       return
     }
+    if partOfChannel[Int(channel)] == 1 { startFM(part: 0, channel: channel, note: note, velocity: velocity) }
     padAgeCounter += 1
     var slot = -1
     for i in 0..<padCount where !pads[i].active { slot = i; break }
@@ -858,8 +899,30 @@ final class MidiBedTestSynth {
     pads[slot] = PadVoice(active: true, gate: true, note: note, phaseA: 0, phaseB: 0.37, env: 0, velocity: velocity, ic1: 0, ic2: 0, age: padAgeCounter, channel: channel)
   }
 
+  /// Start a note of the FM layer on a part, if that part's layer is switched on (level above 0).
+  private func startFM(part: Int, channel: UInt8, note: Int, velocity: Float) {
+    guard fmParams[part * 5] > 0.001 else { return }
+    var slot = -1
+    for i in 0..<fmCount where !fmVoices[i].active { slot = i; break }
+    if slot < 0 {
+      // Steal a note that has been let go of (the quietest), else the one sounding longest.
+      var best = Float.greatestFiniteMagnitude
+      for i in 0..<fmCount {
+        let score = (fmVoices[i].gate ? 10000 : 0) + fmVoices[i].env * 100 - fmVoices[i].t
+        if score < best {
+          best = score
+          slot = i
+        }
+      }
+    }
+    fmVoices[slot] = FMVoice(active: true, gate: true, part: part, note: note, phaseC: 0, phaseA: 0, phaseB: 0.31, phaseS: 0.77, t: 0, env: 0, velocity: velocity, channel: channel)
+  }
+
   private func noteOff(channel: UInt8, note: Int) {
     if channel == 9 { return }
+    for i in 0..<fmCount where fmVoices[i].active && fmVoices[i].gate && fmVoices[i].note == note && fmVoices[i].channel == channel {
+      fmVoices[i].gate = false
+    }
     if Int(channel) == keysChannel {
       for i in 0..<keysCount where keysVoices[i].active && keysVoices[i].gate && keysVoices[i].note == note && keysVoices[i].channel == channel {
         keysVoices[i].gate = false
@@ -876,6 +939,7 @@ final class MidiBedTestSynth {
   private func allNotesOff() {
     for i in 0..<padCount { pads[i].gate = false }
     for i in 0..<keysCount { keysVoices[i].gate = false }
+    for i in 0..<fmCount { fmVoices[i].gate = false }
   }
 
   /// A drum hit's own noise (see DrumVoice.rng): a different stream per hit, so hits can be made identical.
@@ -1270,6 +1334,58 @@ final class MidiBedTestSynth {
       }
       keysLP += kLPcoef * (keysRaw - keysLP)
       partKeys = keysLP * keysTrem
+
+      // The FM layer (sizzle): its own voices, summed per part, softened by a gentle low-pass, and (for the pad) sent
+      // through the pad part's filter like the pad notes, then added to that part.
+      var fmPadRaw: Float = 0
+      var fmKeysRaw: Float = 0
+      for i in 0..<fmCount where fmVoices[i].active {
+        let part = fmVoices[i].part
+        let lv = fmParams[part * 5]
+        let sz = fmParams[part * 5 + 1]
+        let shim = max(0.05, fmParams[part * 5 + 2])
+        let oct = fmParams[part * 5 + 3]
+        let bloom = max(0.05, fmParams[part * 5 + 4])
+        let f = 440 * powf(2, Float(fmVoices[i].note - 69) / 12 + oct)
+        let t = fmVoices[i].t
+        fmVoices[i].phaseC += f * dt
+        if fmVoices[i].phaseC >= 1 { fmVoices[i].phaseC -= 1 }
+        fmVoices[i].phaseA += (f * 3.5 + shim * 0.5) * dt
+        if fmVoices[i].phaseA >= 1 { fmVoices[i].phaseA -= 1 }
+        fmVoices[i].phaseB += (f * 3.5 - shim * 0.5) * dt
+        if fmVoices[i].phaseB >= 1 { fmVoices[i].phaseB -= 1 }
+        fmVoices[i].phaseS += f * 7.13 * dt
+        if fmVoices[i].phaseS >= 1 { fmVoices[i].phaseS -= 1 }
+        let twoPi = 2 * Float.pi
+        let m = 0.5 * sinf(twoPi * fmVoices[i].phaseA) + 0.35 * sinf(twoPi * fmVoices[i].phaseB) + 0.15 * sinf(twoPi * fmVoices[i].phaseS)
+        let idx = sz * 4 * (1 - expf(-t / bloom))
+        let y = sinf(twoPi * fmVoices[i].phaseC + idx * m)
+        if part == 0 {
+          // follows the pad's own swell and die-away
+          if fmVoices[i].gate { fmVoices[i].env += (1 - fmVoices[i].env) * attack } else { fmVoices[i].env -= fmVoices[i].env * release }
+        } else {
+          // an electric-piano note dies away by itself
+          if fmVoices[i].gate { fmVoices[i].env = expf(-t * 1.6) } else { fmVoices[i].env *= keysRelease }
+        }
+        let amp = fmVoices[i].env
+        fmVoices[i].t += dt
+        let out = y * amp * (0.35 + 0.65 * fmVoices[i].velocity) * lv * 0.12 * expCurrent[Int(fmVoices[i].channel)]
+        if part == 0 { fmPadRaw += out } else { fmKeysRaw += out }
+        if amp < 0.0005 && (!fmVoices[i].gate || (part == 1 && t > 0.2)) { fmVoices[i].active = false }
+      }
+      let fmLPcoef = 1 - expf(-2 * Float.pi * 9000 / sr)
+      fmLP.0 += fmLPcoef * (fmPadRaw - fmLP.0)
+      fmLP.1 += fmLPcoef * (fmKeysRaw - fmLP.1)
+      do {
+        // the pad part's filter (state-variable, as for the pad notes) on the summed pad layer
+        let v3 = fmLP.0 - fmIc2
+        let v1 = fcA1[1] * fmIc1 + fcA2[1] * v3
+        let v2 = fmIc2 + fcA2[1] * fmIc1 + fcA3[1] * v3
+        fmIc1 = 2 * v1 - fmIc1
+        fmIc2 = 2 * v2 - fmIc2
+        partPad += fcMode[1] == 3 ? v1 * fcK[1] : (fcMode[1] == 2 ? fmLP.0 - fcK[1] * v1 - v2 : v2)
+      }
+      partKeys += fmLP.1 * keysTrem
 
       for i in 0..<drumCount where drums[i].active {
         let t = drums[i].t

@@ -11,6 +11,7 @@ import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance'
 import { DancerState, defaultDancer, makePhrases } from './dancer';
 import { buildBassColorNotes } from './bassrhythm';
 import { KeysVoiceState, defaultKeysVoice } from './keysvoice';
+import { FMLayerState, defaultFMLayer } from './fmlayer';
 import { PadVoiceState, defaultPadVoice } from './padvoice';
 import { groupsForWants, parsePacks } from './packs';
 import { NetworkState, defaultNetwork } from './network';
@@ -337,6 +338,8 @@ export type BedState = {
   keys: KeysState;
   /** The Keys' built-in electric piano: its type and sound controls. Global, not saved in a scene. */
   keysVoice: KeysVoiceState;
+  /** The FM layer (sizzle) laid over the chord pad and the Keys. Global, not saved in a scene. */
+  fmLayer: FMLayerState;
   /** The chord pad's sound shape (wave, detune, drift, flange). Global, not saved in a scene. */
   padVoice: PadVoiceState;
   /** 1 = the Shaker slot has been moved to the softer egg shaker once (settings saved before this keep the sharp one until migrateState changes it, once). */
@@ -865,6 +868,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   dancer: defaultDancer,
   keys: defaultKeys,
   keysVoice: defaultKeysVoice,
+  fmLayer: defaultFMLayer,
   padVoice: defaultPadVoice,
   drumSoundVersion: 1,
   showNotes: true,

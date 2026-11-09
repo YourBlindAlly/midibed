@@ -1044,6 +1044,16 @@ final class MidiBedEngine {
     queue.async { self.synth.configureKeys(c.values.map { Float($0) }) }
   }
 
+  /// The FM layer (sizzle) on the chord pad and the Keys (see src/fmlayer.ts for the order of the values).
+  func setFMLayer(json: String) {
+    struct FMLayerConfig: Decodable { var values: [Double] }
+    guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(FMLayerConfig.self, from: data) else {
+      NSLog("MidiBedEngine: could not decode the FM layer")
+      return
+    }
+    queue.async { self.synth.configureFM(c.values.map { Float($0) }) }
+  }
+
   func setFX(json: String) {
     struct FXConfig: Decodable { var values: [Double] }
     guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(FXConfig.self, from: data) else {
