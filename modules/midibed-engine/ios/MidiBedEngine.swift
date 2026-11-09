@@ -295,6 +295,32 @@ struct MidiBedFillConfig: Decodable {
 
 /// Keys: a rhythmic electric piano comping the chords of the harmony loop (reference: src/keys.ts). The pattern
 /// fields mirror a drum's so it is played the same way: a library mask or the Euclidean spread, ghost notes, accents.
+/// MidiWeave: two looping, slowly changing melodic lines (see src/weave.ts for the rules, which weaveMutate mirrors).
+struct MidiBedWeaveLine: Decodable {
+  var on: Bool
+  var steps: Int
+  var mask: Int             // bit n set = step n plays (rotation already applied)
+  var degrees: [Int]        // a scale degree (or chord tone) for every step
+  var velocity: Int
+  var lengthPct: Double     // percent of the gap to the next note
+  var octave: Int
+  var spread: Int           // the melody ranges over this many degrees
+  var lock: Int             // 100 = never drifts on its own
+  var changeEvery: Int      // one small change every this many loops (0 = off)
+  var changeChance: Int     // percent
+  var returnAfter: Int      // changes before the line goes home (0 = never)
+}
+
+struct MidiBedWeaveConfig: Decodable {
+  var enabled: Bool
+  var channel: Int
+  var pitch: Int            // 0 scale only, 1 follow the chords
+  var base: Int             // the home note
+  var intervals: [Int]      // the scale's notes within an octave
+  var chords: [[Int]]       // one per chord of the harmony loop (follow the chords)
+  var lines: [MidiBedWeaveLine]
+}
+
 struct MidiBedKeysConfig: Decodable {
   var enabled: Bool
   var channel: Int
@@ -367,6 +393,7 @@ struct MidiBedConfig: Decodable {
   var harmony: MidiBedHarmonyConfig
   var dancer: MidiBedDancerConfig
   var keys: MidiBedKeysConfig?
+  var weave: MidiBedWeaveConfig?
   var fill: MidiBedFillConfig
   var ports: MidiBedPortsConfig
   var outputs: MidiBedOutputsConfig
@@ -576,6 +603,18 @@ final class MidiBedEngine {
   private var evoHits: [Int] = []
   private var evoRot: [Int] = []
   private var evoCount: [Int] = []
+
+  /// What each MidiWeave line is doing now: the pattern as it has drifted, and the one it started as.
+  private struct WeaveRT {
+    var sig = ""
+    var deg: [Int] = []
+    var hit: [Bool] = []
+    var origDeg: [Int] = []
+    var origHit: [Bool] = []
+    var loops = 0
+    var changes = 0
+  }
+  private var weaveRT = [WeaveRT(), WeaveRT()]
   private var fillEndTick = 0
   private var fillRequested = false
 
@@ -1085,6 +1124,7 @@ final class MidiBedEngine {
       self.tickIndex = 0
       self.padStartTick = 0
       self.chordIndex = 0
+      self.weaveRT = [WeaveRT(), WeaveRT()]
       self.earlyPadDone = false
       self.earlyBassDone = false
       self.chordHeld = false
@@ -1630,6 +1670,7 @@ final class MidiBedEngine {
 
     // The keys comp on, through fills too (they are not part of the drum pattern).
     stepKeys(step: step, time: time, stepDur: stepDur, cfg: cfg)
+    stepWeave(step: step, time: time, stepDur: stepDur, cfg: cfg)
 
     // Fills: plan one if one is due, and keep the normal pattern silent while it plays.
     planFillIfDue(tick: tick, time: time, tickDur: tickDur, cfg: cfg)
@@ -1737,6 +1778,127 @@ final class MidiBedEngine {
   /// At each 16th step: if the keys' pattern hits, play the current chord of the harmony loop (its sus 4 version
   /// now and then), the notes spread a few milliseconds low to high, each ringing for lengthPct of the gap to
   /// the next hit. The pattern is played as a drum's would be (chance, ghost notes, accents, looseness).
+  // MARK: MidiWeave
+
+  /// Plays MidiWeave's lines on each sixteenth step. A line loops by its own length (so the two drift against each
+  /// other); when it comes round to its start the change rules run (weaveMutate). The pattern as it has drifted is kept
+  /// while the starting pattern in the settings stays the same, and starts again from it on Play.
+  private func stepWeave(step: Int, time: Double, stepDur: Double, cfg: MidiBedConfig) {
+    guard let w = cfg.weave, w.enabled else { return }
+    for li in 0..<min(2, w.lines.count) {
+      let line = w.lines[li]
+      guard line.on else { continue }
+      let n = max(1, min(32, line.steps))
+      let sig = "\(n)|\(line.mask)|\(line.degrees.map(String.init).joined(separator: ","))|\(line.spread)"
+      if weaveRT[li].sig != sig {
+        var hits = [Bool](repeating: false, count: n)
+        for k in 0..<n where k < 62 { hits[k] = ((line.mask >> k) & 1) == 1 }
+        var deg = line.degrees
+        while deg.count < n { deg.append(0) }
+        if deg.count > n { deg = Array(deg[0..<n]) }
+        weaveRT[li] = WeaveRT(sig: sig, deg: deg, hit: hits, origDeg: deg, origHit: hits, loops: 0, changes: 0)
+      }
+      let local = ((step % n) + n) % n
+      if local == 0, step > 0, !cfg.frozen { weaveMutate(li, line) }
+      guard weaveRT[li].hit[local] else { continue }
+
+      let d = max(0, weaveRT[li].deg[local])
+      var note: Int
+      if w.pitch == 1, !w.chords.isEmpty {
+        let chord = w.chords[chordIndex % w.chords.count].sorted()
+        if chord.isEmpty { continue }
+        note = chord[d % chord.count] + 12 * (d / chord.count) + 12 * line.octave
+      } else {
+        let cnt = w.intervals.count
+        if cnt == 0 { continue }
+        note = w.base + w.intervals[d % cnt] + 12 * (d / cnt) + 12 * line.octave
+      }
+      note = max(0, min(127, note))
+
+      var vel = Double(line.velocity)
+      if local % 4 == 0 { vel *= 1.12 }
+      vel *= 1 - 0.1 * Double.random(in: 0..<1, using: &rng)
+      vel *= endFade
+      guard vel >= 1 else { continue }
+
+      var gap = n
+      for j in 1...n where weaveRT[li].hit[(local + j) % n] {
+        gap = j
+        break
+      }
+      let length = max(0.05, min(4, Double(gap) * stepDur * max(0.1, min(1.5, line.lengthPct / 100)) - 0.003))
+      let swing = (step % 2 == 1) ? max(0, min(1, cfg.swing)) * stepDur * 0.5 : 0
+      let start = time + swing
+      let ch = UInt8(max(0, min(15, w.channel)))
+      let nb = UInt8(note)
+      pending.append(Pending(time: start, status: 0x90 | ch, d1: nb, d2: UInt8(max(1, min(127, Int(vel))))))
+      pending.append(Pending(time: start + length, status: 0x80 | ch, d1: nb, d2: 0))
+    }
+  }
+
+  /// A line's loop has come round: maybe one scheduled change, and the lock dial's wandering. Mirrors mutateAtLoop in
+  /// src/weave.ts.
+  private func weaveMutate(_ li: Int, _ line: MidiBedWeaveLine) {
+    weaveRT[li].loops += 1
+    if line.returnAfter > 0, weaveRT[li].changes >= line.returnAfter {
+      weaveRT[li].deg = weaveRT[li].origDeg
+      weaveRT[li].hit = weaveRT[li].origHit
+      weaveRT[li].changes = 0
+      return
+    }
+    let top = max(0, line.spread - 1)
+    if line.changeEvery > 0, weaveRT[li].loops % line.changeEvery == 0,
+      Double.random(in: 0..<1, using: &rng) * 100 < Double(line.changeChance)
+    {
+      weaveOneChange(li, top: top)
+      weaveRT[li].changes += 1
+    }
+    let p = Double(100 - line.lock) / 100 * 0.2
+    if p > 0 {
+      for s in 0..<weaveRT[li].hit.count {
+        guard weaveRT[li].hit[s] else { continue }
+        if Double.random(in: 0..<1, using: &rng) >= p { continue }
+        let dir = Bool.random(using: &rng) ? -1 : 1
+        let amount = Double.random(in: 0..<1, using: &rng) < 0.3 ? 2 : 1
+        weaveRT[li].deg[s] = max(0, min(top, weaveRT[li].deg[s] + dir * amount))
+      }
+    }
+  }
+
+  /// One small change: a note moves a step in the scale, a note shifts to the next step, one is added, or one is taken
+  /// away. The first note of the line (its anchor) is never moved or removed.
+  private func weaveOneChange(_ li: Int, top: Int) {
+    let n = weaveRT[li].hit.count
+    let hitIdx = (0..<n).filter { weaveRT[li].hit[$0] }
+    guard let anchor = hitIdx.first else { return }
+    let movable = hitIdx.filter { $0 != anchor }
+    let r = Double.random(in: 0..<1, using: &rng)
+    if r < 0.55 {
+      let s = hitIdx[Int.random(in: 0..<hitIdx.count, using: &rng)]
+      let dir = Bool.random(using: &rng) ? -1 : 1
+      let amount = Double.random(in: 0..<1, using: &rng) < 0.1 ? 2 : 1
+      weaveRT[li].deg[s] = max(0, min(top, weaveRT[li].deg[s] + dir * amount))
+    } else if r < 0.8 {
+      guard !movable.isEmpty else { return }
+      let s = movable[Int.random(in: 0..<movable.count, using: &rng)]
+      let to = s + (Bool.random(using: &rng) ? -1 : 1)
+      if to > anchor, to < n, !weaveRT[li].hit[to] {
+        weaveRT[li].hit[s] = false
+        weaveRT[li].hit[to] = true
+        weaveRT[li].deg[to] = weaveRT[li].deg[s]
+      }
+    } else if r < 0.9 {
+      let empty = (0..<n).filter { !weaveRT[li].hit[$0] }
+      if empty.isEmpty || hitIdx.count >= max(3, n / 2) { return }
+      let e = empty[Int.random(in: 0..<empty.count, using: &rng)]
+      weaveRT[li].hit[e] = true
+      weaveRT[li].deg[e] = max(0, min(top, weaveRT[li].deg[(e + n - 1) % n] + (Bool.random(using: &rng) ? -1 : 1)))
+    } else {
+      guard hitIdx.count > 2, !movable.isEmpty else { return }
+      weaveRT[li].hit[movable[Int.random(in: 0..<movable.count, using: &rng)]] = false
+    }
+  }
+
   private func stepKeys(step: Int, time: Double, stepDur: Double, cfg: MidiBedConfig) {
     guard let k = cfg.keys, k.enabled, !k.chords.isEmpty else { return }
     let steps = max(1, min(64, k.steps))

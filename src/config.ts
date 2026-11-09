@@ -11,6 +11,7 @@ import { AdvanceRule, advanceBars, defaultAdvance, pickTarget } from './advance'
 import { DancerState, defaultDancer, makePhrases } from './dancer';
 import { buildBassColorNotes } from './bassrhythm';
 import { KeysVoiceState, defaultKeysVoice } from './keysvoice';
+import { WeaveLine, WeaveState, defaultWeave, hitsMask, lineDegrees, lineHits, lineSteps, weaveBase, weaveIntervals } from './weave';
 import { FMLayerState, defaultFMLayer } from './fmlayer';
 import { PadVoiceState, defaultPadVoice } from './padvoice';
 import { groupsForWants, parsePacks } from './packs';
@@ -336,6 +337,8 @@ export type BedState = {
   dancer: DancerState;
   /** Keys: a rhythmic electric piano that comps the chords. Everything but the channel is saved per scene. */
   keys: KeysState;
+  /** MidiWeave: two rhythmic melodic lines that repeat and change slowly. Everything but the channel is saved per scene. */
+  weave: WeaveState;
   /** The Keys' built-in electric piano: its type and sound controls. Global, not saved in a scene. */
   keysVoice: KeysVoiceState;
   /** The FM layer (sizzle) laid over the chord pad and the Keys. Global, not saved in a scene. */
@@ -446,6 +449,7 @@ export type SceneData = {
   filterPreset: number;
   dancer: Omit<DancerState, 'channel'>;
   keys: Omit<KeysState, 'channel'>;
+  weave: Omit<WeaveState, 'channel'>;
   /** Semitones above the journey key; the scene's home note (see keyRoot). */
   keyOffset: number;
   swing: number;
@@ -463,12 +467,13 @@ export type SceneData = {
 
 export const SCENE_COUNT = 4;
 
-type SceneSource = Pick<BedState, 'playerOn' | 'lanes' | 'filterMove' | 'filterPreset' | 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keys' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
+type SceneSource = Pick<BedState, 'playerOn' | 'lanes' | 'filterMove' | 'filterPreset' | 'sceneName' | 'fill' | 'evolve' | 'dancer' | 'keys' | 'weave' | 'keyOffset' | 'swing' | 'percussion' | 'drone' | 'harmony' | 'motion' | 'advance' | 'transitionUse' | 'pad' | 'drums' | 'wanderers' | 'loops'>;
 
 export function captureScene(s: SceneSource): SceneData {
   const { channel: _padChannel, ...pad } = s.pad;
   const { channel: _dancerChannel, ...dancer } = s.dancer;
   const { channel: _keysChannel, ...keys } = s.keys;
+  const { channel: _weaveChannel, ...weave } = s.weave;
   return {
     fill: { ...s.fill },
     evolve: { ...s.evolve },
@@ -479,6 +484,7 @@ export function captureScene(s: SceneSource): SceneData {
     filterPreset: s.filterPreset,
     dancer: { ...dancer },
     keys: { ...keys },
+    weave: { ...weave, lines: weave.lines.map((l) => ({ ...l })) },
     keyOffset: s.keyOffset,
     swing: s.swing,
     percussion: s.percussion,
@@ -558,6 +564,7 @@ export function applyScene(s: BedState, sc: SceneData): BedState {
     filterPreset: typeof sc.filterPreset === 'number' ? sc.filterPreset : 0,
     dancer: { ...s.dancer, ...sc.dancer },
     keys: { ...s.keys, ...(sc.keys ?? {}) },
+    weave: mergeWeave(s.weave, sc.weave),
     keyOffset: sc.keyOffset,
     swing: sc.swing,
     percussion: sc.percussion,
@@ -609,6 +616,7 @@ export const SCENE_COPY_PARTS = [
   'After this scene',
   'Loop player lanes',
   'Keys',
+  'MidiWeave',
 ];
 
 /** Copy one part of the current scene (including unsaved edits) into scene `to`; the rest of `to` stays. */
@@ -629,6 +637,7 @@ export function copyScenePart(s: BedState, to: number, what: number): BedState {
     { advance: cur.advance },
     { lanes: cur.lanes },
     { keys: cur.keys },
+    { weave: cur.weave },
   ];
   const piece = JSON.parse(JSON.stringify(parts[what])) as Partial<SceneData>;
   return {
@@ -867,6 +876,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   soundFavs: stringifyFavMap({ synthone: favsFromPrograms(parseFavorites(getProfile('synthone').favorites ?? '')) }),
   dancer: defaultDancer,
   keys: defaultKeys,
+  weave: defaultWeave,
   keysVoice: defaultKeysVoice,
   fmLayer: defaultFMLayer,
   padVoice: defaultPadVoice,
@@ -1093,6 +1103,56 @@ function keysForEngine(s: BedState) {
     followSkip: k.followSkip,
     chords: keysChords(s),
     susChords: keysSusChords(s),
+  };
+}
+
+/** A scene's MidiWeave settings laid over the live ones (a scene saved before MidiWeave existed gets it switched off). */
+export function mergeWeave(live: WeaveState, saved?: Partial<Omit<WeaveState, 'channel'>>): WeaveState {
+  const base = saved ? { ...live, ...saved } : { ...defaultWeave, channel: live.channel };
+  const lines = defaultWeave.lines.map((d, i) => ({ ...d, ...((saved?.lines ?? [])[i] ?? {}) })) as WeaveLine[];
+  return { ...base, channel: live.channel, lines };
+}
+
+/** MidiWeave as the engine takes it: sent only while the layer is on, so nothing else about the settings changes. */
+function weaveForEngine(s: BedState) {
+  const w = s.weave;
+  const on = s.solo ? s.solo === 'weave' : w.enabled;
+  if (!on) return undefined;
+  const root = keyRoot(s);
+  const chordMode = w.pitch === 1;
+  return {
+    enabled: true,
+    channel: w.channel,
+    pitch: chordMode ? 1 : 0,
+    base: weaveBase(w.register, root),
+    intervals: weaveIntervals(w, s.harmony.mode),
+    chords: chordMode
+      ? buildPadChords({
+          root,
+          mode: s.harmony.mode,
+          degrees: s.harmony.degrees,
+          count: s.harmony.count,
+          colors: s.harmony.colors,
+          style: 0,
+          register: w.register,
+          spread: false,
+          voiceLead: true,
+        })
+      : [],
+    lines: w.lines.map((l) => ({
+      on: l.on,
+      steps: lineSteps(l),
+      mask: hitsMask(lineHits(l)),
+      degrees: lineDegrees(l),
+      velocity: l.velocity,
+      lengthPct: l.length,
+      octave: l.octave,
+      spread: l.spread,
+      lock: l.lock,
+      changeEvery: l.changeEvery,
+      changeChance: l.changeChance,
+      returnAfter: l.returnAfter,
+    })),
   };
 }
 
@@ -1589,6 +1649,7 @@ export function toEngineJson(s: BedState): string {
     ports: s.ports,
     outputs: s.outputs,
     keys: keysForEngine(s),
+    ...(weaveForEngine(s) ? { weave: weaveForEngine(s) } : {}),
     dancer: (() => {
       const on = s.solo ? s.solo === 'dancer' : s.dancer.enabled;
       return {

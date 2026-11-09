@@ -4,6 +4,7 @@ import { PAD_PRESETS, applyPadPreset, padVoiceJson, setPadVoice } from './src/pa
 import { PREROLLS, networkJson } from './src/network';
 import { KEYS_PRESETS, KEYS_TYPE_NAMES, applyKeysPreset, keysVoiceJson, setKeysVoice } from './src/keysvoice';
 import { FM_PRESETS, applyFMPreset, fmLayerJson, setFMPart } from './src/fmlayer';
+import { WEAVE_PITCH_NAMES, WeaveLine, WeaveState, describeLine, lineSteps } from './src/weave';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -488,6 +489,82 @@ export default function App() {
 
   const patch = (p: Partial<BedState>) => setState((s) => ({ ...s, ...p }));
 
+  // MidiWeave: two repeating, slowly changing melodic lines.
+  const renderWeave = () => {
+    const w = state.weave;
+    const onKeys = w.channel === state.keys.channel;
+    return (
+      <>
+        <Section title="MidiWeave: where it goes">
+          <Note>
+            Hypnotic, strictly rhythmic melodic lines that repeat and change slowly, for flowing movement. By default they play on the Keys' MIDI channel, so the built-in electric piano plays them, with the Keys' level, filter and effects. The Keys part's own switches for sending to other apps and for the built-in sound apply to this channel.
+          </Note>
+          <Stepper label="MidiWeave MIDI channel" value={w.channel} onChange={(v) => patchWeave({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the lines play on" />
+          <Toggle
+            label="MidiWeave plays the Keys' electric piano"
+            value={onKeys}
+            onChange={(v) => patchWeave({ channel: v ? state.keys.channel : 5 })}
+            hint="Puts MidiWeave on the Keys' MIDI channel. Off moves it to channel 6, for another app or sound"
+          />
+        </Section>
+        <Section title="MidiWeave: what it plays">
+          <Stepper
+            label="MidiWeave pitches"
+            value={w.pitch}
+            onChange={(v) => patchWeave({ pitch: v })}
+            min={0}
+            max={WEAVE_PITCH_NAMES.length - 1}
+            format={(v) => WEAVE_PITCH_NAMES[v]}
+            hint="Scale only: the notes of the key's scale, good over a drone. Follow the chords: the notes of whichever chord is sounding. Saved in each scene"
+          />
+          <Stepper label="MidiWeave scale" value={w.scale} onChange={(v) => patchWeave({ scale: v })} min={0} max={SCALES.length - 1} format={(v) => SCALES[v].name} hint="Automatic picks a pentatonic scale to suit the mode. Used in scale only mode" />
+          <Stepper label="MidiWeave lowest note" value={w.register} onChange={(v) => patchWeave({ register: v })} min={36} max={84} format={(v) => noteName(v)} hint="The key's note at or above this is the home note of the lines" />
+        </Section>
+        {w.lines.map((l, i) => (
+          <Section key={i} title={`MidiWeave line ${i + 1}`} id={`MidiWeave line ${i + 1}`}>
+            <Toggle label={`Line ${i + 1} on`} value={l.on} onChange={(v) => patchWeaveLine(i, { on: v })} hint={i === 1 ? 'The second line has its own loop length, so the two drift against each other. Switch it off to hear the first alone' : undefined} />
+            {l.on && (
+              <>
+                <View accessible accessibilityLabel={`Line ${i + 1} summary`} accessibilityValue={{ text: describeLine(l) }}>
+                  <Text style={styles.note}>{describeLine(l)}</Text>
+                </View>
+                <Stepper
+                  label={`Line ${i + 1} rhythm`}
+                  value={l.rhythm}
+                  onChange={(v) => patchWeaveLine(i, { rhythm: v })}
+                  min={0}
+                  max={RHYTHMS.length - 1}
+                  format={(v) => (v === 0 ? 'Euclidean spread (hits, steps, rotation)' : RHYTHMS[v].name)}
+                  hint="A rhythm from the library brings its own length. The Euclidean spread uses the hits, length and rotation below"
+                />
+                {l.rhythm === 0 && (
+                  <>
+                    <Stepper label={`Line ${i + 1} length`} value={l.steps} onChange={(v) => patchWeaveLine(i, { steps: v })} min={4} max={32} format={(v) => `${v} sixteenth notes`} hint="How long the loop is. Different lengths on the two lines drift against each other" />
+                    <Stepper label={`Line ${i + 1} notes`} value={l.hits} onChange={(v) => patchWeaveLine(i, { hits: v })} min={0} max={lineSteps(l)} hint="How many notes are spread through the loop" />
+                  </>
+                )}
+                <Stepper label={`Line ${i + 1} rotation`} value={l.rotation} onChange={(v) => patchWeaveLine(i, { rotation: v })} min={0} max={Math.max(0, lineSteps(l) - 1)} />
+                <Stepper label={`Line ${i + 1} octave`} value={l.octave} onChange={(v) => patchWeaveLine(i, { octave: v })} min={-1} max={2} format={(v) => (v === 0 ? 'at the lowest note' : v < 0 ? 'one octave down' : v === 1 ? 'one octave up' : 'two octaves up')} />
+                <Stepper label={`Line ${i + 1} velocity`} value={l.velocity} onChange={(v) => patchWeaveLine(i, { velocity: v })} min={1} max={127} step={5} />
+                <Stepper label={`Line ${i + 1} note length`} value={l.length} onChange={(v) => patchWeaveLine(i, { length: v })} min={10} max={150} step={5} format={(v) => `${v} percent of the gap`} hint="Short is plucked and detached, long runs the notes together" />
+                <Stepper label={`Line ${i + 1} melody range`} value={l.spread} onChange={(v) => patchWeaveLine(i, { spread: v })} min={3} max={12} format={(v) => `${v} scale steps`} hint="How far up the scale the melody wanders. A new melody is made when this changes" />
+                <ActionButton label={`Line ${i + 1}: make a new melody`} hint="Keeps the rhythm and writes a different tune" onPress={() => { patchWeaveLine(i, { seed: l.seed + 1 }); announceLater(`Line ${i + 1} has a new melody`, 150); }} />
+                <Stepper label={`Line ${i + 1} change every`} value={l.changeEvery} onChange={(v) => patchWeaveLine(i, { changeEvery: v })} min={0} max={32} format={(v) => (v === 0 ? 'never' : v === 1 ? 'every loop' : `${v} loops`)} hint="One small change at that interval: a note moves a step, or a note is moved, added or taken away" />
+                {l.changeEvery > 0 && (
+                  <>
+                    <Stepper label={`Line ${i + 1} change chance`} value={l.changeChance} onChange={(v) => patchWeaveLine(i, { changeChance: v })} min={5} max={100} step={5} format={(v) => `${v} percent`} />
+                    <Stepper label={`Line ${i + 1} goes home after`} value={l.returnAfter} onChange={(v) => patchWeaveLine(i, { returnAfter: v })} min={0} max={32} format={(v) => (v === 0 ? 'never' : `${v} changes`)} hint="After that many changes the line returns to its starting pattern, then drifts away again" />
+                  </>
+                )}
+                <Stepper label={`Line ${i + 1} lock`} value={l.lock} onChange={(v) => patchWeaveLine(i, { lock: v })} min={0} max={100} step={5} format={(v) => (v >= 100 ? 'fully locked' : `${v} percent`)} hint="Fully locked never drifts on its own. Lower lets individual notes wander a step now and then, like a Turing machine" />
+              </>
+            )}
+          </Section>
+        ))}
+      </>
+    );
+  };
+
   // The FM layer (sizzle) section for the chord pad or the Keys.
   const renderFM = (which: 'pad' | 'keys') => {
     const fm = state.fmLayer[which];
@@ -760,6 +837,9 @@ export default function App() {
   };
   const patchPad = (p: Partial<PadState>) => setState((s) => ({ ...s, pad: { ...s.pad, ...p } }));
   const patchKeys = (p: Partial<KeysState>) => setState((s) => ({ ...s, keys: { ...s.keys, ...p } }));
+  const patchWeave = (p: Partial<WeaveState>) => setState((s) => ({ ...s, weave: { ...s.weave, ...p } }));
+  const patchWeaveLine = (i: number, p: Partial<WeaveLine>) =>
+    setState((s) => ({ ...s, weave: { ...s.weave, lines: s.weave.lines.map((l, k) => (k === i ? { ...l, ...p } : l)) } }));
   const patchMotionRule = (layer: 'bass' | 'pad', p: Partial<MotionRule>) =>
     setState((s) => ({ ...s, motion: { ...s.motion, preset: 0, [layer]: { ...s.motion[layer], ...p } } }));
   const patchTransition = (which: 'entrance' | 'drumBreak' | 'drumReturn', p: Partial<TransitionSlot>) =>
@@ -1180,6 +1260,9 @@ export default function App() {
         } else if (action.layer === 'pad') {
           on = !state.pad.enabled;
           patchPad({ enabled: on });
+        } else if (action.layer === 'weave') {
+          on = !state.weave.enabled;
+          patchWeave({ enabled: on });
         } else if (action.layer === 'keys') {
           on = !state.keys.enabled;
           patchKeys({ enabled: on });
@@ -1261,7 +1344,7 @@ export default function App() {
   }, []);
 
   // ---- Parts tab helpers
-  const PARTS = ['bass', 'pad', 'keys', 'dancer', 'drums', 'loops'] as const;
+  const PARTS = ['bass', 'pad', 'keys', 'weave', 'dancer', 'drums', 'loops'] as const;
   const [partIdx, setPartIdx] = useState(0);
   // Which drum's settings the Drums module shows (one at a time).
   const [drumIdx, setDrumIdx] = useState(0);
@@ -1705,22 +1788,23 @@ export default function App() {
   const partProfile = partRole ? getProfile(state.profiles[partRole]) : getProfile('none');
   const soundSlot: number | undefined = part === 'bass' ? 0 : part === 'drums' ? 1 : part === 'pad' ? 2 : undefined;
   const partChannelsOf = (p: (typeof PARTS)[number]): number[] =>
-    p === 'bass' ? [state.drone.channel] : p === 'pad' ? [state.pad.channel] : p === 'keys' ? [state.keys.channel] : p === 'dancer' ? [state.dancer.channel] : p === 'drums' ? state.drums.map((d) => d.channel) : [state.loops.channel];
+    p === 'bass' ? [state.drone.channel] : p === 'pad' ? [state.pad.channel] : p === 'keys' ? [state.keys.channel] : p === 'weave' ? [state.weave.channel] : p === 'dancer' ? [state.dancer.channel] : p === 'drums' ? state.drums.map((d) => d.channel) : [state.loops.channel];
   const onThisPart = (channel: number) => partChannelsOf(part).includes(channel);
   const anyPartChannel = (channel: number) => PARTS.some((p) => partChannelsOf(p).includes(channel));
   const partIsOn =
-    part === 'bass' ? state.drone.enabled : part === 'pad' ? state.pad.enabled : part === 'keys' ? state.keys.enabled : part === 'dancer' ? state.dancer.enabled : part === 'drums' ? state.percussion : state.loops.enabled;
+    part === 'bass' ? state.drone.enabled : part === 'pad' ? state.pad.enabled : part === 'keys' ? state.keys.enabled : part === 'weave' ? state.weave.enabled : part === 'dancer' ? state.dancer.enabled : part === 'drums' ? state.percussion : state.loops.enabled;
   const setPartOn = (p: (typeof PARTS)[number], on: boolean) => {
     if (p === 'bass') patchDrone({ enabled: on });
     else if (p === 'pad') patchPad({ enabled: on });
     else if (p === 'keys') patchKeys({ enabled: on });
+    else if (p === 'weave') patchWeave({ enabled: on });
     else if (p === 'dancer') patchDancer({ enabled: on });
     else if (p === 'drums') patch({ percussion: on });
     else patchLoops({ enabled: on });
   };
   // Switching a part's output off or on: a short pause for the new setting to reach the engine, then all notes off, so
   // nothing hangs on one side and the bass and pad start again on the other.
-  const setPartOutput = (p: (typeof PARTS)[number], change: Partial<{ midi: boolean; synth: boolean }>) => {
+  const setPartOutput = (p: Exclude<(typeof PARTS)[number], 'weave'>, change: Partial<{ midi: boolean; synth: boolean }>) => {
     setState((s) => ({ ...s, outputs: { ...s.outputs, [p]: { ...s.outputs[p], ...change } } }));
     setTimeout(() => engine.panic(), 200);
   };
@@ -2081,6 +2165,8 @@ export default function App() {
             <Toggle label="Solo chord pad" value={state.solo === 'pad'} onChange={(v) => setSolo(v ? 'pad' : null)} />
             <Toggle label="Keys layer" value={state.keys.enabled} onChange={(v) => patchKeys({ enabled: v })} hint="The rhythmic electric piano. Saved in each scene" />
             <Toggle label="Solo keys" value={state.solo === 'keys'} onChange={(v) => setSolo(v ? 'keys' : null)} />
+            <Toggle label="MidiWeave layer" value={state.weave.enabled} onChange={(v) => patchWeave({ enabled: v })} hint="Two repeating, slowly changing melodic lines. Saved in each scene" />
+            <Toggle label="Solo MidiWeave" value={state.solo === 'weave'} onChange={(v) => setSolo(v ? 'weave' : null)} />
             <Toggle label="MidiDancer layer" value={state.dancer.enabled} onChange={(v) => patchDancer({ enabled: v })} />
             <Toggle label="Solo MidiDancer" value={state.solo === 'dancer'} onChange={(v) => setSolo(v ? 'dancer' : null)} />
             <Toggle
@@ -2267,6 +2353,9 @@ export default function App() {
             />
           </Section>
 
+          {part === 'weave' && renderWeave()}
+          {part !== 'weave' && (
+            <>
           <Section title={`${partName}: where it goes`}>
             {part === 'bass' && (
               <Stepper label="Bass drone MIDI channel" value={state.drone.channel} onChange={(v) => patchDrone({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the bass drone plays on. Its sound changes go to the same channel" />
@@ -3422,6 +3511,8 @@ export default function App() {
 
           </Section>
 
+            </>
+          )}
             </>
           )}
           {tab === 'player' && (

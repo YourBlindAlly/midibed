@@ -38,6 +38,7 @@ const LAYERS = [
   ['loops', 'Loops app'],
   ['player', 'Loop player'],
   ['keys', 'Keys'],
+  ['weave', 'MidiWeave'],
 ] as const;
 
 // New actions go at the END so a saved mapping keeps its meaning.

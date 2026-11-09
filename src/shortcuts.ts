@@ -4,7 +4,7 @@
  * side (MidiBedPagerView) only reports unmodified key presses while MidiBed is in front: iOS does not
  * deliver keys to an app in the background.
  */
-export type Layer = 'bass' | 'pad' | 'keys' | 'dancer' | 'drums' | 'loops' | 'player';
+export type Layer = 'bass' | 'pad' | 'keys' | 'dancer' | 'drums' | 'loops' | 'player' | 'weave';
 
 export type ShortcutAction =
   | { type: 'scene'; index: number }
@@ -42,6 +42,7 @@ export const LAYER_NAMES: Record<Layer, string> = {
   drums: 'Drums',
   loops: 'Loops app',
   player: 'Loop player',
+  weave: 'MidiWeave',
 };
 
 /**
