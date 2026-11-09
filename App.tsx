@@ -4,7 +4,8 @@ import { PAD_PRESETS, applyPadPreset, padVoiceJson, setPadVoice } from './src/pa
 import { PREROLLS, networkJson } from './src/network';
 import { KEYS_PRESETS, KEYS_TYPE_NAMES, applyKeysPreset, keysVoiceJson, setKeysVoice } from './src/keysvoice';
 import { FM_PRESETS, applyFMPreset, fmLayerJson, setFMPart } from './src/fmlayer';
-import { WEAVE_PITCH_NAMES, WeaveLine, WeaveState, describeLine, lineSteps } from './src/weave';
+import { WEAVE_PITCH_NAMES, WEAVE_SOUND_NAMES, WeaveLine, WeaveState, describeLine, lineSteps } from './src/weave';
+import { FM_CHARACTER_NAMES, FM_VOICE_PRESETS, applyFMVoicePreset, fmVoiceJson, setFMVoice } from './src/fmvoice';
 import { STARTER_JOURNEYS, addStarterJourney } from './src/starters';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Alert, AppState, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -492,20 +493,13 @@ export default function App() {
   // MidiWeave: two repeating, slowly changing melodic lines.
   const renderWeave = () => {
     const w = state.weave;
-    const onKeys = w.channel === state.keys.channel;
     return (
       <>
         <Section title="MidiWeave: where it goes">
           <Note>
-            Hypnotic, strictly rhythmic melodic lines that repeat and change slowly, for flowing movement. By default they play on the Keys' MIDI channel, so the built-in electric piano plays them, with the Keys' level, filter and effects. The Keys part's own switches for sending to other apps and for the built-in sound apply to this channel.
+            Hypnotic, strictly rhythmic melodic lines that repeat and change slowly, for flowing movement. Each line chooses its own sound: the Keys' electric piano, the FM voice below, or another app on a MIDI channel. On the Keys' piano a line uses the Keys' level, filter and effects.
           </Note>
-          <Stepper label="MidiWeave MIDI channel" value={w.channel} onChange={(v) => patchWeave({ channel: v })} min={0} max={15} format={channelText} hint="Which MIDI channel the lines play on" />
-          <Toggle
-            label="MidiWeave plays the Keys' electric piano"
-            value={onKeys}
-            onChange={(v) => patchWeave({ channel: v ? state.keys.channel : 5 })}
-            hint="Puts MidiWeave on the Keys' MIDI channel. Off moves it to channel 6, for another app or sound"
-          />
+          <Stepper label="MidiWeave channel for another app" value={w.channel} onChange={(v) => patchWeave({ channel: v })} min={0} max={15} format={channelText} hint="The MIDI channel a line uses when its sound is set to another app. Each line chooses its own sound below" />
         </Section>
         <Section title="MidiWeave: what it plays">
           <Stepper
@@ -525,6 +519,15 @@ export default function App() {
             <Toggle label={`Line ${i + 1} on`} value={l.on} onChange={(v) => patchWeaveLine(i, { on: v })} hint={i === 1 ? 'The second line has its own loop length, so the two drift against each other. Switch it off to hear the first alone' : undefined} />
             {l.on && (
               <>
+                <Stepper
+                  label={`Line ${i + 1} plays on`}
+                  value={l.sound}
+                  onChange={(v) => patchWeaveLine(i, { sound: v })}
+                  min={0}
+                  max={WEAVE_SOUND_NAMES.length - 1}
+                  format={(v) => WEAVE_SOUND_NAMES[v]}
+                  hint="Which sound this line uses. The FM voice is MidiBed's own bell or pluck, set up below. Another app sends it out on the MidiWeave channel"
+                />
                 <View accessible accessibilityLabel={`Line ${i + 1} summary`} accessibilityValue={{ text: describeLine(l) }}>
                   <Text style={styles.note}>{describeLine(l)}</Text>
                 </View>
@@ -561,6 +564,28 @@ export default function App() {
             )}
           </Section>
         ))}
+        <Section title="MidiWeave: FM voice sound">
+          <Note>
+            The standalone FM voice: a plucked or bell-like sound of its own, for a line to play on. It is MidiBed's own sound, on its own MIDI channel, and shares its effects with MidiDancer's part.
+          </Note>
+          <Stepper
+            label="FM voice preset"
+            value={state.fmVoice.preset}
+            onChange={(v) => patch({ fmVoice: applyFMVoicePreset(state.fmVoice, v) })}
+            min={0}
+            max={FM_VOICE_PRESETS.length - 1}
+            format={(v) => FM_VOICE_PRESETS[v].name}
+            hint="Sets every FM voice setting at once. Changing any setting yourself makes it Custom"
+          />
+          <Stepper label="FM voice level" value={state.fmVoice.level} onChange={(v) => patch({ fmVoice: setFMVoice(state.fmVoice, { level: v }) })} min={0} max={100} step={5} format={(v) => `${v} percent`} />
+          <Stepper label="FM voice brightness" value={state.fmVoice.bright} onChange={(v) => patch({ fmVoice: setFMVoice(state.fmVoice, { bright: v }) })} min={0} max={100} step={5} format={(v) => `${v} percent`} hint="How bright the start of each note is. Zero is a pure, soft tone" />
+          <Stepper label="FM voice notes ring for" value={state.fmVoice.decay} onChange={(v) => patch({ fmVoice: setFMVoice(state.fmVoice, { decay: v }) })} min={5} max={400} step={5} format={(v) => `${(v / 100).toFixed(2)} seconds`} hint="How long each note takes to die away" />
+          <Stepper label="FM voice pluck" value={state.fmVoice.pluck} onChange={(v) => patch({ fmVoice: setFMVoice(state.fmVoice, { pluck: v }) })} min={2} max={300} step={2} format={(v) => `${(v / 100).toFixed(2)} seconds`} hint="How quickly the brightness fades after the start of a note. Short is a pluck, long is a bell" />
+          <Stepper label="FM voice character" value={state.fmVoice.character} onChange={(v) => patch({ fmVoice: setFMVoice(state.fmVoice, { character: v }) })} min={0} max={1} format={(v) => FM_CHARACTER_NAMES[v]} hint="Pluck is clean and musical. Bell is glassy and slightly out of tune" />
+          <Stepper label="FM voice shimmer speed" value={state.fmVoice.shimmer} onChange={(v) => patch({ fmVoice: setFMVoice(state.fmVoice, { shimmer: v }) })} min={1} max={80} format={(v) => `${(v / 10).toFixed(1)} per second`} />
+          <Stepper label="FM voice octave" value={state.fmVoice.octave} onChange={(v) => patch({ fmVoice: setFMVoice(state.fmVoice, { octave: v }) })} min={-1} max={2} format={(v) => (v === 0 ? 'as played' : v < 0 ? 'one octave down' : v === 1 ? 'one octave up' : 'two octaves up')} />
+          <Stepper label="FM voice MIDI channel" value={state.fmVoice.channel} onChange={(v) => patch({ fmVoice: { ...state.fmVoice, channel: v } })} min={0} max={15} format={channelText} hint="The channel a line uses to play the FM voice. Keep it a channel no other part uses" />
+        </Section>
       </>
     );
   };
@@ -1007,6 +1032,14 @@ export default function App() {
     const t = setTimeout(() => engine.setKeysVoice(keysVoiceJsonText), 80);
     return () => clearTimeout(t);
   }, [keysVoiceJsonText, ready]);
+
+  // The standalone FM voice: send it whenever it changes.
+  const fmVoiceJsonText = fmVoiceJson(state.fmVoice);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => engine.setFMVoice(fmVoiceJsonText), 80);
+    return () => clearTimeout(t);
+  }, [fmVoiceJsonText, ready]);
 
   // The FM layer (sizzle) on the pad and the keys: send it whenever it changes.
   const fmLayerJsonText = fmLayerJson(state.fmLayer);

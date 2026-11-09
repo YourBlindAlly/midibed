@@ -17,8 +17,13 @@ import { RHYTHMS, clampRhythm } from './rhythms';
 export const WEAVE_PITCH_NAMES = ['Scale only (over a drone)', 'Follow the chords'];
 export const MAX_WEAVE_STEPS = 32;
 
+/** Where a line plays: the Keys' electric piano, the standalone FM voice, or another app on the MidiWeave channel. */
+export const WEAVE_SOUND_NAMES = ["Keys' electric piano", 'FM voice (bell or pluck)', 'Another app (on the MidiWeave channel)'];
+
 export type WeaveLine = {
   on: boolean;
+  /** 0 the Keys' electric piano, 1 the FM voice, 2 another app. */
+  sound: number;
   /** Loop length in sixteenth notes (4-32). A library rhythm brings its own length. */
   steps: number;
   /** 0 = the Euclidean spread (hits, steps, rotation); else a rhythm from the library. */
@@ -47,7 +52,7 @@ export type WeaveLine = {
 export type WeaveState = {
   /** The layer is on. Scene-owned. */
   enabled: boolean;
-  /** MIDI channel (0-based). Default is the Keys' channel, so the built-in electric piano plays it. Global. */
+  /** The MIDI channel for a line that plays on another app (0-based). Global. */
   channel: number;
   /** 0 = scale only, 1 = follow the chords. */
   pitch: number;
@@ -60,6 +65,7 @@ export type WeaveState = {
 
 export const defaultWeaveLine1: WeaveLine = {
   on: true,
+  sound: 0,
   steps: 16,
   rhythm: 0,
   hits: 6,
@@ -77,6 +83,7 @@ export const defaultWeaveLine1: WeaveLine = {
 
 export const defaultWeaveLine2: WeaveLine = {
   on: false,
+  sound: 1,
   steps: 12,
   rhythm: 0,
   hits: 4,
@@ -94,7 +101,7 @@ export const defaultWeaveLine2: WeaveLine = {
 
 export const defaultWeave: WeaveState = {
   enabled: false,
-  channel: 4,
+  channel: 5,
   pitch: 0,
   scale: 0,
   register: 60,

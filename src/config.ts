@@ -13,6 +13,7 @@ import { buildBassColorNotes } from './bassrhythm';
 import { KeysVoiceState, defaultKeysVoice } from './keysvoice';
 import { WeaveLine, WeaveState, defaultWeave, hitsMask, lineDegrees, lineHits, lineSteps, weaveBase, weaveIntervals } from './weave';
 import { FMLayerState, defaultFMLayer } from './fmlayer';
+import { FMVoiceState, defaultFMVoice } from './fmvoice';
 import { PadVoiceState, defaultPadVoice } from './padvoice';
 import { groupsForWants, parsePacks } from './packs';
 import { NetworkState, defaultNetwork } from './network';
@@ -343,6 +344,8 @@ export type BedState = {
   keysVoice: KeysVoiceState;
   /** The FM layer (sizzle) laid over the chord pad and the Keys. Global, not saved in a scene. */
   fmLayer: FMLayerState;
+  /** The standalone FM voice (a bell or pluck on its own MIDI channel). Global, not saved in a scene. */
+  fmVoice: FMVoiceState;
   /** The chord pad's sound shape (wave, detune, drift, flange). Global, not saved in a scene. */
   padVoice: PadVoiceState;
   /** 1 = the Shaker slot has been moved to the softer egg shaker once (settings saved before this keep the sharp one until migrateState changes it, once). */
@@ -879,6 +882,7 @@ const baseState: Omit<BedState, 'scenes' | 'activeScene' | 'journeys' | 'activeJ
   weave: defaultWeave,
   keysVoice: defaultKeysVoice,
   fmLayer: defaultFMLayer,
+  fmVoice: defaultFMVoice,
   padVoice: defaultPadVoice,
   drumSoundVersion: 1,
   showNotes: true,
@@ -1141,6 +1145,7 @@ function weaveForEngine(s: BedState) {
       : [],
     lines: w.lines.map((l) => ({
       on: l.on,
+      channel: l.sound === 0 ? s.keys.channel : l.sound === 1 ? s.fmVoice.channel : w.channel,
       steps: lineSteps(l),
       mask: hitsMask(lineHits(l)),
       degrees: lineDegrees(l),

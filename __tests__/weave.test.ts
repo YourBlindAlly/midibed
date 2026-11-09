@@ -145,7 +145,8 @@ describe('MidiWeave in the settings', () => {
     const on = { ...defaultState, weave: { ...defaultState.weave, enabled: true } };
     const w = JSON.parse(toEngineJson(on)).weave;
     expect(w.enabled).toBe(true);
-    expect(w.channel).toBe(4);
+    expect(w.lines[0].channel).toBe(4); // line 1 plays on the Keys' electric piano
+    expect(w.lines[1].channel).toBe(6); // line 2 plays on the FM voice
     expect(w.lines).toHaveLength(2);
     expect(w.lines[0].steps).toBe(16);
     expect(w.lines[1].steps).toBe(12);
@@ -153,6 +154,16 @@ describe('MidiWeave in the settings', () => {
     expect(w.intervals.length).toBeGreaterThan(4);
     expect(JSON.parse(toEngineJson({ ...on, solo: 'pad' })).weave).toBeUndefined();
     expect(JSON.parse(toEngineJson({ ...defaultState, solo: 'weave' })).weave.enabled).toBe(true);
+  });
+
+  it('each line plays on the sound it is given', () => {
+    const base = { ...defaultState.weave, enabled: true, channel: 9 };
+    const lines = (a: number, b: number) => base.lines.map((l, i) => ({ ...l, on: true, sound: i === 0 ? a : b }));
+    const w = JSON.parse(toEngineJson({ ...defaultState, keys: { ...defaultState.keys, channel: 3 }, fmVoice: { ...defaultState.fmVoice, channel: 11 }, weave: { ...base, lines: lines(2, 1) } })).weave;
+    expect(w.lines[0].channel).toBe(9);
+    expect(w.lines[1].channel).toBe(11);
+    const k = JSON.parse(toEngineJson({ ...defaultState, keys: { ...defaultState.keys, channel: 3 }, weave: { ...base, lines: lines(0, 0) } })).weave;
+    expect(k.lines.map((l: { channel: number }) => l.channel)).toEqual([3, 3]);
   });
 
   it('follow the chords sends the chord list', () => {

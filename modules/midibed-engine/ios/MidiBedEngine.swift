@@ -298,6 +298,7 @@ struct MidiBedFillConfig: Decodable {
 /// MidiWeave: two looping, slowly changing melodic lines (see src/weave.ts for the rules, which weaveMutate mirrors).
 struct MidiBedWeaveLine: Decodable {
   var on: Bool
+  var channel: Int          // the MIDI channel this line plays on (the Keys', the FM voice's or another app's)
   var steps: Int
   var mask: Int             // bit n set = step n plays (rotation already applied)
   var degrees: [Int]        // a scale degree (or chord tone) for every step
@@ -1083,6 +1084,16 @@ final class MidiBedEngine {
     queue.async { self.synth.configureKeys(c.values.map { Float($0) }) }
   }
 
+  /// The standalone FM voice: a bell or pluck on its own MIDI channel (see src/fmvoice.ts for the order of the values).
+  func setFMVoice(json: String) {
+    struct FMVoiceConfig: Decodable { var values: [Double] }
+    guard let data = json.data(using: .utf8), let c = try? JSONDecoder().decode(FMVoiceConfig.self, from: data) else {
+      NSLog("MidiBedEngine: could not decode the FM voice")
+      return
+    }
+    queue.async { self.synth.configureFMVoice(c.values.map { Float($0) }) }
+  }
+
   /// The FM layer (sizzle) on the chord pad and the Keys (see src/fmlayer.ts for the order of the values).
   func setFMLayer(json: String) {
     struct FMLayerConfig: Decodable { var values: [Double] }
@@ -1829,7 +1840,7 @@ final class MidiBedEngine {
       let length = max(0.05, min(4, Double(gap) * stepDur * max(0.1, min(1.5, line.lengthPct / 100)) - 0.003))
       let swing = (step % 2 == 1) ? max(0, min(1, cfg.swing)) * stepDur * 0.5 : 0
       let start = time + swing
-      let ch = UInt8(max(0, min(15, w.channel)))
+      let ch = UInt8(max(0, min(15, line.channel)))
       let nb = UInt8(note)
       pending.append(Pending(time: start, status: 0x90 | ch, d1: nb, d2: UInt8(max(1, min(127, Int(vel))))))
       pending.append(Pending(time: start + length, status: 0x80 | ch, d1: nb, d2: 0))

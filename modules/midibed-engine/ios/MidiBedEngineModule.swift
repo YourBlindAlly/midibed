@@ -115,6 +115,10 @@ public class MidiBedEngineModule: Module {
       self.engine.setFX(json: json)
     }
 
+    Function("setFMVoice") { (json: String) in
+      self.engine.setFMVoice(json: json)
+    }
+
     Function("setFMLayer") { (json: String) in
       self.engine.setFMLayer(json: json)
     }

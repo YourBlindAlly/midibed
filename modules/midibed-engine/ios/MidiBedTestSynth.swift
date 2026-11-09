@@ -84,6 +84,7 @@ final class MidiBedTestSynth {
     var env: Float = 0
     var velocity: Float = 0
     var channel: UInt8 = 0
+    var rel: Float = 1    // release gain (the standalone FM voice)
   }
 
   /// One drum hit. `kind`: 0 kick, 1 snare, 2 rim click, 3 clap, 4 closed hat, 5 open hat, 6 sharp shaker (cabasa-like), 7 tom,
@@ -201,6 +202,12 @@ final class MidiBedTestSynth {
   /// shimmer rate in Hz, octave offset, bloom time in seconds. The order of fmLayerValues in src/fmlayer.ts.
   private let fmParams = UnsafeMutablePointer<Float>.allocate(capacity: 10)
   private var fmLP: (Float, Float) = (0, 0)
+  /// The standalone FM voice (a bell or pluck that plays by itself on its own MIDI channel): level 0...1, brightness
+  /// 0...1, decay seconds, pluck seconds (how fast the brightness fades), shimmer Hz, character (0 harmonic pluck,
+  /// 1 inharmonic bell), octave offset, then the MIDI channel (-1 = none). The order of fmVoiceValues in src/fmvoice.ts.
+  private let fmVoiceParams = UnsafeMutablePointer<Float>.allocate(capacity: 8)
+  private var fmChannel = -1
+  private var fmLP2: Float = 0
   private var fmIc1: Float = 0
   private var fmIc2: Float = 0
   private var keysTremPhase: Float = 0
@@ -428,6 +435,12 @@ final class MidiBedTestSynth {
     return tri * (1 - u) + (-cosf(2 * Float.pi * p)) * u
   }
 
+  /// Control side: the standalone FM voice's settings and channel (see fmVoiceParams).
+  func configureFMVoice(_ values: [Float]) {
+    for i in 0..<min(7, values.count) { fmVoiceParams[i] = values[i] }
+    if values.count > 7 { fmChannel = Int(values[7].rounded()) }
+  }
+
   /// Control side: the FM layer's settings (see fmParams).
   func configureFM(_ values: [Float]) {
     for i in 0..<min(10, values.count) { fmParams[i] = values[i] }
@@ -487,6 +500,7 @@ final class MidiBedTestSynth {
     fmVoices = UnsafeMutablePointer<FMVoice>.allocate(capacity: fmCount)
     fmVoices.initialize(repeating: FMVoice(), count: fmCount)
     fmParams.initialize(from: [0, 0.5, 0.8, 1, 1.5, 0, 0.5, 0.8, 1, 1.5], count: 10)
+    fmVoiceParams.initialize(from: [0.7, 0.5, 0.5, 0.2, 0.8, 0, 0, -1], count: 8)
     keysParams.initialize(from: [0, 0.4, 0.2, 4.8, 1.0, 0.002, 0.6, 0.12], count: 8)
     padParams.initialize(from: [0, 8.7, 0, 0, 1.5, 0.4, 0.3, 0.9, 1.6, 0], count: 10)
     flangeBuf.initialize(repeating: 0, count: 4096)
@@ -534,6 +548,7 @@ final class MidiBedTestSynth {
     keysVoices.deallocate()
     fmVoices.deallocate()
     fmParams.deallocate()
+    fmVoiceParams.deallocate()
     keysParams.deallocate()
     padParams.deallocate()
     flangeBuf.deallocate()
@@ -862,6 +877,10 @@ final class MidiBedTestSynth {
       drums[slot] = v
       return
     }
+    if Int(channel) == fmChannel {
+      startFM(part: 2, channel: channel, note: note, velocity: velocity)
+      return
+    }
     if Int(channel) == keysChannel {
       var kslot = -1
       for i in 0..<keysCount where !keysVoices[i].active { kslot = i; break }
@@ -901,7 +920,7 @@ final class MidiBedTestSynth {
 
   /// Start a note of the FM layer on a part, if that part's layer is switched on (level above 0).
   private func startFM(part: Int, channel: UInt8, note: Int, velocity: Float) {
-    guard fmParams[part * 5] > 0.001 else { return }
+    guard part == 2 || fmParams[part * 5] > 0.001 else { return }
     var slot = -1
     for i in 0..<fmCount where !fmVoices[i].active { slot = i; break }
     if slot < 0 {
@@ -1339,8 +1358,40 @@ final class MidiBedTestSynth {
       // through the pad part's filter like the pad notes, then added to that part.
       var fmPadRaw: Float = 0
       var fmKeysRaw: Float = 0
+      var fmVoiceRaw: Float = 0
       for i in 0..<fmCount where fmVoices[i].active {
         let part = fmVoices[i].part
+        if part == 2 {
+          // The standalone FM voice: the carrier at the note, shaken by modulators whose brightness falls away at the
+          // pluck rate. Character 0 uses whole-number ratios (a clean pluck), character 1 the inharmonic bell ratios.
+          let lv = fmVoiceParams[0]
+          let bright = fmVoiceParams[1]
+          let decayS = max(0.05, fmVoiceParams[2])
+          let pluckS = max(0.02, fmVoiceParams[3])
+          let shim = max(0.05, fmVoiceParams[4])
+          let bell = fmVoiceParams[5] > 0.5
+          let oct = fmVoiceParams[6]
+          let f = 440 * powf(2, Float(fmVoices[i].note - 69) / 12 + oct)
+          let t = fmVoices[i].t
+          fmVoices[i].phaseC += f * dt
+          if fmVoices[i].phaseC >= 1 { fmVoices[i].phaseC -= 1 }
+          fmVoices[i].phaseA += (bell ? f * 3.5 + shim * 0.5 : f) * dt
+          if fmVoices[i].phaseA >= 1 { fmVoices[i].phaseA -= 1 }
+          fmVoices[i].phaseB += (bell ? f * 3.5 - shim * 0.5 : f * 2 + shim * 0.25) * dt
+          if fmVoices[i].phaseB >= 1 { fmVoices[i].phaseB -= 1 }
+          fmVoices[i].phaseS += (bell ? f * 7.13 : f * 3) * dt
+          if fmVoices[i].phaseS >= 1 { fmVoices[i].phaseS -= 1 }
+          let twoPi = 2 * Float.pi
+          let m = 0.5 * sinf(twoPi * fmVoices[i].phaseA) + 0.35 * sinf(twoPi * fmVoices[i].phaseB) + 0.15 * sinf(twoPi * fmVoices[i].phaseS)
+          let idx = bright * 6 * (0.15 + 0.85 * expf(-t / pluckS))
+          let y = sinf(twoPi * fmVoices[i].phaseC + idx * m)
+          if !fmVoices[i].gate { fmVoices[i].rel *= expf(-dt / 0.12) }
+          let amp = expf(-t / decayS) * min(1, t / 0.003) * fmVoices[i].rel
+          fmVoices[i].t += dt
+          fmVoiceRaw += y * amp * (0.35 + 0.65 * fmVoices[i].velocity) * lv * 0.14 * expCurrent[Int(fmVoices[i].channel)]
+          if amp < 0.0005 && t > 0.01 { fmVoices[i].active = false }
+          continue
+        }
         let lv = fmParams[part * 5]
         let sz = fmParams[part * 5 + 1]
         let shim = max(0.05, fmParams[part * 5 + 2])
@@ -1376,6 +1427,8 @@ final class MidiBedTestSynth {
       let fmLPcoef = 1 - expf(-2 * Float.pi * 9000 / sr)
       fmLP.0 += fmLPcoef * (fmPadRaw - fmLP.0)
       fmLP.1 += fmLPcoef * (fmKeysRaw - fmLP.1)
+      fmLP2 += fmLPcoef * (fmVoiceRaw - fmLP2)
+      partDancer += fmLP2
       do {
         // the pad part's filter (state-variable, as for the pad notes) on the summed pad layer
         let v3 = fmLP.0 - fmIc2
