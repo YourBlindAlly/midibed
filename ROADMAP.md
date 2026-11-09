@@ -399,3 +399,22 @@ Related: 'Pool tempo window' above.
 2. **FM layer for the pad and the Keys.** An optional FM voice layered on a part's notes (same channel, through that part's filter/level/Ugly FX), for "sizzle"/air: high-ratio inharmonic modulator at a low index, gentle low-pass, slow bloom, 10-25 percent mix, octave offset; controls: layer level, sizzle, shimmer speed, octave, bloom time; presets (air, glass, bell halo). Built-in sound only. Later it could grow into a standalone FM pad/e-piano voice.
 3. **Preload the whole journey's loops** when a journey is loaded (decode all four scenes' loops in the background, ~70 MB; load the current scene first). The smaller step (preload an incoming scene's loops when a switch is queued) is built.
 4. **Random ratchets and a triplet grid** for the drums (chance per step to roll 2-4 hits, velocity shape already exists).
+
+## MidiWeave (Rusty's name, 2026-11-09): hypnotic, evolving, strictly rhythmic melodic lines
+Inspired by a progressive house show: repeating short melodies that change slowly, for yoga flows, mindful movement and
+heart-healthy dancing. A SEPARATE layer from MidiDancer (MidiDancer = free, phrase-based, with rests; MidiWeave = a
+step sequencer locked to the grid with a mutation engine). Shares scale/mode/chord helpers, the bend/vibrato output and
+the rhythm library with the existing code. Decisions from Rusty:
+- TWO interlocking lines that drift against each other; line 2 can be switched off.
+- Change style: BOTH (a) scheduled changes every N loops (move one note a scale step, add/remove/shift a hit, with a
+  'return home after M changes' option) and (b) a Turing-machine style LOCK dial (fully locked = never changes, up = notes re-rolled
+  at random, in between = slow drift).
+- Pitches: a per-scene choice of scale-only (over a drone) or chord-following (chord tones on strong steps).
+- Tempo up to 130 BPM (the Tempo stepper already goes to 200).
+- Sound: a new built-in short pluck voice (saw/pulse + a snapping filter envelope) into the existing ping-pong delay, plus
+  MIDI out on its own channel/port for other apps. Per-part switches, level, Ugly FX like the other parts.
+- Rhythm for each line from the rhythm library, the Euclidean generator or the step editor (with ratchets).
+- Open questions: loop lengths (4/8/16/32 steps; different lengths per line for polymeter drift?), octave jumps, accents,
+  note length, swing, a per-scene on/off and a layer switch + solo like the others.
+Slightly melodic pads: Rusty found that 8 chords in the Harmony section on ONE scale degree with varying chord colour
+(sus 2, sus 4, major) gives a melodic flow already, so no separate pad feature for now.
